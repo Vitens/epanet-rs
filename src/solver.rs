@@ -46,6 +46,10 @@ impl Network {
 
     // update the resistance of all links
     self.update_link_resistances();
+    for link in self.links.iter_mut() {
+      link.result.flow = 1.0;
+    }
+
 
     // set demand for unknown nodes
     for node in self.nodes.iter_mut() {
@@ -56,11 +60,12 @@ impl Network {
 
     // perform GGA iterations
     // solve the system of equations: J * dh = rhs
+    let unknown_nodes = node_to_unknown.iter().filter(|&x| x.is_some()).count();
 
     let mut values = vec![0.0; sparsity_pattern.as_ref().row_idx().len()]; // Jacobian matrix values
-    let mut rhs = vec![0.0; node_to_unknown.len()]; // RHS = –demand  (unknown nodes only)
+    let mut rhs = vec![0.0; unknown_nodes]; // RHS = –demand  (unknown nodes only)
 
-    for _ in 1..=MAX_ITER {
+    for iter in 1..=MAX_ITER {
       // reset values and rhs
       values.fill(0.0);
       rhs.fill(0.0);
@@ -85,37 +90,29 @@ impl Network {
         let u = node_to_unknown[link.start_node];
         let v = node_to_unknown[link.end_node];
 
-        if let Some(i) = u {
-          values[link.csc_index.diag_u.unwrap()] += g;
-          rhs[i] -= y;
-          // if the end node is not a junction (i.e. a reservoir or tank), add the head of the end node to the RHS
-          if !matches!(self.nodes[link.end_node].node_type, NodeType::Junction { .. }) {
-            rhs[i] += g * self.nodes[link.end_node].result.head;
-          }
-        }
-        if let Some(j) = v {
-          values[link.csc_index.diag_v.unwrap()] += g;
-          rhs[j] += y;
-          // if the start node is not a junction (i.e. a reservoir or tank), add the head of the start node to the RHS
-          if !matches!(self.nodes[link.start_node].node_type, NodeType::Junction { .. }) {
-            rhs[j] += g * self.nodes[link.start_node].result.head;
-          }
-        }
+        // residual contributions (Newton form)
+        if let Some(i) = u { rhs[i] -= link.result.flow; }
+        if let Some(j) = v { rhs[j] += link.result.flow; }
+
+        // Jacobian entries
+        if let Some(i) = u { values[link.csc_index.diag_u.unwrap()] += g; }
+        if let Some(j) = v { values[link.csc_index.diag_v.unwrap()] += g; }
         if let (Some(i), Some(j)) = (u, v) {
-          values[link.csc_index.off_diag_uv.unwrap()] -= g;
-          values[link.csc_index.off_diag_vu.unwrap()] -= g;
+            values[link.csc_index.off_diag_uv.unwrap()] -= g;
+            values[link.csc_index.off_diag_vu.unwrap()] -= g;
         }
+
       }
     
       // solve the system of equations: J * dh = rhs
       let jac = SparseColMat::new(sparsity_pattern.clone(), values.clone());
       let solver = jac.sp_cholesky(Side::Lower).expect("Singular matrix – check connectivity");
-      let dh = solver.solve(&Mat::from_fn(node_to_unknown.len(), 1, |r, _| rhs[r]));
+      let dh = solver.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
 
       // update the heads of the nodes
       for (global, &head_id) in node_to_unknown.iter().enumerate() {
         if let Some(i) = head_id {
-          self.nodes[global].result.head = dh[(i, 0)];
+          self.nodes[global].result.head += dh[(i, 0)];
         }
       }
       // update the flows of the links
@@ -136,6 +133,7 @@ impl Network {
         sum_q  += link.result.flow.abs();
       }
       let rel_change = sum_dq / (sum_q + 1e-6);
+      println!("Iter {:2}: relative change = {:.3e}", iter, rel_change);
       if rel_change < CONVERGENCE_TOL {
         return Ok(());
       }
