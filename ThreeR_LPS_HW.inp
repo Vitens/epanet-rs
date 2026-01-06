@@ -1,5 +1,9 @@
 [TITLE]
-
+Feifei Zheng, Angus R. Simpson, and Aaron C. Zecchin (2013)
+A decomposition and multistage optimization approach applied
+to the optimization of water distribution systems with multiple
+supply sources
+WATER RESOURCES RESEARCH, VOL. 49, 380–399, doi:10.1029/2012WR013160
 
 [JUNCTIONS]
 ;ID              	Elev        	Demand      	Pattern         
@@ -818,3 +822,4 @@
  OFFSET         	0.00            	0.00            
 
 [END]
+
