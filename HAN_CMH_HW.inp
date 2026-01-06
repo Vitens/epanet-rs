@@ -1,0 +1,231 @@
+[TITLE]
+Hanoi example by Fujiwara and Khang, Water Resources Research, 1990
+Download from
+https://www.exeter.ac.uk/research/centres/cws/resources/benchmarks/pareto/
+Modified as in
+This file is set in CMH and with the HW pipe roughness as in:
+ALL PIPES ARE 800.0 mm of diameter
+Ezio Todini; Simone Santopietro; Rudy Gargano; and Lewis A. Rossman (2021)
+Pressure Flow Based Algorithms for Pressure-Driven Analysis of Water Distribution Networks
+10.1061/(ASCE)WR.1943-5452.0001401
+
+[JUNCTIONS]
+;ID              	Elev        	Demand      	Pattern         
+ 2               	0           	890         	                	;
+ 3               	0           	850         	                	;
+ 4               	0           	130         	                	;
+ 5               	0           	725         	                	;
+ 6               	0           	1005        	                	;
+ 7               	0           	1350        	                	;
+ 8               	0           	550         	                	;
+ 9               	0           	525         	                	;
+ 10              	0           	525         	                	;
+ 11              	0           	500         	                	;
+ 12              	0           	560         	                	;
+ 13              	0           	940         	                	;
+ 14              	0           	615         	                	;
+ 15              	0           	280         	                	;
+ 16              	0           	310         	                	;
+ 17              	0           	865         	                	;
+ 18              	0           	1345        	                	;
+ 19              	0           	60          	                	;
+ 20              	0           	1275        	                	;
+ 21              	0           	930         	                	;
+ 22              	0           	485         	                	;
+ 23              	0           	1045        	                	;
+ 24              	0           	820         	                	;
+ 25              	0           	170         	                	;
+ 26              	0           	900         	                	;
+ 27              	0           	370         	                	;
+ 28              	0           	290         	                	;
+ 29              	0           	360         	                	;
+ 30              	0           	360         	                	;
+ 31              	0           	105         	                	;
+ 32              	0           	805         	                	;
+
+[RESERVOIRS]
+;ID              	Head        	Pattern         
+ 1               	100.0       	                	;
+
+[TANKS]
+;ID              	Elevation   	InitLevel   	MinLevel    	MaxLevel    	Diameter    	MinVol      	VolCurve        	Overflow
+
+[PIPES]
+;ID              	Node1           	Node2           	Length      	Diameter    	Roughness   	MinorLoss   	Status
+ 1               	1               	2               	100         	800.0       	130         	0           	open  	;	
+ 2               	2               	3               	1350        	800.0       	130         	0           	open  	;
+ 3               	3               	4               	900         	800.0       	130         	0           	open  	;
+ 4               	4               	5               	1150        	800.0       	130         	0           	open  	;
+ 5               	5               	6               	1450        	800.0       	130         	0           	open  	;
+ 6               	6               	7               	450         	800.0       	130         	0           	open  	;
+ 7               	7               	8               	850         	800.0       	130         	0           	open  	;
+ 8               	8               	9               	850         	800.0       	130         	0           	open  	;
+ 9               	9               	10              	800         	800.0       	130         	0           	open  	;
+ 10              	10              	11              	950         	800.0       	130         	0           	open  	;
+ 11              	11              	12              	1200        	800.0       	130         	0           	open  	;
+ 12              	12              	13              	3500        	800.0       	130         	0           	open  	;
+ 13              	10              	14              	800         	800.0       	130         	0           	open  	;
+ 14              	14              	15              	500         	800.0       	130         	0           	open  	;
+ 15              	15              	16              	550         	800.0       	130         	0           	open  	;
+ 16              	17              	16              	2730        	800.0       	130         	0           	open  	;
+ 17              	18              	17              	1750        	800.0       	130         	0           	open  	;
+ 18              	19              	18              	800         	800.0       	130         	0           	open  	;
+ 19              	3               	19              	400         	800.0       	130         	0           	open  	;
+ 20              	3               	20              	2200        	800.0       	130         	0           	open  	;
+ 21              	20              	21              	1500        	800.0       	130         	0           	open  	;
+ 22              	21              	22              	500         	800.0       	130         	0           	open  	;
+ 23              	20              	23              	2650        	800.0       	130         	0           	open  	;
+ 24              	23              	24              	1230        	800.0       	130         	0           	open  	;
+ 25              	24              	25              	1300        	800.0       	130         	0           	open  	;
+ 26              	26              	25              	850         	800.0       	130         	0           	open  	;
+ 27              	27              	26              	300         	800.0       	130         	0           	open  	;
+ 28              	16              	27              	750         	800.0       	130         	0           	open  	;
+ 29              	23              	28              	1500        	800.0       	130         	0           	open  	;
+ 30              	28              	29              	2000        	800.0       	130         	0           	open  	;
+ 31              	29              	30              	1600        	800.0       	130         	0           	open  	;
+ 32              	30              	31              	150         	800.0       	130         	0           	open  	;
+ 33              	32              	31              	860         	800.0       	130         	0           	open  	;
+ 34              	25              	32              	950         	800.0       	130         	0           	open  	; 
+
+[PUMPS]
+;ID              	Node1           	Node2           	Parameters
+
+[VALVES]
+;ID              	Node1           	Node2           	Diameter    	Type	Setting     	MinorLoss   
+
+[TAGS]
+
+[DEMANDS]
+;Junction        	Demand      	Pattern         	Category
+
+[STATUS]
+;ID              	Status/Setting
+
+[PATTERNS]
+;ID              	Multipliers
+
+[CURVES]
+;ID              	X-Value     	Y-Value
+
+[CONTROLS]
+
+
+[RULES]
+
+
+[ENERGY]
+ Global Efficiency  	75
+ Global Price       	0
+ Demand Charge      	0
+
+[EMITTERS]
+;Junction        	Coefficient
+
+[QUALITY]
+;Node            	InitQual
+
+[SOURCES]
+;Node            	Type        	Quality     	Pattern
+
+[REACTIONS]
+;Type     	Pipe/Tank       	Coefficient
+
+
+[REACTIONS]
+ Order Bulk            	1
+ Order Tank            	1
+ Order Wall            	1
+ Global Bulk           	0
+ Global Wall           	0
+ Limiting Potential    	0
+ Roughness Correlation 	0
+
+[MIXING]
+;Tank            	Model
+
+[TIMES]
+ Duration           	0:00 
+ Hydraulic Timestep 	1:00 
+ Quality Timestep   	0:05 
+ Pattern Timestep   	1:00 
+ Pattern Start      	0:00 
+ Report Timestep    	1:00 
+ Report Start       	0:00 
+ Start ClockTime    	12 am
+ Statistic          	NONE
+
+[REPORT]
+ Status             	Full
+ Summary            	No
+ Page               	0
+
+[OPTIONS]
+ Units              	CMH
+ Headloss           	H-W
+ Specific Gravity   	1
+ Viscosity          	1
+ Trials             	40
+ Accuracy           	0.001
+ CHECKFREQ          	2
+ MAXCHECK           	10
+ DAMPLIMIT          	0
+ Unbalanced         	Continue 10
+ Pattern            	1
+ Demand Multiplier  	1.0
+ Demand Model       	PDA
+ Minimum Pressure   	0.0
+ Required Pressure  	20.0
+ Pressure Exponent  	0.5
+ Emitter Exponent   	0.5
+ Quality            	NONE mg/L
+ Diffusivity        	1
+ Tolerance          	0.01
+
+[COORDINATES]
+;Node            	X-Coord           	Y-Coord
+2               	5021.200          	1582.170          
+3               	5025.200          	2585.420          
+4               	5874.220          	2588.300          
+5               	6873.110          	2588.300          
+6               	8103.510          	2585.420          
+7               	8103.510          	3234.670          
+8               	8106.660          	4179.280          
+9               	8106.660          	5133.780          
+10              	7318.640          	5133.780          
+11              	7319.940          	5831.650          
+12              	7319.940          	6671.190          
+13              	5636.760          	6676.240          
+14              	6530.630          	5133.780          
+15              	5676.020          	5133.780          
+16              	5021.200          	5133.780          
+17              	5021.200          	4412.360          
+18              	5021.200          	3868.520          
+19              	5021.200          	3191.490          
+20              	3587.870          	2588.300          
+21              	3587.870          	1300.840          
+22              	3587.870          	901.290           
+23              	1978.550          	2588.300          
+24              	1975.580          	4084.350          
+25              	1980.460          	5137.630          
+26              	3077.460          	5137.630          
+27              	3933.520          	5133.780          
+28              	846.040           	2588.200          
+29              	-552.410          	2588.200          
+30              	-552.380          	4369.060          
+31              	-549.360          	5137.630          
+32              	536.450           	5137.630          
+1               	5360.710          	1354.050          
+
+[VERTICES]
+;Link            	X-Coord           	Y-Coord
+
+[LABELS]
+;X-Coord             Y-Coord             Label & Anchor Node
+
+[BACKDROP]
+  DIMENSIONS  	-985.920          	612.540           	8551.270          	6964.990          
+ UNITS          	None
+ FILE           	
+ OFFSET         	0.00            	0.00            
+
+[END]
