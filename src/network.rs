@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use hashbrown::HashMap;
 
+#[derive(Default)]
 pub struct Network {
     pub nodes: Vec<Node>,
     pub links: Vec<Link>,
@@ -9,14 +10,6 @@ pub struct Network {
 }
 
 impl Network {
-  pub fn new() -> Self {
-    Network {
-      nodes: Vec::new(),
-      links: Vec::new(),
-      node_map: HashMap::new(),
-      link_map: HashMap::new(),
-    }
-  }
   pub fn add_node(&mut self, node: Node) -> Result<(), String> {
     if self.node_map.contains_key(&node.id) {
       return Err(format!("Node {} already exists", node.id));
@@ -37,7 +30,7 @@ impl Network {
 
 pub enum NodeType {
     Reservoir,
-    Demand,
+    Tank,
     Junction { basedemand: f64 },
 }
 
@@ -46,16 +39,10 @@ pub enum LinkType {
     Pump,
     Valve,
 }
+
+#[derive(Default)]
 pub struct NodeResult {
   pub head: f64
-}
-
-impl NodeResult {
-  pub fn new() -> Self {
-    NodeResult {
-      head: 0.0,
-    }
-  }
 }
 
 #[derive(Default)]
@@ -63,6 +50,8 @@ pub struct LinkResult {
   pub flow: f64,
 }
 
+
+/// CSC (Compressed Sparse Column) indices for the Jacobian matrix used in the Global Gradient Algorithm
 #[derive(Default)]
 pub struct CSCIndex {
   pub diag_u: Option<usize>,      // CSC index for J[u,u]
@@ -75,6 +64,7 @@ pub struct Node {
     pub id: Box<str>,
     pub node_type: NodeType,
     pub elevation: f64,
+    pub demand: f64,
 
     pub result: NodeResult,
 }

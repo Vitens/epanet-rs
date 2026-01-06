@@ -5,34 +5,44 @@ use crate::network::*;
 
 #[derive(Debug)]
 enum ReadState {
-  None,
   Junctions,
   Pipes,
   Reservoirs,
+  Demands,
+  None,
 }
 
 impl Network {
-  pub fn from_inp(inp: &str) -> Self {
+  /// Read a network from an INP file.
+  pub fn from_inp(inp: &str) -> Result<Network, String> {
 
-    let mut network = Network::new();
+    // create a new network
+    let mut network = Network::default();
 
+    // set the initial state to none
     let mut state = ReadState::None;
 
-    let file = File::open(inp).unwrap();
+    // open the INP file
+    let file = File::open(inp).or_else(|e| Err(format!("Failed to open file: {}: {}", inp, e)))?;
+
+    // create a new reader
     let mut reader = BufReader::new(file);
     let mut line_buffer = String::with_capacity(512);
 
+    // iterate over the lines in the file
     while reader.read_line(&mut line_buffer).unwrap() > 0 {
       let line = line_buffer.trim();
 
       if line.starts_with(";") || line.is_empty() {
         // skip comment and empty lines
       }
+      // if the line starts with [, it is a new section
       else if line.starts_with("[") {
         state = match line {
           "[JUNCTIONS]" => ReadState::Junctions,
           "[PIPES]" => ReadState::Pipes,
           "[RESERVOIRS]" => ReadState::Reservoirs,
+          "[DEMANDS]" => ReadState::Demands,
           _ => ReadState::None,
         }
       }
@@ -52,8 +62,9 @@ impl Network {
             network.add_node(Node {
               id,
               elevation,
+              demand: 0.0,
               node_type: NodeType::Junction { basedemand: demand },
-              result: NodeResult::new(),
+              result: NodeResult::default(),
             }).unwrap();
           }
           ReadState::Pipes => {
@@ -90,9 +101,22 @@ impl Network {
             let _ = network.add_node(Node {
               id,
               elevation,
+              demand: 0.0,
               node_type: NodeType::Reservoir,
-              result: NodeResult::new(),
+              result: NodeResult::default(),
             });
+          }
+          ReadState::Demands => {
+
+            let id : Box<str> = parts[0].trim().into();
+            // read the demand
+            let demand = parts[1].parse::<f64>().unwrap();
+            // add the demand to the network
+            let node_index = *network.node_map.get(&id).unwrap();
+            // update basedemand for the node
+            if let NodeType::Junction { basedemand } = &mut network.nodes[node_index].node_type {
+              *basedemand = demand;
+            }
           }
           ReadState::None => {
             // skip unknown state
@@ -103,6 +127,6 @@ impl Network {
       line_buffer.clear();
     }
 
-    return network;
+    Ok(network)
   }
 }
