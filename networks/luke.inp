@@ -1,5 +1,8 @@
 [TITLE]
-
+E. Alperovits, U. Shamir
+First published: December 1977
+Design of optimal water distribution systems
+https://doi.org/10.1029/WR013i006p00885
 
 [JUNCTIONS]
 ;ID              	Elev        	Demand      	Pattern         
@@ -141,3 +144,4 @@ FH              	147.702           	7932.166
  OFFSET         	0.00            	0.00            
 
 [END]
+
