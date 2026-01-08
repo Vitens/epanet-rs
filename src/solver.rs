@@ -120,27 +120,20 @@ impl Network {
           self.nodes[global].result.head = dh[(i, 0)];
         }
       }
-      // update the flows of the links - EPANET Eq. 12.12
+
+      // update the flows of the links (Equation 12.12)
       let mut sum_dq = 0.0;
       let mut sum_q  = 0.0;
 
       for link in self.links.iter_mut() {
           // calculate the head difference between the start and end nodes
           let dh = self.nodes[link.start_node].result.head - self.nodes[link.end_node].result.head;
-          let q = link.result.flow;
-          let q_abs = q.abs().max(1e-8);
-          let r = link.resistance;
-          let m = 0.0; // minor loss coefficient
-          let n = H_EXPONENT;
-          
-          // Calculate head loss gradient (g_ij) - EPANET Eq. 12.8
-          let g = n * r * q_abs.powf(n - 1.0) + 2.0 * m * q_abs;
-  
-          // Calculate head loss (h_Lij) - EPANET Eq. 12.1
-          let y = (r * q_abs.powf(n) + m * q_abs.powf(2.0)) * q.signum();
+
+          // calculate the 1/G_ij and Y_ij coefficients
+          let (g_inv, y) = link.coefficients();
         
           // Flow update: dq = (h_L - dh) / g
-          let dq = 1.0/g*(y - dh);
+          let dq = g_inv*(y - dh);
 
           link.result.flow -= dq;
           

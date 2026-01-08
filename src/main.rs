@@ -39,14 +39,14 @@ fn main() {
   let end_time = Instant::now();
 
   // print the heads of the nodes
-  for node in network.nodes.iter() {
-    println!("Node {} head = {:.4}", node.id, node.result.head * 1.0/network::UCF_H);
-  }
+  // for node in network.nodes.iter() {
+  //   println!("Node {} head = {:.4}", node.id, node.result.head * 1.0/network::UCF_H);
+  // }
 
-  // print the flows of the links
-  for link in network.links.iter() {
-    println!("Link {} flow = {:.4}", link.id, link.result.flow * 1.0/network::UCF_Q);
-  }
+  // // print the flows of the links
+  // for link in network.links.iter() {
+  //   println!("Link {} flow = {:.4}", link.id, link.result.flow * 1.0/network::UCF_Q);
+  // }
 
 
   println!("Solve time: {:?}", end_time.duration_since(start_time));
