@@ -1,8 +1,9 @@
 use faer::sparse::{SparseColMat, Triplet};
-use faer::traits::num_traits::ToPrimitive;
 use faer::sparse::SymbolicSparseColMat;
 use faer::{Mat, Side};
 use faer::prelude::*;
+
+use std::time::Instant;
 
 use crate::network::*;
 
@@ -40,7 +41,7 @@ impl Network {
     // generate sparsity pattern
     let sparsity_pattern = self.build_sparsity_pattern(&node_to_unknown);
 
-    // map each link to its CSC indices
+    // map each link to its CSC (Compressed Sparse Column) indices
     self.map_links_to_csc_indices(&sparsity_pattern, &node_to_unknown);
 
     // update the resistance of all links
@@ -66,13 +67,19 @@ impl Network {
     }
 
     // perform GGA iterations
-    // solve the system of equations: J * dh = rhs
+    // solve the system of equations: A * h = rhs
+    // where A is the Jacobian matrix, h is the vector of heads, and rhs is the vector of right-hand side values
+    // A is a sparse matrix, so we use the Compressed Sparse Column (CSC) format to store it
+    // h is the vector of heads, and rhs is the vector of right-hand side values
+
     let unknown_nodes = node_to_unknown.iter().filter(|&x| x.is_some()).count();
 
     let mut values = vec![0.0; sparsity_pattern.as_ref().row_idx().len()]; // Jacobian matrix values
-    let mut rhs = vec![0.0; unknown_nodes]; // RHS = –demand  (unknown nodes only)
+    let mut rhs = vec![0.0; unknown_nodes]; // (unknown nodes only)
 
-    for iter in 1..=MAX_ITER {
+    let mut jac = SparseColMat::new(sparsity_pattern.clone(), values.clone());
+
+    for _ in 1..=MAX_ITER {
       // reset values and rhs
       values.fill(0.0);
       rhs.fill(0.0);
@@ -104,27 +111,27 @@ impl Network {
         let v = node_to_unknown[link.end_node];
 
         if let Some(i) = u {
-            values[link.csc_index.diag_u.unwrap()] += 1.0 / g;
-            rhs[i] -= q - (y / g);
+            values[link.csc_index.diag_u.unwrap()] += g_inv;
+            rhs[i] -= q - (y * g_inv);
             if self.nodes[link.end_node].is_fixed() {
-              rhs[i] += 1.0 / g * self.nodes[link.end_node].result.head;
+              rhs[i] += g_inv * self.nodes[link.end_node].result.head;
             }
         }
         if let Some(j) = v {
-            values[link.csc_index.diag_v.unwrap()] += 1.0 / g;
-            rhs[j] += q - (y / g);
+            values[link.csc_index.diag_v.unwrap()] += g_inv;
+            rhs[j] += q - (y * g_inv);
             if self.nodes[link.start_node].is_fixed() {
-              rhs[j] += 1.0 / g * self.nodes[link.start_node].result.head;
+              rhs[j] += g_inv * self.nodes[link.start_node].result.head;
             }
         }
-        if let (Some(i), Some(j)) = (u, v) {
-            values[link.csc_index.off_diag_uv.unwrap()] -= 1.0 / g;
-            values[link.csc_index.off_diag_vu.unwrap()] -= 1.0 / g;
+        if let (Some(_i), Some(_j)) = (u, v) {
+            values[link.csc_index.off_diag_uv.unwrap()] -= g_inv;
+            values[link.csc_index.off_diag_vu.unwrap()] -= g_inv;
         }
       }
-    
+
       // solve the system of equations: J * dh = rhs
-      let jac = SparseColMat::new(sparsity_pattern.clone(), values.clone());
+      jac.val_mut().copy_from_slice(&values);
       let solver = jac.sp_cholesky(Side::Lower).expect("Singular matrix – check connectivity");
       let dh = solver.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
 
@@ -162,8 +169,9 @@ impl Network {
           sum_dq += dq.abs();
           sum_q  += link.result.flow.abs();
       }
+
       let rel_change = sum_dq / (sum_q + 1e-6);
-      println!("Iter {:2}: relative change = {:.3e}", iter, rel_change);
+
       if rel_change < CONVERGENCE_TOL {
         return Ok(());
       }
@@ -233,7 +241,6 @@ impl Network {
         .collect();
     node_to_unknown
   }
-
 
 
 
