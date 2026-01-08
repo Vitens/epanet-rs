@@ -1,5 +1,13 @@
 use hashbrown::HashMap;
 
+
+// pub const UCF_Q: f64 = 0.009809629503517; // Unit conversion factor for flow (m3/h to cfs)
+// pub const UCF_H: f64 = 3.2808399; // Unit conversion factor for head (m to ft)
+// pub const UCF_D: f64 = 0.0032808399; // Unit conversion factor for diameter (mm to ft)
+pub const UCF_Q: f64 = 1.0; // 
+pub const UCF_H: f64 = 1.0; // in to feet
+pub const UCF_D: f64 = 1.0 / 12.0; // 
+
 #[derive(Default)]
 pub struct Network {
     pub nodes: Vec<Node>,
@@ -67,6 +75,11 @@ pub struct Node {
     pub demand: f64,
 
     pub result: NodeResult,
+}
+impl Node {
+  pub fn is_fixed(&self) -> bool {
+    matches!(self.node_type, NodeType::Reservoir | NodeType::Tank)
+  }
 }
 
 pub struct Link {

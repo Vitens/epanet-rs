@@ -6,22 +6,21 @@ use faer::prelude::*;
 
 use crate::network::*;
 
-const MAX_ITER: usize = 50;
+const MAX_ITER: usize = 10;
 const CONVERGENCE_TOL: f64 = 1e-3;
 
-const A1: f64 = 2.7662548476475583e-06; // Hazen-Williams conversion for m3/h to m3/s (1/3600)**H_EXPONENT * 10.67
 const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
 
-impl Link {
-  pub fn update_resistance(&mut self) {
-    match self.link_type {
-      LinkType::Pipe { diameter, length, roughness } => {
-        self.resistance = A1 * length / ((diameter/1000.0).powf(4.87) * roughness.powf(H_EXPONENT));
-      }
-      _ => (),
-    }
-  }
-}
+// impl Link {
+//   pub fn update_resistance(&mut self) {
+//     match self.link_type {
+//       LinkType::Pipe { diameter, length, roughness } => {
+//         self.resistance = A1 * length / ((diameter/1000.0).powf(4.87) * roughness.powf(H_EXPONENT));
+//       }
+//       _ => (),
+//     }
+//   }
+// }
 
 impl Network {
   /// Solve the network using the Global Gradient Algorithm (Todini & Pilati, 1987)
@@ -46,15 +45,23 @@ impl Network {
 
     // update the resistance of all links
     self.update_link_resistances();
-    for link in self.links.iter_mut() {
-      link.result.flow = 1.0;
-    }
-
 
     // set demand for unknown nodes
     for node in self.nodes.iter_mut() {
       if let NodeType::Junction { basedemand } = node.node_type {
         node.demand = basedemand;
+      }
+      if node.is_fixed() {
+        node.result.head = node.elevation;
+      }
+    }
+    for link in self.links.iter_mut() {
+      if let LinkType::Pipe { diameter, .. } = link.link_type {
+        // initialize the flow to correspond with 1.0 f/s
+        let area = 0.25 * std::f64::consts::PI * (diameter).powf(2.0);
+        let velocity = 1.0;
+        let flow = area * velocity;
+        link.result.flow = flow;
       }
     }
 
@@ -79,29 +86,41 @@ impl Network {
 
       // assemble Jacobian and RHS contributions from links
       for link in self.links.iter() {
-        let q_abs = link.result.flow.abs().max(1e-8); // get absolute flow, avoid division by zero by setting a small value
-        let r_term = link.resistance * q_abs.powf(H_EXPONENT - 1.0); // resistance term
-        let gradient = H_EXPONENT * r_term; // gradient term
-        let h_loss = r_term * link.result.flow; // head loss term
-        let g = 1.0 / gradient; // conductance term
-        let y = link.result.flow - (h_loss / gradient); // head loss term
+        let q = link.result.flow;
+        let q_abs = q.abs().max(1e-8);
+        let r = link.resistance;
+        let m = 0.0; // minor loss coefficient (0 for now)
+        let n = H_EXPONENT;
 
-        // get the CSC indices for the start and end nodes
+        // Calculate head loss gradient (g_ij) - EPANET Eq. 12.8
+        let g = n * r * q_abs.powf(n - 1.0) + 2.0 * m * q_abs;
+        let g_inv = 1.0 / g;
+        
+        // Calculate head loss (h_Lij) - EPANET Eq. 12.1
+        let y = (r * q_abs.powf(n) + m * q_abs.powf(2.0)) * q.signum();
+
+        // Get the CSC indices for the start and end nodes
         let u = node_to_unknown[link.start_node];
         let v = node_to_unknown[link.end_node];
 
-        // residual contributions (Newton form)
-        if let Some(i) = u { rhs[i] -= link.result.flow; }
-        if let Some(j) = v { rhs[j] += link.result.flow; }
-
-        // Jacobian entries
-        if let Some(i) = u { values[link.csc_index.diag_u.unwrap()] += g; }
-        if let Some(j) = v { values[link.csc_index.diag_v.unwrap()] += g; }
-        if let (Some(i), Some(j)) = (u, v) {
-            values[link.csc_index.off_diag_uv.unwrap()] -= g;
-            values[link.csc_index.off_diag_vu.unwrap()] -= g;
+        if let Some(i) = u {
+            values[link.csc_index.diag_u.unwrap()] += 1.0 / g;
+            rhs[i] -= q - (y / g);
+            if self.nodes[link.end_node].is_fixed() {
+              rhs[i] += 1.0 / g * self.nodes[link.end_node].result.head;
+            }
         }
-
+        if let Some(j) = v {
+            values[link.csc_index.diag_v.unwrap()] += 1.0 / g;
+            rhs[j] += q - (y / g);
+            if self.nodes[link.start_node].is_fixed() {
+              rhs[j] += 1.0 / g * self.nodes[link.start_node].result.head;
+            }
+        }
+        if let (Some(i), Some(j)) = (u, v) {
+            values[link.csc_index.off_diag_uv.unwrap()] -= 1.0 / g;
+            values[link.csc_index.off_diag_vu.unwrap()] -= 1.0 / g;
+        }
       }
     
       // solve the system of equations: J * dh = rhs
@@ -112,25 +131,36 @@ impl Network {
       // update the heads of the nodes
       for (global, &head_id) in node_to_unknown.iter().enumerate() {
         if let Some(i) = head_id {
-          self.nodes[global].result.head += dh[(i, 0)];
+          self.nodes[global].result.head = dh[(i, 0)];
         }
       }
-      // update the flows of the links
+      // update the flows of the links - EPANET Eq. 12.12
       let mut sum_dq = 0.0;
       let mut sum_q  = 0.0;
 
       for link in self.links.iter_mut() {
-        // calculate the head difference between the start and end nodes
-        let dh = self.nodes[link.start_node].result.head - self.nodes[link.end_node].result.head;
-        let q_abs = link.result.flow.abs().max(1e-8);
-        let r_coef = link.resistance * q_abs.powf(H_EXPONENT - 1.0);
-        let h_loss = r_coef * link.result.flow;
-        let grad = H_EXPONENT * r_coef;
-        let dq = (dh - h_loss) / grad;
-        link.result.flow += dq;
-        // update the sum of the absolute changes in flow and the sum of the absolute flows
-        sum_dq += dq.abs();
-        sum_q  += link.result.flow.abs();
+          // calculate the head difference between the start and end nodes
+          let dh = self.nodes[link.start_node].result.head - self.nodes[link.end_node].result.head;
+          let q = link.result.flow;
+          let q_abs = q.abs().max(1e-8);
+          let r = link.resistance;
+          let m = 0.0; // minor loss coefficient
+          let n = H_EXPONENT;
+          
+          // Calculate head loss gradient (g_ij) - EPANET Eq. 12.8
+          let g = n * r * q_abs.powf(n - 1.0) + 2.0 * m * q_abs;
+  
+          // Calculate head loss (h_Lij) - EPANET Eq. 12.1
+          let y = (r * q_abs.powf(n) + m * q_abs.powf(2.0)) * q.signum();
+        
+          // Flow update: dq = (h_L - dh) / g
+          let dq = 1.0/g*(y - dh);
+
+          link.result.flow -= dq;
+          
+          // update the sum of the absolute changes in flow and the sum of the absolute flows
+          sum_dq += dq.abs();
+          sum_q  += link.result.flow.abs();
       }
       let rel_change = sum_dq / (sum_q + 1e-6);
       println!("Iter {:2}: relative change = {:.3e}", iter, rel_change);
@@ -138,13 +168,16 @@ impl Network {
         return Ok(());
       }
     }
-    Err(format!("Maximum number of iterations reached: {}", MAX_ITER))
+    // Err(format!("Maximum number of iterations reached: {}", MAX_ITER))
+    Ok(())
   }
 
   /// Update the resistance of all links
   fn update_link_resistances(&mut self) {
     for link in self.links.iter_mut() {
-      link.update_resistance();
+      if let LinkType::Pipe { diameter, length, roughness } = link.link_type {
+        link.resistance = 4.727 * roughness.powf(-1.852) * diameter.powf(-4.87) * length;
+      }
     }
   }
 

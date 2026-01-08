@@ -7,7 +7,7 @@ use std::time::Instant;
 
 fn main() {
   let start_time = Instant::now();
-  let mut network = network::Network::from_inp("grid4.inp").unwrap();
+  let mut network = network::Network::from_inp("luke.inp").unwrap();
   let end_time = Instant::now();
   println!("Load time: {:?}", end_time.duration_since(start_time));
   println!("Loaded network with {} nodes and {} links", network.nodes.len(), network.links.len());
@@ -32,6 +32,15 @@ fn main() {
   
   println!("Mass balance: demand = {:.4}, supply = {:.4}, error = {:.2e}", total_demand, reservoir_supply, (total_demand - reservoir_supply).abs());
 
+  // print the heads of the nodes
+  for node in network.nodes.iter() {
+    println!("Node {} head = {:.4}", node.id, node.result.head);
+  }
+
+  // print the flows of the links
+  for link in network.links.iter() {
+    println!("Link {} flow = {:.4}", link.id, link.result.flow);
+  }
 
 
   let end_time = Instant::now();

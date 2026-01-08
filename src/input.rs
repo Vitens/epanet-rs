@@ -12,6 +12,7 @@ enum ReadState {
   None,
 }
 
+
 impl Network {
   /// Read a network from an INP file.
   pub fn from_inp(inp: &str) -> Result<Network, String> {
@@ -54,9 +55,9 @@ impl Network {
             // read the junction data
             let id = parts[0].trim().into();
             // read the elevation (optional, default 0.0)
-            let elevation = parts.get(1).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+            let elevation = parts.get(1).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) * UCF_H;
             // read the demand (optional, default 0.0)
-            let demand = parts.get(2).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+            let demand = parts.get(2).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) * UCF_Q;
 
             // add the node to the network
             network.add_node(Node {
@@ -73,10 +74,10 @@ impl Network {
             let start_node: Box<str> = parts[1].trim().into();
             // read the end node
             let end_node: Box<str> = parts[2].trim().into();
-            // read the diameter
-            let diameter = parts[3].parse::<f64>().unwrap();
             // read the length
-            let length = parts[4].parse::<f64>().unwrap();
+            let length = parts[3].parse::<f64>().unwrap() * UCF_H;
+            // read the diameter
+            let diameter = parts[4].parse::<f64>().unwrap() * UCF_D;
             // read the roughness
             let roughness = parts[5].parse::<f64>().unwrap();
             // create the link
@@ -96,7 +97,8 @@ impl Network {
           ReadState::Reservoirs => {
             let id = parts[0].trim().into();
             // read the elevation
-            let elevation = parts[1].parse::<f64>().unwrap();
+            let elevation = parts[1].parse::<f64>().unwrap() * UCF_H;
+            println!("Elevation of reservoir {} = {}", id, elevation);
             // add the node to the network
             let _ = network.add_node(Node {
               id,
@@ -110,7 +112,7 @@ impl Network {
 
             let id : Box<str> = parts[0].trim().into();
             // read the demand
-            let demand = parts[1].parse::<f64>().unwrap();
+            let demand = parts[1].parse::<f64>().unwrap() * UCF_Q;
             // add the demand to the network
             let node_index = *network.node_map.get(&id).unwrap();
             // update basedemand for the node
