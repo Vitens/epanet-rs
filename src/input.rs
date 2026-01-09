@@ -23,6 +23,9 @@ impl Network {
     // create a new network
     let mut network = Network::default();
 
+    network.nodes.reserve(25000);
+    network.links.reserve(25000);
+
     // set the initial state to none
     let mut state = ReadState::None;
 
@@ -54,16 +57,16 @@ impl Network {
         }
       }
       else {
-        let parts: Vec<&str> = line.split_whitespace().collect();
+        let mut parts = line.split_whitespace();
 
         match state {
           ReadState::Junctions => {
             // read the junction data
-            let id = parts[0].trim().into();
+            let id = parts.next().unwrap().into();
             // read the elevation (optional, default 0.0)
-            let elevation = parts.get(1).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) * UCF_H;
+            let elevation = parts.next().unwrap().parse::<f64>().unwrap_or(0.0) * UCF_H;
             // read the demand (optional, default 0.0)
-            let demand = parts.get(2).and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) * UCF_Q;
+            let demand = parts.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) * UCF_Q;
 
             // add the node to the network
             network.add_node(Node {
@@ -75,15 +78,15 @@ impl Network {
             }).unwrap();
           }
           ReadState::Valves => {
-            let id = parts[0].trim().into();
+            let id = parts.next().unwrap().into();
             // read the start node
-            let start_node: Box<str> = parts[1].trim().into();
+            let start_node: Box<str> = parts.next().unwrap().into();
             // read the end node
-            let end_node: Box<str> = parts[2].trim().into();
+            let end_node: Box<str> = parts.next().unwrap().into();
             // read the diameter
-            let diameter = parts[3].parse::<f64>().unwrap() * UCF_D;
+            let diameter = parts.next().unwrap().parse::<f64>().unwrap() * UCF_D;
             // create the link
-            let valve_type = match parts[4].trim().to_uppercase().as_str() {
+            let valve_type = match parts.next().unwrap().to_uppercase().as_str() {
               "GPV" => ValveType::GPV,
               "TCV" => ValveType::TCV,
               "FCV" => ValveType::FCV,
@@ -91,16 +94,16 @@ impl Network {
               "PSV" => ValveType::PSV,
               "PBV" => ValveType::PBV,
               "PCV" => ValveType::PCV,
-              _ => return Err(format!("Invalid valve type: {}", parts[4].trim())),
+              _ => return Err(format!("Invalid valve type: {}", parts.next().unwrap())),
             };
             // read the setting
-            let setting = parts[5].parse::<f64>().unwrap_or(0.0);
+            let setting = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
             // read the minor loss
-            let minor_loss = parts[6].parse::<f64>().unwrap_or(0.0);
+            let minor_loss = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
 
             // read the curve ID (optional, default none)
-            let curve_id = if let Some(curve_id) = parts.get(7) {
-              Some(curve_id.trim().into())
+            let curve_id = if let Some(curve_id) = parts.next() {
+              Some(curve_id.to_string().into())
             } else {
               None
             };
@@ -120,22 +123,22 @@ impl Network {
             });
           }
           ReadState::Pipes => {
-            let id = parts[0].trim().into();
+            let id = parts.next().unwrap().into();
             // read the start node
-            let start_node: Box<str> = parts[1].trim().into();
+            let start_node: Box<str> = parts.next().unwrap().into();
             // read the end node
-            let end_node: Box<str> = parts[2].trim().into();
+            let end_node: Box<str> = parts.next().unwrap().into();
             // read the length
-            let length = parts[3].parse::<f64>().unwrap() * UCF_H;
+            let length = parts.next().unwrap().parse::<f64>().unwrap() * UCF_H;
             // read the diameter
-            let diameter = parts[4].parse::<f64>().unwrap() * UCF_D;
+            let diameter = parts.next().unwrap().parse::<f64>().unwrap() * UCF_D;
             // read the roughness
-            let roughness = parts[5].parse::<f64>().unwrap();
+            let roughness = parts.next().unwrap().parse::<f64>().unwrap();
             let roughness = 100.0;
 
             // create the link
-            let minor_loss = parts[6].parse::<f64>().unwrap_or(0.0);
-            // convert minor loss
+            let minor_loss = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
+            // convert minor los
             let minor_loss = 0.02517 * minor_loss / diameter.powi(2) / diameter.powi(2);
 
             let start_node_index = *network.node_map.get(&start_node).unwrap();
@@ -153,9 +156,9 @@ impl Network {
             });
           }
           ReadState::Reservoirs => {
-            let id = parts[0].trim().into();
+            let id = parts.next().unwrap().into();
             // read the elevation
-            let elevation = parts[1].parse::<f64>().unwrap() * UCF_H;
+            let elevation = parts.next().unwrap().parse::<f64>().unwrap() * UCF_H;
             // add the node to the network
             let _ = network.add_node(Node {
               id,
@@ -167,14 +170,14 @@ impl Network {
           }
           ReadState::Pumps => {
 
-            let id : Box<str> = parts[0].trim().into();
+            let id : Box<str> = parts.next().unwrap().into();
             // read the start node
-            let start_node: Box<str> = parts[1].trim().into();
+            let start_node: Box<str> = parts.next().unwrap().into();
             // read the end node
-            let end_node: Box<str> = parts[2].trim().into();
+            let end_node: Box<str> = parts.next().unwrap().into();
 
             // read the parameters
-            let mut parameters = parts[3..].iter();
+            let mut parameters = parts.skip(3);
 
             let mut speed = 1.0;
             let mut head_curve = "";
@@ -185,11 +188,11 @@ impl Network {
             let end_node_index = *network.node_map.get(&end_node).unwrap();
 
             while let Some(parameter) = parameters.next() {
-              if parameter.trim() == ";" {
+              if parameter == ";" {
                 continue;
               }
               if let Some(value) = parameters.next() {
-                match parameter.trim() {
+                match parameter {
                   "SPEED" => speed = value.parse::<f64>().unwrap(),
                   "HEAD" => head_curve = value.trim(),
                   "POWER" => power = value.parse::<f64>().unwrap(),
@@ -212,9 +215,9 @@ impl Network {
 
           }
           ReadState::Curves => {
-            let id: Box<str> = parts[0].trim().into();
-            let x = parts[1].parse::<f64>().unwrap();
-            let y = parts[2].parse::<f64>().unwrap();
+            let id: Box<str> = parts.next().unwrap().into();
+            let x = parts.next().unwrap().parse::<f64>().unwrap();
+            let y = parts.next().unwrap().parse::<f64>().unwrap();
             // create curve if it does not exist
             if !network.curves.contains_key(&id) {
               network.curves.insert(id.clone(), Curve { id, x: vec![x], y: vec![y] });
@@ -233,9 +236,9 @@ impl Network {
           }
           ReadState::Demands => {
 
-            let id : Box<str> = parts[0].trim().into();
+            let id : Box<str> = parts.next().unwrap().into();
             // read the demand
-            let demand = parts[1].parse::<f64>().unwrap() * UCF_Q;
+            let demand = parts.next().unwrap().parse::<f64>().unwrap() * UCF_Q;
             // add the demand to the network
             let node_index = *network.node_map.get(&id).unwrap();
             // update basedemand for the node

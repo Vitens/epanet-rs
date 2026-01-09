@@ -10,7 +10,8 @@ rayon = "1.11.0"
 
 
 [profile.release]
+debug = "line-tables-only"
 opt-level = 3
 lto = "fat"
 codegen-units = 1
-panic = "abort"
+panic = "unwind"

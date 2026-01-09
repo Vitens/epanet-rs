@@ -8,7 +8,7 @@ use std::time::Instant;
 use crate::network::*;
 
 const MAX_ITER: usize = 200;
-const CONVERGENCE_TOL: f64 = 1e-3;
+const CONVERGENCE_TOL: f64 = 0.01;
 
 const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
 
