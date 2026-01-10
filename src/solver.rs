@@ -1,9 +1,8 @@
 use faer::sparse::{SparseColMat, Triplet};
 use faer::sparse::SymbolicSparseColMat;
+use faer::sparse::linalg::solvers::{SymbolicLlt, Llt};
 use faer::{Mat, Side};
 use faer::prelude::*;
-
-use std::time::Instant;
 
 use crate::network::*;
 
@@ -68,6 +67,10 @@ impl Network {
 
     let mut jac = SparseColMat::new(sparsity_pattern.clone(), values.clone());
 
+    // Pre-compute symbolic Cholesky factorization (only depends on sparsity pattern)
+    let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower)
+      .expect("Failed to compute symbolic Cholesky factorization");
+
     for iteration in 1..=MAX_ITER {
       // reset values and rhs
       values.fill(0.0);
@@ -111,8 +114,12 @@ impl Network {
 
       // solve the system of equations: J * dh = rhs
       jac.val_mut().copy_from_slice(&values);
-      let solver = jac.sp_cholesky(Side::Lower).expect("Singular matrix – check connectivity");
-      let dh = solver.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
+      
+      // Perform numerical factorization using pre-computed symbolic factorization
+      let llt = Llt::try_new_with_symbolic(symbolic_llt.clone(), jac.as_ref(), Side::Lower)
+        .expect("Singular matrix – check connectivity");
+      
+      let dh = llt.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
 
       // update the heads of the nodes
       for (global, &head_id) in node_to_unknown.iter().enumerate() {
@@ -185,7 +192,8 @@ impl Network {
   fn build_sparsity_pattern(&self, node_to_unknown: &Vec<Option<usize>>) -> SymbolicSparseColMat<usize> {
     let n_unknowns = node_to_unknown.iter().filter(|&x| x.is_some()).count();
 
-    let mut triplets = Vec::new();
+    // Pre-allocate: at most 4 triplets per link (2 diagonal + 2 off-diagonal)
+    let mut triplets = Vec::with_capacity(4 * self.links.len());
     for link in self.links.iter() {
       let u = node_to_unknown[link.start_node]; // u is the index of the start node (None if unknown)
       let v = node_to_unknown[link.end_node]; // v is the index of the end node (None if unknown)
