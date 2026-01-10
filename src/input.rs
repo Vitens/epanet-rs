@@ -119,7 +119,9 @@ impl Network {
               minor_loss: minor_loss,
               resistance: 0.0,
               result: LinkResult::default(),
-              csc_index: CSCIndex::default()
+              csc_index: CSCIndex::default(),
+              g_inv: 0.0,
+              y: 0.0,
             });
           }
           ReadState::Pipes => {
@@ -153,6 +155,8 @@ impl Network {
               link_type: LinkType::Pipe { diameter, length, roughness },
               result: LinkResult::default(),
               csc_index: CSCIndex::default(),
+              g_inv: 0.0,
+              y: 0.0
             });
           }
           ReadState::Reservoirs => {
@@ -211,6 +215,8 @@ impl Network {
               link_type: LinkType::Pump { speed, head_curve, power },
               result: LinkResult::default(),
               csc_index: CSCIndex::default(),
+              g_inv: 0.0,
+              y: 0.0,
             });
 
           }

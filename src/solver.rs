@@ -84,9 +84,12 @@ impl Network {
       }
 
       // assemble Jacobian and RHS contributions from links
-      for link in self.links.iter() {
+      for link in self.links.iter_mut() {
         let q = link.result.flow;
         let (g_inv, y) = link.coefficients();
+
+        link.g_inv = g_inv;
+        link.y = y;
 
         // Get the CSC indices for the start and end nodes
         let u = node_to_unknown[link.start_node];
@@ -137,7 +140,8 @@ impl Network {
           let dh = self.nodes[link.start_node].result.head - self.nodes[link.end_node].result.head;
 
           // calculate the 1/G_ij and Y_ij coefficients
-          let (g_inv, y) = link.coefficients();
+          let g_inv = link.g_inv;
+          let y = link.y;
         
           // Flow update: dq = (h_L - dh) / g
           let dq = g_inv*(y - dh);

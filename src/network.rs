@@ -110,6 +110,9 @@ pub struct Link {
   pub result: LinkResult,
 
   pub csc_index: CSCIndex,
+
+  pub g_inv: f64,
+  pub y: f64,
 }
 
 impl Link {
@@ -129,10 +132,13 @@ impl Link {
     let m = self.minor_loss;
     let n = H_EXPONENT;
 
-    let g = n * r * q_abs.powf(n - 1.0) + 2.0 * m * q_abs;
+    let q_pow = q_abs.powf(n - 1.0);
+
+
+    let g = n * r * q_pow + 2.0 * m * q_abs;
     let g_inv = 1.0 / g;
 
-    let y = (r * q_abs.powf(n) + m * q_abs.powf(2.0)) * q.signum();
+    let y = (r * q_abs * q_pow + m * q_abs.powi(2)) * q.signum();
 
     (g_inv, y)
   }
