@@ -1,0 +1,7 @@
+# Ideas and To-Do
+
+- [] Refactor Solver to output vector of heads/flows instead of in-place assignment
+- [] Refactor network, link and node setup, compute coefficients using traits
+- [] Parallelize sequential solves with Rayon if possible (no tanks)
+- [] Implement Darcy Weisbach
+- [] Implement Valves and Pumps
