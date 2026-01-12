@@ -1,7 +1,11 @@
 # Ideas and To-Do
 
-- [] Refactor Solver to output vector of heads/flows instead of in-place assignment
-- [] Refactor network, link and node setup, compute coefficients using traits
+- [] Refactor Solver to output vector of heads/flows instead of in-place assignment (allow parallization of solve loop)
+- [] Refactor network, link and node setup, split into separate files and compute coefficients using traits
+- [] Refactor network build from inp file, split logic into separate methods
 - [] Parallelize sequential solves with Rayon if possible (no tanks)
 - [] Implement Darcy Weisbach
 - [] Implement Valves and Pumps
+- [] Implement tank logic
+- [] Try to get the solver working for f32 in addition to f64 (SIMD speedup)
+- [] Setup automated benchmarks
