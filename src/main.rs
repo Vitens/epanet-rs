@@ -8,6 +8,7 @@ const BANNER: [&str; 6] = [r"  _____ ____   _    _   _ _____ _____     ____  ___
 fn main() {
   let start_time = Instant::now();
   let file = env::args().nth(1).unwrap_or("grid100.inp".to_string());
+  let parallel = env::args().nth(2).unwrap_or("false".to_string()) == "true";
 
   println!("{}", BANNER.join("\n"));
   println!("Loading network from file: {}", file);
@@ -18,10 +19,16 @@ fn main() {
   println!("Network loaded in {:?}", end_time.duration_since(start_time));
 
   let start_time = Instant::now();
-  network.solve().unwrap();
+  network.run(parallel);
 
   // check the mass balance
-  let total_demand: f64 = network.nodes.iter().map(|n| n.demand).sum();
+  let total_demand: f64 = network.nodes.iter().map(|n| {
+    if let network::NodeType::Junction { basedemand } = n.node_type {
+      return basedemand;
+    } else {
+      return 0.0;
+    }
+  }).sum();
   let reservoir_supply: f64 = network.links.iter().map(|l| {
     if !matches!(network.nodes[l.end_node].node_type, network::NodeType::Junction { .. }) {
       -l.result.flow
@@ -38,7 +45,7 @@ fn main() {
   println!("Mass balance: demand = {:.4}, supply = {:.4}, error = {:.2e}", total_demand * 1.0/network::UCF_Q, reservoir_supply * 1.0/network::UCF_Q, (total_demand - reservoir_supply).abs() * 1.0/network::UCF_Q);
   let end_time = Instant::now();
 
-  // print the heads of the nodes
+  // // print the heads of the nodes
   // for node in network.nodes.iter() {
   //   println!("Node {} head = {:.4}", node.id, node.result.head * 1.0/network::UCF_H);
   // }

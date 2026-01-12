@@ -1,11 +1,11 @@
 use hashbrown::HashMap;
 
-pub const UCF_Q: f64 = 0.009809629503517; // Unit conversion factor for flow (m3/h to cfs)
-pub const UCF_H: f64 = 3.2808399; // Unit conversion factor for head (m to ft)
-pub const UCF_D: f64 = 0.0032808399; // Unit conversion factor for diameter (mm to ft)
-// pub const UCF_Q: f64 = 1.0;
-// pub const UCF_H: f64 = 1.0;
-// pub const UCF_D: f64 = 1.0 / 12.0;
+// pub const UCF_Q: f64 = 0.009809629503517; // Unit conversion factor for flow (m3/h to cfs)
+// pub const UCF_H: f64 = 3.2808399; // Unit conversion factor for head (m to ft)
+// pub const UCF_D: f64 = 0.0032808399; // Unit conversion factor for diameter (mm to ft)
+pub const UCF_Q: f64 = 1.0;
+pub const UCF_H: f64 = 1.0;
+pub const UCF_D: f64 = 1.0 / 12.0;
 
 pub const C_SMALL: f64 = 1e-6;
 pub const C_BIG: f64 = 1e8;
@@ -117,18 +117,17 @@ pub struct Link {
 
 impl Link {
   /// Calculate the 1/G_ij and Y_ij coefficients for the link
-  pub fn coefficients(&self, ) -> (f64, f64) {
+  pub fn coefficients(&self, q: f64, resistance: f64) -> (f64, f64) {
     match &self.link_type {
-      LinkType::Pipe { .. } => self.pipe_coefficients(),
-      LinkType::Pump { .. } => self.pump_coefficients(),
-      LinkType::Valve { diameter, setting, curve, valve_type } => self.valve_coefficients(*diameter, *setting, valve_type, curve),
+      LinkType::Pipe { .. } => self.pipe_coefficients(q, resistance),
+      LinkType::Pump { .. } => self.pump_coefficients(q),
+      LinkType::Valve { diameter, setting, curve, valve_type } => self.valve_coefficients(q, *diameter, *setting, valve_type, curve),
     }
   }
   /// Calculate the 1/G_ij and Y_ij coefficients for a pipe
-  pub fn pipe_coefficients(&self) -> (f64, f64) {
-    let q = self.result.flow;
+  pub fn pipe_coefficients(&self, q: f64, resistance: f64) -> (f64, f64) {
     let q_abs = q.abs().max(1e-8);
-    let r = self.resistance;
+    let r = resistance;
     let m = self.minor_loss;
     let n = H_EXPONENT;
 
@@ -142,14 +141,12 @@ impl Link {
 
     (g_inv, y)
   }
-  pub fn pump_coefficients(&self) -> (f64, f64) {
+  pub fn pump_coefficients(&self, q: f64) -> (f64, f64) {
     (0.0, 0.0)
   }
-  pub fn valve_coefficients(&self, diameter: f64, setting: f64, valve_type: &ValveType, curve: &Option<Box<str>>) -> (f64, f64) {
+  pub fn valve_coefficients(&self, q: f64, diameter: f64, setting: f64, valve_type: &ValveType, curve: &Option<Box<str>>) -> (f64, f64) {
     
-    let q = self.result.flow;
     let q_abs = q.abs().max(1e-8);
-
 
     let m = 0.02517 * setting / diameter.powi(2) / diameter.powi(2);
 

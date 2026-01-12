@@ -4,6 +4,8 @@ use faer::sparse::linalg::solvers::{SymbolicLlt, Llt};
 use faer::{Mat, Side};
 use faer::prelude::*;
 
+use rayon::prelude::*;
+
 use crate::network::*;
 
 const MAX_ITER: usize = 200;
@@ -12,7 +14,7 @@ const CONVERGENCE_TOL: f64 = 0.01;
 const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
 
 impl Network {
-  /// Solve the network using the Global Gradient Algorithm (Todini & Pilati, 1987)
+  /// Solve the network using the Global Gradient Algorithm (Todini & Pilati, 1987) for a single time step
   /// 
   /// The following steps are performed:
   /// 1. Build global unknown-numbering map
@@ -21,8 +23,7 @@ impl Network {
   /// 4. Update the resistance of all links
   /// 5. Set demand for unknown nodes
   /// 
-  pub fn solve(&mut self) -> Result<(), String> {
-
+  pub fn run(&mut self, parallel: bool) {
     // build global unknown-numbering map
     let node_to_unknown = self.build_unknown_numbering_map();
 
@@ -32,27 +33,87 @@ impl Network {
     // map each link to its CSC (Compressed Sparse Column) indices
     self.map_links_to_csc_indices(&sparsity_pattern, &node_to_unknown);
 
-    // update the resistance of all links
-    self.update_link_resistances();
+    let values = vec![0.0; sparsity_pattern.as_ref().row_idx().len()]; // Jacobian matrix values
+    let jac = SparseColMat::new(sparsity_pattern.clone(), values.clone());
 
-    // set demand for unknown nodes
-    for node in self.nodes.iter_mut() {
-      if let NodeType::Junction { basedemand } = node.node_type {
-        node.demand = basedemand;
+    let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower)
+      .expect("Failed to compute symbolic Cholesky factorization");
+
+    let steps = 24*4;
+
+    let mut flows: Vec<Vec<f64>> = vec![vec![0.0; self.links.len()]; steps];
+    let mut heads: Vec<Vec<f64>> = vec![vec![0.0; self.nodes.len()]; steps];
+
+
+    if parallel {
+      // do parallel solve with Rayon
+      let results: Vec<(Vec<f64>, Vec<f64>)> = (0..steps).into_par_iter().map(|step| {
+        self.solve(&node_to_unknown, &sparsity_pattern, &symbolic_llt, &jac).unwrap()
+      }).collect();
+      for (step, (flow, head)) in results.iter().enumerate() {
+        flows[step] = flow.clone();
+        heads[step] = head.clone();
       }
-      if node.is_fixed() {
-        node.result.head = node.elevation;
+
+    } else {
+      // do sequential solves
+      for step in 0..steps {
+        let (flow, head) = self.solve(&node_to_unknown, &sparsity_pattern, &symbolic_llt, &jac).unwrap();
+        flows[step] = flow;
+        heads[step] = head;
       }
     }
-    for link in self.links.iter_mut() {
-      if let LinkType::Pipe { diameter, .. } = link.link_type {
-        // initialize the flow to correspond with 1.0 f/s
-        let area = 0.25 * std::f64::consts::PI * (diameter).powf(2.0);
+
+    // assign the flows and heads to the links and nodes
+    for (i, link) in self.links.iter_mut().enumerate() {
+      link.result.flow = flows[0][i];
+    }
+    for (i, node) in self.nodes.iter_mut().enumerate() {
+      node.result.head = heads[0][i];
+    }
+
+
+  }
+
+  pub fn solve(&self, node_to_unknown: &Vec<Option<usize>>, sparsity_pattern: &SymbolicSparseColMat<usize>, symbolic_llt: &SymbolicLlt<usize>, jac: &SparseColMat<usize, f64>) -> Result<(Vec<f64>, Vec<f64>), String> {
+
+    // initialize the flows and heads
+    let mut flows: Vec<f64> = self.links.iter().map(|l| {
+      if let LinkType::Pipe { diameter, .. } = l.link_type {
+        let area = 0.25 * std::f64::consts::PI * diameter.powi(2);
         let velocity = 1.0;
         let flow = area * velocity;
-        link.result.flow = flow;
+        return flow;
+      } else {
+        return 0.0;
       }
-    }
+    }).collect::<Vec<f64>>();
+
+    // initialize the heads
+    let mut heads: Vec<f64> = self.nodes.iter().map(|n| {
+      if n.is_fixed() {
+        return n.elevation;
+      } else {
+        return 0.0;
+      }
+    }).collect::<Vec<f64>>();
+
+    // gather demands
+    let demands: Vec<f64> = self.nodes.iter().map(|n| {
+      if let NodeType::Junction { basedemand } = n.node_type {
+        return basedemand;
+      } else {
+        return 0.0;
+      }
+    }).collect::<Vec<f64>>();
+
+    let resistances: Vec<f64> = self.links.iter().map(|l| {
+      if let LinkType::Pipe { diameter, length, roughness } = l.link_type {
+        return 4.727 * roughness.powf(-1.852) * diameter.powf(-4.87) * length;
+      } else {
+        return 0.0;
+      }
+    }).collect::<Vec<f64>>();
 
     // perform GGA iterations
     // solve the system of equations: A * h = rhs
@@ -65,11 +126,9 @@ impl Network {
     let mut values = vec![0.0; sparsity_pattern.as_ref().row_idx().len()]; // Jacobian matrix values
     let mut rhs = vec![0.0; unknown_nodes]; // (unknown nodes only)
 
-    let mut jac = SparseColMat::new(sparsity_pattern.clone(), values.clone());
-
-    // Pre-compute symbolic Cholesky factorization (only depends on sparsity pattern)
-    let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower)
-      .expect("Failed to compute symbolic Cholesky factorization");
+    let mut g_invs: Vec<f64> = vec![0.0; self.links.len()];
+    let mut ys: Vec<f64> = vec![0.0; self.links.len()];
+    let mut jac = jac.clone();
 
     for iteration in 1..=MAX_ITER {
       // reset values and rhs
@@ -79,17 +138,20 @@ impl Network {
       // set RHS to -demand (unknown nodes only)
       for (global, &head_id) in node_to_unknown.iter().enumerate() {
         if let Some(i) = head_id {
-          rhs[i] = -self.nodes[global].demand;
+          rhs[i] = -demands[global];
         }
       }
 
-      // assemble Jacobian and RHS contributions from links
-      for link in self.links.iter_mut() {
-        let q = link.result.flow;
-        let (g_inv, y) = link.coefficients();
+      // clone the symbolic LLT to avoid borrowing issues
+      let symbolic_llt = symbolic_llt.clone();
 
-        link.g_inv = g_inv;
-        link.y = y;
+      // assemble Jacobian and RHS contributions from links
+      for (i, link) in self.links.iter().enumerate() {
+        let q = flows[i];
+        let (g_inv, y) = link.coefficients(q, resistances[i]);
+
+        g_invs[i] = g_inv;
+        ys[i] = y;
 
         // Get the CSC indices for the start and end nodes
         let u = node_to_unknown[link.start_node];
@@ -99,14 +161,14 @@ impl Network {
             values[link.csc_index.diag_u.unwrap()] += g_inv;
             rhs[i] -= q - (y * g_inv);
             if self.nodes[link.end_node].is_fixed() {
-              rhs[i] += g_inv * self.nodes[link.end_node].result.head;
+              rhs[i] += g_inv * heads[link.end_node];
             }
         }
         if let Some(j) = v {
             values[link.csc_index.diag_v.unwrap()] += g_inv;
             rhs[j] += q - (y * g_inv);
             if self.nodes[link.start_node].is_fixed() {
-              rhs[j] += g_inv * self.nodes[link.start_node].result.head;
+              rhs[j] += g_inv * heads[link.start_node];
             }
         }
         if let (Some(_i), Some(_j)) = (u, v) {
@@ -119,15 +181,16 @@ impl Network {
       jac.val_mut().copy_from_slice(&values);
       
       // Perform numerical factorization using pre-computed symbolic factorization
-      let llt = Llt::try_new_with_symbolic(symbolic_llt.clone(), jac.as_ref(), Side::Lower)
+      let llt = Llt::try_new_with_symbolic(symbolic_llt, jac.as_ref(), Side::Lower)
         .expect("Singular matrix – check connectivity");
+
       
       let dh = llt.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
 
       // update the heads of the nodes
       for (global, &head_id) in node_to_unknown.iter().enumerate() {
         if let Some(i) = head_id {
-          self.nodes[global].result.head = dh[(i, 0)];
+          heads[global] = dh[(i, 0)];
         }
       }
 
@@ -135,42 +198,32 @@ impl Network {
       let mut sum_dq = 0.0;
       let mut sum_q  = 0.0;
 
-      for link in self.links.iter_mut() {
+      for (i, link) in self.links.iter().enumerate() {
           // calculate the head difference between the start and end nodes
-          let dh = self.nodes[link.start_node].result.head - self.nodes[link.end_node].result.head;
+          let dh = heads[link.start_node] - heads[link.end_node];
 
           // calculate the 1/G_ij and Y_ij coefficients
-          let g_inv = link.g_inv;
-          let y = link.y;
+          let g_inv = g_invs[i];
+          let y = ys[i];
         
           // Flow update: dq = (h_L - dh) / g
           let dq = g_inv*(y - dh);
 
-          link.result.flow -= dq;
+          flows[i] -= dq;
           
           // update the sum of the absolute changes in flow and the sum of the absolute flows
           sum_dq += dq.abs();
-          sum_q  += link.result.flow.abs();
+          sum_q  += flows[i].abs();
       }
 
       let rel_change = sum_dq / (sum_q + 1e-6);
-      println!("Iteration {} relative change = {:.4}", iteration, rel_change);
+      // println!("Iteration {} relative change = {:.4}", iteration, rel_change);
 
       if rel_change < CONVERGENCE_TOL {
-        return Ok(());
+        return Ok((flows, heads));
       }
     }
-    // Err(format!("Maximum number of iterations reached: {}", MAX_ITER))
-    Ok(())
-  }
-
-  /// Update the resistance of all links
-  fn update_link_resistances(&mut self) {
-    for link in self.links.iter_mut() {
-      if let LinkType::Pipe { diameter, length, roughness } = link.link_type {
-        link.resistance = 4.727 * roughness.powf(-1.852) * diameter.powf(-4.87) * length;
-      }
-    }
+    Err(format!("Maximum number of iterations reached: {}", MAX_ITER))
   }
 
   /// Map each link to its CSC (Compressed Sparse Column) indices
