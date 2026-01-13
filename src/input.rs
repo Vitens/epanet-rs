@@ -1,7 +1,17 @@
 use std::fs::File;
 use std::io::{BufReader, BufRead};
 
-use crate::network::*;
+use crate::model::network::Network;
+use crate::model::node::{Node, NodeType};
+use crate::model::link::{Link, LinkType};
+use crate::model::curve::Curve;
+use crate::model::pattern::Pattern;
+use crate::model::junction::Junction;
+use crate::model::reservoir::Reservoir;
+use crate::model::pipe::{Pipe, PipeStatus};
+use crate::model::valve::{Valve, ValveType};
+// use crate::model::tank::Tank;
+use crate::model::pump::Pump;
 
 #[derive(Debug)]
 enum ReadState {
@@ -12,6 +22,7 @@ enum ReadState {
   Valves,
   Pumps,
   Curves,
+  Patterns,
   None,
 }
 
@@ -46,6 +57,7 @@ impl Network {
           "[VALVES]" => ReadState::Valves,
           "[PUMPS]" => ReadState::Pumps,
           "[CURVES]" => ReadState::Curves,
+          "[PATTERNS]" => ReadState::Patterns,
           _ => ReadState::None,
         }
       }
@@ -78,6 +90,9 @@ impl Network {
           ReadState::Demands => { 
             self.read_demand(line); 
           }
+          ReadState::Patterns => { 
+            self.read_pattern(line); 
+          }
           ReadState::None => {
             // skip unknown state
           }
@@ -95,15 +110,14 @@ impl Network {
     // read the junction data
     let id = parts.next().unwrap().into();
     // read the elevation (optional, default 0.0)
-    let elevation = parts.next().unwrap().parse::<f64>().unwrap_or(0.0) * UCF_H;
+    let elevation = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
     // read the demand (optional, default 0.0)
-    let demand = parts.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0) * UCF_Q;
+    let demand = parts.next().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
 
     Node {
       id,
       elevation,
-      demand: 0.0,
-      node_type: NodeType::Junction { basedemand: demand },
+      node_type: NodeType::Junction(Junction { basedemand: demand, pattern: None }),
     }
   }
 
@@ -113,13 +127,12 @@ impl Network {
 
     let id = parts.next().unwrap().into();
     // read the elevation
-    let elevation = parts.next().unwrap().parse::<f64>().unwrap() * UCF_H;
+    let elevation = parts.next().unwrap().parse::<f64>().unwrap();
     // add the node to the network
     Node {
       id,
       elevation,
-      demand: 0.0,
-      node_type: NodeType::Reservoir,
+      node_type: NodeType::Reservoir(Reservoir { head_pattern: None }),
     }
   }
 
@@ -133,7 +146,7 @@ impl Network {
     // read the end node
     let end_node: Box<str> = parts.next().unwrap().into();
     // read the diameter
-    let diameter = parts.next().unwrap().parse::<f64>().unwrap() * UCF_D;
+    let diameter = parts.next().unwrap().parse::<f64>().unwrap();
     // create the link
     let valve_type = match parts.next().unwrap().to_uppercase().as_str() {
       "GPV" => ValveType::GPV,
@@ -151,7 +164,7 @@ impl Network {
     let minor_loss = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
 
     // read the curve ID (optional, default none)
-    let curve_id: Option<Box<str>> = parts.next().map(|s| s.to_string().into_boxed_str());
+    let curve: Option<Box<str>> = parts.next().map(|s| s.to_string().into_boxed_str());
 
     let start_node_index = *self.node_map.get(&start_node).unwrap();
     let end_node_index = *self.node_map.get(&end_node).unwrap();
@@ -160,7 +173,7 @@ impl Network {
       id,
       start_node: start_node_index,
       end_node: end_node_index,
-      link_type: LinkType::Valve { diameter, setting, curve: curve_id, valve_type },
+      link_type: LinkType::Valve(Valve { diameter, setting, curve, valve_type }),
       minor_loss: minor_loss,
     }
   }
@@ -175,9 +188,9 @@ impl Network {
     // read the end node
     let end_node: Box<str> = parts.next().unwrap().into();
     // read the length
-    let length = parts.next().unwrap().parse::<f64>().unwrap() * UCF_H;
+    let length = parts.next().unwrap().parse::<f64>().unwrap();
     // read the diameter
-    let diameter = parts.next().unwrap().parse::<f64>().unwrap() * UCF_D;
+    let diameter = parts.next().unwrap().parse::<f64>().unwrap();
     // read the roughness
     let roughness = parts.next().unwrap().parse::<f64>().unwrap();
 
@@ -194,7 +207,7 @@ impl Network {
       start_node: start_node_index,
       end_node: end_node_index,
       minor_loss: minor_loss,
-      link_type: LinkType::Pipe { diameter, length, roughness },
+      link_type: LinkType::Pipe(Pipe { diameter, length, roughness, minor_loss, status: PipeStatus::Open }),
     }
   }
   /// Read a pump from a parts iterator
@@ -238,10 +251,11 @@ impl Network {
       start_node: start_node_index,
       end_node: end_node_index,
       minor_loss: 0.0,
-      link_type: LinkType::Pump { speed, head_curve, power },
+      link_type: LinkType::Pump(Pump { speed, head_curve, power }),
     }
   }
   /// Read a curve from a parts iterator
+  /// Appends a point to the curve if it already exists, otherwise creates a new curve
   fn read_curve(&mut self, line: &str) {
     let mut parts = line.split_whitespace();
 
@@ -264,15 +278,34 @@ impl Network {
       curve.y.push(y);
     }
   }
-  /// Read a demand from a parts iterator
+  /// Read a pattern from a parts iterator
+  fn read_pattern(&mut self, line: &str) {
+    let mut parts = line.split_whitespace();
+    let id: Box<str> = parts.next().unwrap().into();
+    let multipliers = parts.map(|s| s.parse::<f64>().unwrap()).collect();
+    if !self.patterns.contains_key(&id) {
+      self.patterns.insert(id.clone(), Pattern { id, multipliers });
+    }
+    else {
+      let pattern = self.patterns.get_mut(&id).unwrap();
+      pattern.multipliers.extend(multipliers);
+    }
+  }
+  
+  /// Read a demand from a parts iterator and set the basedemand for the junction
   fn read_demand(&mut self, line: &str) {
     let mut parts = line.split_whitespace();
 
     let id: Box<str> = parts.next().unwrap().into();
-    let demand = parts.next().unwrap().parse::<f64>().unwrap() * UCF_Q;
+    let demand = parts.next().unwrap().parse::<f64>().unwrap();
     let node_index = *self.node_map.get(&id).unwrap();
     let node = &mut self.nodes[node_index];
-    node.demand = demand;
+    match &mut node.node_type {
+      NodeType::Junction(junction) => {
+        junction.basedemand = demand;
+      }
+      _ => panic!("Demand can only be set for junctions"),
+    }
   }
 }
 

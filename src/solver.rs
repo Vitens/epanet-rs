@@ -5,14 +5,21 @@ use faer::{Mat, Side};
 use faer::prelude::*;
 
 use rayon::prelude::*;
-use rand::prelude::*;
 
-use crate::network::*;
+use crate::model::node::NodeType;
+use crate::model::link::{LinkType, LinkTrait};
+use crate::model::network::Network;
+
 
 const MAX_ITER: usize = 200;
 const CONVERGENCE_TOL: f64 = 0.01;
 
 const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
+
+pub struct SolverResult {
+  pub flows: Vec<Vec<f64>>,
+  pub heads: Vec<Vec<f64>>
+}
 
 /// CSC (Compressed Sparse Column) indices for the Jacobian matrix used in the Global Gradient Algorithm
 #[derive(Default)]
@@ -53,7 +60,7 @@ impl<'a> HydraulicSolver<'a> {
   }
 
   /// Run the hydraulic solver
-  pub fn run(self, parallel: bool) {
+  pub fn run(self, parallel: bool) -> SolverResult {
     
     let steps = 24*4;
 
@@ -61,39 +68,28 @@ impl<'a> HydraulicSolver<'a> {
     let mut flows: Vec<Vec<f64>> = vec![vec![0.0; self.network.links.len()]; steps];
     let mut heads: Vec<Vec<f64>> = vec![vec![0.0; self.network.nodes.len()]; steps];
 
-    // set the initial flows and heads
-    let mut initial_flows: Vec<f64> = self.network.links.iter().map(|l| {
-      if let LinkType::Pipe { diameter, .. } = l.link_type {
-        let area = 0.25 * std::f64::consts::PI * diameter.powi(2);
-        let velocity = 1.0;
-        let flow = area * velocity;
-        return flow;
-      } else {
-        return 0.0;
-      }
-    }).collect::<Vec<f64>>();
+    // set the initial flows
+    let mut initial_flows: Vec<f64> = self.get_initial_flows();
 
     // set the initial heads
-    let mut initial_heads: Vec<f64> = self.network.nodes.iter().map(|n| {
-      if n.is_fixed() {
-        return n.elevation;
-      } else {
-        return 0.0;
-      }
-    }).collect::<Vec<f64>>();
+    let mut initial_heads: Vec<f64> = self.get_initial_heads();
 
 
-    // run the solver in parallel if enabled
+    // run the solver in parallel using Rayon if enabled
     if parallel {
 
+      // solve the first step to use as initial values for the next, parallel computed steps
       let (flow, head) = self.solve(&initial_flows, &initial_heads, 0).unwrap();
 
+      // store the results
       flows[0] = flow.clone();
       heads[0] = head.clone();
+
+      // update the initial flows and heads for the next step
       initial_flows = flow;
       initial_heads = head;
 
-      // do parallel solve with Rayon
+      // do parallel solves using Rayon
       let results: Vec<(Vec<f64>, Vec<f64>)> = (1..steps).into_par_iter().map(|step| {
         self.solve(&initial_flows, &initial_heads, step).unwrap()
       }).collect();
@@ -112,6 +108,7 @@ impl<'a> HydraulicSolver<'a> {
         initial_heads = head;
       }
     }
+    SolverResult { flows, heads }
   }
 
   /// Solve the network using the Global Gradient Algorithm (Todini & Pilati, 1987) for a single step
@@ -123,16 +120,16 @@ impl<'a> HydraulicSolver<'a> {
 
     // gather demands
     let demands: Vec<f64> = self.network.nodes.iter().map(|n| {
-      if let NodeType::Junction { basedemand } = n.node_type {
-        return basedemand + 0.1 * step as f64;
+      if let NodeType::Junction(junction) = &n.node_type {
+        return junction.basedemand + 0.1 * step as f64;
       } else {
         return 0.0;
       }
     }).collect::<Vec<f64>>();
 
     let resistances: Vec<f64> = self.network.links.iter().map(|l| {
-      if let LinkType::Pipe { diameter, length, roughness } = l.link_type {
-        return 4.727 * roughness.powf(-1.852) * diameter.powf(-4.87) * length;
+      if let LinkType::Pipe(pipe) = &l.link_type {
+        return 4.727 * pipe.roughness.powf(-1.852) * pipe.diameter.powf(-4.87) * pipe.length;
       } else {
         return 0.0;
       }
@@ -245,26 +242,32 @@ impl<'a> HydraulicSolver<'a> {
 
       if rel_change < CONVERGENCE_TOL {
 
-        let sum_demand: f64 = demands.iter().sum();
 
-        let supply: f64 = self.network.links.iter().enumerate().map(|(i, l)| {
-          if !matches!(self.network.nodes[l.end_node].node_type, NodeType::Junction { .. }) {
-            -flows[i]
-          } 
-          else if !matches!(self.network.nodes[l.start_node].node_type, NodeType::Junction { .. }) {
-            flows[i]
-          }
-          else {
-            0.0
-          }
-        }).sum();
+        let (sum_demand, sum_supply, sum_error) = self.flow_balance(&demands, &flows, &heads);
 
-        println!("Converged in {} iterations: Error = {:.4}, Supply = {:.4}, Demand = {:.4}", iteration, (sum_demand - supply).abs(), supply, sum_demand);
+        println!("Converged in {} iterations: Error = {:.4}, Supply = {:.4}, Demand = {:.4}", iteration, sum_error, sum_supply, sum_demand);
 
         return Ok((flows, heads));
       }
     }
     Err(format!("Maximum number of iterations reached: {}", MAX_ITER))
+  }
+
+  /// Calculate the flow balance error
+  fn flow_balance(&self, demands: &Vec<f64>, flows: &Vec<f64>, heads: &Vec<f64>) -> (f64, f64, f64) {
+
+    let sum_demand: f64 = demands.iter().sum();
+
+    let mut sum_supply: f64 = 0.0;
+    for (i, link) in self.network.links.iter().enumerate() {
+      if !matches!(self.network.nodes[link.end_node].node_type, NodeType::Junction { .. }) {
+        sum_supply -= flows[i];
+      }
+      if !matches!(self.network.nodes[link.start_node].node_type, NodeType::Junction { .. }) {
+        sum_supply += flows[i];
+      }
+    }
+    return (sum_demand, sum_supply, sum_demand - sum_supply);
   }
 
   /// Map each link to its CSC (Compressed Sparse Column) indices
@@ -324,7 +327,30 @@ impl<'a> HydraulicSolver<'a> {
     node_to_unknown
   }
 
+  /// Compute the initial flows of the links (1 ft/s velocity)
+  fn get_initial_flows(&self) -> Vec<f64> {
+    self.network.links.iter().map(|l| {
+      if let LinkType::Pipe(pipe) = &l.link_type {
+        let area = 0.25 * std::f64::consts::PI * pipe.diameter.powi(2);
+        let velocity = 1.0;
+        let flow = area * velocity;
+        return flow;
+      } else {
+        return 0.0;
+      }
+    }).collect::<Vec<f64>>()
+  }
 
+  /// Set the initial heads of the nodes
+  fn get_initial_heads(&self) -> Vec<f64> {
+    self.network.nodes.iter().map(|n| {
+      if n.is_fixed() {
+        return n.elevation;
+      } else {
+        return 0.0;
+      }
+    }).collect::<Vec<f64>>()
+  }
 
 }
 
