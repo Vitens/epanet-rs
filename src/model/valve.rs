@@ -1,4 +1,6 @@
 use crate::model::link::LinkTrait;
+use crate::model::options::HeadlossFormula;
+
 pub enum ValveType {
   PRV, // Pressure Reducing Valve
   PSV, // Pressure Sensing Valve

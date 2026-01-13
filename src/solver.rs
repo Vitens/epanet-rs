@@ -9,16 +9,21 @@ use rayon::prelude::*;
 use crate::model::node::NodeType;
 use crate::model::link::{LinkType, LinkTrait};
 use crate::model::network::Network;
+use crate::model::options::HeadlossFormula;
 
 
 const MAX_ITER: usize = 200;
 const CONVERGENCE_TOL: f64 = 0.01;
 
-const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
-
 pub struct SolverResult {
   pub flows: Vec<Vec<f64>>,
   pub heads: Vec<Vec<f64>>
+}
+
+pub struct FlowBalance {
+  pub total_demand: f64,
+  pub total_supply: f64,
+  pub error: f64,
 }
 
 /// CSC (Compressed Sparse Column) indices for the Jacobian matrix used in the Global Gradient Algorithm
@@ -63,6 +68,7 @@ impl<'a> HydraulicSolver<'a> {
   pub fn run(self, parallel: bool) -> SolverResult {
     
     let steps = 24*4;
+    let steps = 1;
 
     // initialize the flows and heads result vectors
     let mut flows: Vec<Vec<f64>> = vec![vec![0.0; self.network.links.len()]; steps];
@@ -127,13 +133,8 @@ impl<'a> HydraulicSolver<'a> {
       }
     }).collect::<Vec<f64>>();
 
-    let resistances: Vec<f64> = self.network.links.iter().map(|l| {
-      if let LinkType::Pipe(pipe) = &l.link_type {
-        return 4.727 * pipe.roughness.powf(-1.852) * pipe.diameter.powf(-4.87) * pipe.length;
-      } else {
-        return 0.0;
-      }
-    }).collect::<Vec<f64>>();
+    // calculate the resistances of the links
+    let resistances: Vec<f64> = self.network.links.iter().map(|l| l.resistance()).collect::<Vec<f64>>();
 
     // perform GGA iterations
     // solve the system of equations: A * h = rhs
@@ -180,14 +181,14 @@ impl<'a> HydraulicSolver<'a> {
 
         if let Some(i) = u {
             values[csc_index.diag_u.unwrap()] += g_inv;
-            rhs[i] -= q - (y * g_inv);
+            rhs[i] -= q - y;
             if self.network.nodes[link.end_node].is_fixed() {
               rhs[i] += g_inv * heads[link.end_node];
             }
         }
         if let Some(j) = v {
             values[csc_index.diag_v.unwrap()] += g_inv;
-            rhs[j] += q - (y * g_inv);
+            rhs[j] += q - y;
             if self.network.nodes[link.start_node].is_fixed() {
               rhs[j] += g_inv * heads[link.start_node];
             }
@@ -227,9 +228,10 @@ impl<'a> HydraulicSolver<'a> {
           let g_inv = g_invs[i];
           let y = ys[i];
         
-          // Flow update: dq = (h_L - dh) / g
-          let dq = g_inv*(y - dh);
+          // Flow update: dq = y - g_inv * dh
+          let dq = y - g_inv * dh;
 
+          // update the flow of the link
           flows[i] -= dq;
           
           // update the sum of the absolute changes in flow and the sum of the absolute flows
@@ -238,14 +240,13 @@ impl<'a> HydraulicSolver<'a> {
       }
 
       let rel_change = sum_dq / (sum_q + 1e-6);
-      // println!("Iteration {} relative change = {:.4}", iteration, rel_change);
 
       if rel_change < CONVERGENCE_TOL {
 
 
-        let (sum_demand, sum_supply, sum_error) = self.flow_balance(&demands, &flows, &heads);
+        let flow_balance = self.flow_balance(&demands, &flows);
 
-        println!("Converged in {} iterations: Error = {:.4}, Supply = {:.4}, Demand = {:.4}", iteration, sum_error, sum_supply, sum_demand);
+        println!("Converged in {} iterations: Error = {:.4}, Supply = {:.4}, Demand = {:.4}", iteration, flow_balance.error, flow_balance.total_supply, flow_balance.total_demand);
 
         return Ok((flows, heads));
       }
@@ -254,7 +255,7 @@ impl<'a> HydraulicSolver<'a> {
   }
 
   /// Calculate the flow balance error
-  fn flow_balance(&self, demands: &Vec<f64>, flows: &Vec<f64>, heads: &Vec<f64>) -> (f64, f64, f64) {
+  fn flow_balance(&self, demands: &Vec<f64>, flows: &Vec<f64>) -> FlowBalance {
 
     let sum_demand: f64 = demands.iter().sum();
 
@@ -267,7 +268,8 @@ impl<'a> HydraulicSolver<'a> {
         sum_supply += flows[i];
       }
     }
-    return (sum_demand, sum_supply, sum_demand - sum_supply);
+    let error = sum_demand - sum_supply;
+    return FlowBalance { total_demand: sum_demand, total_supply: sum_supply, error: error };
   }
 
   /// Map each link to its CSC (Compressed Sparse Column) indices

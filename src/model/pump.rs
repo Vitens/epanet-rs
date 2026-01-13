@@ -1,4 +1,6 @@
 use crate::model::link::LinkTrait;
+use crate::model::options::HeadlossFormula;
+
 pub struct Pump {
   pub speed: f64,
   pub head_curve: Box<str>,

@@ -4,18 +4,11 @@ use crate::model::link::Link;
 use crate::model::node::Node;
 use crate::model::curve::Curve;
 use crate::model::pattern::Pattern;
-
-pub const UCF_Q: f64 = 1.0;
-pub const UCF_H: f64 = 1.0;
-pub const UCF_D: f64 = 1.0 / 12.0;
-
-pub const C_SMALL: f64 = 1e-6;
-pub const C_BIG: f64 = 1e8;
-
-pub const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
+use crate::model::options::SimulationOptions;
 
 #[derive(Default)]
 pub struct Network {
+    pub options: SimulationOptions,
     pub nodes: Vec<Node>,
     pub links: Vec<Link>,
 
@@ -24,7 +17,6 @@ pub struct Network {
 
     pub node_map: HashMap<Box<str>, usize>,
     pub link_map: HashMap<Box<str>, usize>,
-
 }
 
 /// Network methods to add nodes and links

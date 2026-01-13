@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::{BufReader, BufRead};
+use std::str::FromStr;
 
 use crate::model::network::Network;
 use crate::model::node::{Node, NodeType};
@@ -10,6 +11,7 @@ use crate::model::junction::Junction;
 use crate::model::reservoir::Reservoir;
 use crate::model::pipe::{Pipe, PipeStatus};
 use crate::model::valve::{Valve, ValveType};
+use crate::model::options::*;
 // use crate::model::tank::Tank;
 use crate::model::pump::Pump;
 
@@ -22,6 +24,7 @@ enum ReadState {
   Valves,
   Pumps,
   Curves,
+  Options,
   Patterns,
   None,
 }
@@ -58,6 +61,7 @@ impl Network {
           "[PUMPS]" => ReadState::Pumps,
           "[CURVES]" => ReadState::Curves,
           "[PATTERNS]" => ReadState::Patterns,
+          "[OPTIONS]" => ReadState::Options,
           _ => ReadState::None,
         }
       }
@@ -95,6 +99,9 @@ impl Network {
           }
           ReadState::None => {
             // skip unknown state
+          },
+          ReadState::Options => {
+            self.read_options(line);
           }
         }
       }
@@ -190,7 +197,7 @@ impl Network {
     // read the length
     let length = parts.next().unwrap().parse::<f64>().unwrap();
     // read the diameter
-    let diameter = parts.next().unwrap().parse::<f64>().unwrap();
+    let diameter = parts.next().unwrap().parse::<f64>().unwrap() / 12.0; // FIX: 
     // read the roughness
     let roughness = parts.next().unwrap().parse::<f64>().unwrap();
 
@@ -198,16 +205,30 @@ impl Network {
     let minor_loss = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
     // convert minor los
     let minor_loss = 0.02517 * minor_loss / diameter.powi(2) / diameter.powi(2);
+    // check if the pipe has a status
+    let mut status = PipeStatus::Open;
+
+    if let Some(status_str) = parts.next() {
+      match status_str.to_uppercase().as_str() {
+        "OPEN" => status = PipeStatus::Open,
+        "CLOSED" => status = PipeStatus::Closed,
+        "CV" => status = PipeStatus::CheckValve,
+        _ => panic!("Invalid pipe status: {}", status_str),
+      }
+    }
+
+
 
     let start_node_index = *self.node_map.get(&start_node).unwrap();
     let end_node_index = *self.node_map.get(&end_node).unwrap();
+    let headloss_formula = HeadlossFormula::HazenWilliams;
 
     Link {
       id,
       start_node: start_node_index,
       end_node: end_node_index,
       minor_loss: minor_loss,
-      link_type: LinkType::Pipe(Pipe { diameter, length, roughness, minor_loss, status: PipeStatus::Open }),
+      link_type: LinkType::Pipe(Pipe { diameter, length, roughness, minor_loss, status, headloss_formula }),
     }
   }
   /// Read a pump from a parts iterator
@@ -306,6 +327,56 @@ impl Network {
       }
       _ => panic!("Demand can only be set for junctions"),
     }
+  }
+  /// Read the options from a parts iterator
+  fn read_options(&mut self, line: &str) {
+    let mut parts = line.split_whitespace(); // TODO: Implement option reading
+    
+    let option = parts.next().unwrap().trim().to_uppercase();
+    let value = parts.next().unwrap();
+
+    match option.as_str() {
+      "UNITS" => {
+        // set the flow units
+        self.options.flow_units = FlowUnits::from_str(value).unwrap();
+        
+        // set the unit system based on the flow units
+        self.options.unit_system = match self.options.flow_units {
+          FlowUnits::CFS | FlowUnits::GMP | FlowUnits::MGD | FlowUnits::IMGD | FlowUnits::AFD => UnitSystem::US,
+          FlowUnits::LPS | FlowUnits::LPM | FlowUnits::MLD | FlowUnits::CMS | FlowUnits::CMH | FlowUnits::CMD => UnitSystem::SI,
+        }
+
+      }
+      "HEADLOSS" => {
+        self.options.headloss_formula = match value.to_uppercase().as_str() {
+          "H-W" => HeadlossFormula::HazenWilliams,
+          "D-W" => HeadlossFormula::DarcyWeisbach,
+          "C-M" => HeadlossFormula::ChezyManning,
+          _ => panic!("Invalid headloss formula: {}", value),
+        };
+        // apply the headloss formula to the pipes
+        for link in self.links.iter_mut() {
+          if let LinkType::Pipe(pipe) = &mut link.link_type {
+            pipe.headloss_formula = self.options.headloss_formula;
+          }
+        }
+      },
+      "PRESSURE" => {
+        self.options.pressure_units = PressureUnits::from_str(value).unwrap();
+      }
+      "TRIALS" => {
+        self.options.max_trials = value.parse::<usize>().unwrap();
+      },
+      "ACCURACY" => {
+        self.options.accuracy = value.parse::<f64>().unwrap();
+      },
+      "CHECKFREQ" => {
+        self.options.check_frequency = value.parse::<usize>().unwrap();
+      },
+      _ => ()
+    }
+
+
   }
 }
 

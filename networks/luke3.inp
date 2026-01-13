@@ -1,9 +1,5 @@
 [TITLE]
-E. Alperovits, U. Shamir
-First published: December 1977
-Design of optimal water distribution systems
-https://doi.org/10.1029/WR013i006p00885
-set up for CFS
+Demo network, using D-W
 
 [JUNCTIONS]
 ;ID              	Elev        	Demand      	Pattern         
@@ -24,14 +20,14 @@ set up for CFS
 
 [PIPES]
 ;ID              	Node1           	Node2           	Length      	Diameter    	Roughness   	MinorLoss   	Status
- A               	FH              	1               	100         	12          	100         	0           	CV  	;
- B               	1               	3               	100         	12          	100         	0           	Open  	;
- C               	1               	2               	100         	12          	100         	0           	Open  	;
- D               	2               	4               	100         	12          	100         	0           	Open  	;
- E               	3               	4               	100         	12          	100         	0           	Open  	;
- F               	4               	5               	100         	12          	100         	0           	Open  	;
- G               	4               	6               	100         	12          	100         	0           	Open  	;
- H               	6               	7               	100         	12          	100         	0           	Open  	;
+ A               	FH              	1               	100         	12          0.6         	0           	CV  	;
+ B               	1               	3               	100         	12          0.6         	0           	Open  	;
+ C               	1               	2               	100         	12          0.6         	0           	Open  	;
+ D               	2               	4               	100         	12          0.6         	0           	Open  	;
+ E               	3               	4               	100         	12          0.6         	0           	Open  	;
+ F               	4               	5               	100         	12          0.6         	0           	Open  	;
+ G               	4               	6               	100         	12          0.6         	0           	Open  	;
+ H               	6               	7               	100         	12          0.6         	0           	Open  	;
 
 [PUMPS]
 ;ID              	Node1           	Node2           	Parameters
@@ -105,7 +101,7 @@ set up for CFS
 
 [OPTIONS]
  Units              	CFS
- Headloss           	H-W
+ Headloss           	D-W
  Specific Gravity   	1
  Viscosity          	1
  Trials             	40

@@ -2,6 +2,8 @@ use crate::model::pipe::Pipe;
 use crate::model::pump::Pump;
 use crate::model::valve::Valve;
 
+use crate::model::options::HeadlossFormula;
+
 /// Link struct
 pub struct Link {
   pub id: Box<str>,

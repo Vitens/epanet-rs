@@ -1,5 +1,20 @@
 use crate::model::link::LinkTrait;
+use crate::model::options::HeadlossFormula;
+use crate::constants::*;
 
+
+// Constants used for computing Darcy-Weisbach friction factor (src: hydcoefs.c from EPANET 2.3)
+const A1 : f64 =  3.14159265358979323850e+03;   // 1000*PI
+const A2 : f64 =  1.57079632679489661930e+03;   // 500*PI
+const A3 : f64 =  5.02654824574366918160e+01;   // 16*PI
+const A4 : f64 =  6.28318530717958647700e+00;   // 2*PI
+const A8 : f64 =  4.61841319859066668690e+00;   // 5.74*(PI/4)^.9
+const A9 : f64 = -8.68588963806503655300e-01;  // -2/ln(10)
+const AA : f64 = -1.5634601348517065795e+00;   // -2*.9*2/ln(10)
+const AB : f64 =  3.28895476345399058690e-03;   // 5.74/(4000^.9)
+const AC : f64 = -5.14214965799093883760e-03;  // AA*AB
+
+#[derive(Debug, Eq, PartialEq)]
 pub enum PipeStatus {
   Open,
   Closed,
@@ -12,27 +27,129 @@ pub struct Pipe {
   pub roughness: f64,
   pub minor_loss: f64,
   pub status: PipeStatus,
+  /// Headloss formula to use for the pipe
+  pub headloss_formula: HeadlossFormula
 }
 
 const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
 
 impl LinkTrait for Pipe {
-  fn coefficients(&self, q: f64, resistance: f64) -> (f64, f64) {
-    let q_abs = q.abs().max(1e-8);
-    let r = resistance;
-    let m = self.minor_loss;
+  fn coefficients(&self, q: f64, r: f64) -> (f64, f64) {
+
+    // for closed pipes use headloss formula hloss = BIG_VALUE * q
+    if self.status == PipeStatus::Closed {
+      return (1.0 / BIG_VALUE, q);
+    }
+
+    if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
+      return self.dw_coefficients(q, r);
+    }
+
+    // take the absolute value of the flow
+    let q = q.abs();
+    // minor loss coefficient
+    let ml = self.minor_loss;
+    // hydraulic exponent factor
     let n = H_EXPONENT;
 
-    let q_pow = q_abs.powf(n - 1.0);
+    // Friction head loss gradient
+    let mut hgrad = n * r * q.powf(n-1.0);
+    // Headloss
+    let mut hloss = hgrad * q / n;
 
-    let g = n * r * q_pow + 2.0 * m * q_abs;
-    let g_inv = 1.0 / g;
+    // contribution of minor losses
+    if ml > 0.0 {
+      hloss += ml * q.powi(2);
+      hgrad += 2.0 * ml * q;
+    }
+    // adjust the headloss to the sign of the flow
+    hloss *= q.signum();
 
-    let y = (r * q_abs * q_pow + m * q_abs.powi(2)) * q.signum();
-
-    (g_inv, y)
+    // return the coefficients
+    (1.0 / hgrad, hloss/hgrad)
   }
+
   fn resistance(&self) -> f64 {
-    0.0
+    match self.headloss_formula {
+      HeadlossFormula::HazenWilliams => {
+        4.727 * self.roughness.powf(-1.852) * self.diameter.powf(-4.87) * self.length
+      }
+      HeadlossFormula::DarcyWeisbach => {
+        // D-W f factor is included in the resistance calculation
+        self.length / 2.0 / 32.2 / self.diameter / (PI * self.diameter.powi(2) / 4.0).powi(2)
+      }
+      HeadlossFormula::ChezyManning => {
+        panic!("Chezy Manning headloss formula not yet implemented");
+      }
+    }
+  }
+}
+
+impl Pipe {
+  /// Calculate the coefficients for the Darcy Weisbach headloss formula
+  fn dw_coefficients(&self, q: f64, r: f64) -> (f64, f64) {
+
+    let q_abs = q.abs();
+    let ml = self.minor_loss;
+    let e = (self.roughness / 1000.0) / self.diameter; // relative roughness (use mf to ft)
+    let s = VISCOSITY * self.diameter;      // kinematic viscosity * diameter
+
+    // Laminar flow (Re <= 2000)
+    // use Hagen-Poiseuille formula
+    if q_abs <= A2 * s {
+      let r = 16.0 * PI * s * r;
+      let hloss = q * (r + ml * q_abs);
+      let hgrad = r + 2.0 * ml * q_abs;
+
+      (1.0/hgrad, hloss/hgrad)
+
+    } else {
+      // Turbulent flow (Re > 2000)
+      let (f, dfdq) = self.dw_friction_factor(q_abs, e, s);
+
+      let r1 = f * r + ml;
+      let hloss = r1 * q_abs * q;
+      let hgrad = (2.0 * r1 * q_abs) + (dfdq * r * q_abs.powi(2));
+
+      // println!("hloss: {}, hgrad: {}", hloss, hgrad);
+
+      (1.0/hgrad, hloss/hgrad)
+
+    }
+
+  }
+
+  // Calculate the Darcy Weisbach friction factor and its derivative
+  fn dw_friction_factor(&self, q: f64, e: f64, s: f64) -> (f64, f64) {
+
+    let w = q / s;
+    // Re >= 4000, use Swamee & Jain approximation
+
+    if (w >= A1) {
+      let y1 = A8 / w.powf(0.9);
+      let y2 = e / 3.7 + y1;
+      let y3 = A9 * y2.ln();
+      let f = 1.0 / y3.powi(2);
+      let dfdq = 1.8 * f * y1 * A9 / y2 / y3 / q;
+
+      (f, dfdq)
+    
+    // Use interpolating polynomials by E. Dunlop for transition flow (2000 < Re < 4000)
+    } else {
+      let y2 = e / 3.7 + AB;
+      let y3 = A9 * y2.ln();
+      let fa = 1.0 / (y3*y3);
+      let fb = (2.0 + AC / (y2*y3)) * fa;
+      let r = w / A2;
+      let x1 = 7.0 * fa - fb;
+      let x2 = 0.128 - 17.0 * fa + 2.5 * fb;
+      let x3 = -0.128 + 13.0 * fa - (fb + fb);
+      let x4 = 0.032 - 3.0 * fa + 0.5 *fb;
+      let f = x1 + r * (x2 + r * (x3 + r * x4));
+      let dfdq = (x2 + r * (2.0 * x3 + r * 3.0 * x4)) / s / A2;
+
+      (f, dfdq)
+    }
+
   }
 }

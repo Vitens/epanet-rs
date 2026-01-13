@@ -4,10 +4,9 @@
 - [x] Parallelize sequential solves with Rayon if possible (no tanks)
 - [x] Refactor network build from inp file, split logic into separate methods
 - [x] Refactor network, link and node setup, split into separate files and compute coefficients using traits
-- [] Setup unit conversion for links and nodes
-- [] Input file support for PATTERN, TIMES, OPTIONS
+- [x] Implement Darcy Weisbach
+- [-] Input file support for PATTERN, TIMES, OPTIONS
 - [] Implement unit conversion
-- [] Implement Darcy Weisbach
 - [] Implement Valves and Pumps
 - [] Implement tank logic
 - [] Try to get the solver working for f32 in addition to f64 (SIMD speedup)
