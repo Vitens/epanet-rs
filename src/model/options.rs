@@ -73,6 +73,27 @@ pub enum HeadlossFormula {
   ChezyManning,  // C-M
 }
 
+#[derive(Debug)]
+pub struct TimeOptions {
+  pub duration: usize,      // duration of the simulation in hours
+  pub hydraulic_timestep: usize, // hydraulic timestep in hours
+  pub pattern_timestep: usize, // pattern timestep in hours
+  pub pattern_start: usize, // pattern start in hours
+  pub start_clocktime: usize, // start clocktime in hours
+}
+
+impl Default for TimeOptions {
+  fn default() -> Self {
+    Self {
+      duration: 0,
+      hydraulic_timestep: 3600,
+      pattern_timestep: 3600,
+      pattern_start: 0,
+      start_clocktime: 0,
+    }
+  }
+}
+
 
 #[derive(Debug)]
 pub struct SimulationOptions {
@@ -89,6 +110,7 @@ pub struct SimulationOptions {
 
   pub pattern: Option<Box<str>>,
 
+  pub time_options: TimeOptions,
 }
 
 /// Default implementation for SimulationOptions
@@ -96,7 +118,7 @@ impl Default for SimulationOptions {
   fn default() -> Self {
     Self {
       flow_units: FlowUnits::CFS,
-      pressure_units: PressureUnits::PSI,
+      pressure_units: PressureUnits::FEET,
       unit_system: UnitSystem::US,
       headloss_formula: HeadlossFormula::HazenWilliams,
       max_trials: 40,
@@ -104,6 +126,7 @@ impl Default for SimulationOptions {
       check_frequency: 2,
       max_check: 10,
       pattern: None,
+      time_options: TimeOptions::default(),
     }
   }
 }

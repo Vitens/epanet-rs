@@ -1,5 +1,5 @@
 use crate::model::link::LinkTrait;
-use crate::model::options::HeadlossFormula;
+use crate::constants::*;
 
 pub struct Pump {
   pub speed: f64,
@@ -9,7 +9,7 @@ pub struct Pump {
 
 impl LinkTrait for Pump {
   fn coefficients(&self, _q: f64, _resistance: f64) -> (f64, f64) {
-    (0.0, 0.0)
+    (BIG_VALUE, 0.0)
   }
   fn resistance(&self) -> f64 {
     0.0

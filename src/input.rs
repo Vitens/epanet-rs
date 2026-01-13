@@ -26,6 +26,7 @@ enum ReadState {
   Curves,
   Options,
   Patterns,
+  Times,
   None,
 }
 
@@ -62,6 +63,7 @@ impl Network {
           "[CURVES]" => ReadState::Curves,
           "[PATTERNS]" => ReadState::Patterns,
           "[OPTIONS]" => ReadState::Options,
+          "[TIMES]" => ReadState::Times,
           _ => ReadState::None,
         }
       }
@@ -102,6 +104,9 @@ impl Network {
           },
           ReadState::Options => {
             self.read_options(line);
+          }
+          ReadState::Times => {
+            self.read_times(line);
           }
         }
       }
@@ -344,6 +349,11 @@ impl Network {
         self.options.unit_system = match self.options.flow_units {
           FlowUnits::CFS | FlowUnits::GMP | FlowUnits::MGD | FlowUnits::IMGD | FlowUnits::AFD => UnitSystem::US,
           FlowUnits::LPS | FlowUnits::LPM | FlowUnits::MLD | FlowUnits::CMS | FlowUnits::CMH | FlowUnits::CMD => UnitSystem::SI,
+        };
+        // set the default pressure units based on the unit system
+        self.options.pressure_units = match self.options.unit_system {
+          UnitSystem::US => PressureUnits::FEET,
+          UnitSystem::SI => PressureUnits::METERS,
         }
 
       }
@@ -373,8 +383,81 @@ impl Network {
       "CHECKFREQ" => {
         self.options.check_frequency = value.parse::<usize>().unwrap();
       },
+      "MAXCHECK" => {
+        self.options.max_check = value.parse::<usize>().unwrap();
+      },
       _ => ()
     }
+  }
+  fn read_times(&mut self, line: &str) {
+    let mut parts = line.split_whitespace();
+    // read the time option name
+    let mut time_option = parts.next().unwrap().to_uppercase();
+
+    if time_option == "STATISTIC" {
+      return;
+    }
+
+    // if the next part is not a number, append it to the time option
+    let mut duration = parts.next().unwrap();
+
+    // if the duration is not a number and does not contain ":", append it to the time option
+    if !duration.parse::<usize>().is_ok() && !duration.contains(":") {
+      time_option += " ";
+      time_option += &duration.to_uppercase();
+      duration = parts.next().unwrap();
+    }
+
+
+    let time_units = parts.next().unwrap_or("HOURS").to_uppercase();
+
+    let mut seconds = 0;
+
+    // if ":" in duration, split into hours and minutes
+    if duration.contains(":") {
+      let mut time_parts = duration.split(":");
+      let hours = time_parts.next().unwrap().parse::<usize>().unwrap();
+      let minutes = time_parts.next().unwrap().parse::<usize>().unwrap();
+      seconds = hours * 3600 + minutes * 60;
+
+      if time_units == "PM" {
+        // add 12 hours to the seconds
+        seconds += 12 * 3600;
+      }
+
+    } else {
+      let duration_value = duration.parse::<usize>().unwrap();
+      seconds = match time_units.as_str() {
+        "HOURS" => duration_value * 3600,
+        "HOUR" => duration_value * 3600,
+        "MINUTES" => duration_value * 60,
+        "MINUTE" => duration_value * 60,
+        "MIN" => duration_value * 60,
+        "SECONDS" => duration_value,
+        "SECOND" => duration_value,
+        "SEC" => duration_value,
+        "DAYS" => duration_value * 86400,
+        "DAY" => duration_value * 86400,
+        _ => panic!("Invalid time units: {}", time_units),
+      };
+    }
+    // assign the duration to the time options
+    match time_option.as_str() {
+      "DURATION" => self.options.time_options.duration = seconds,
+      "HYDRAULIC TIMESTEP" => self.options.time_options.hydraulic_timestep = seconds,
+      "PATTERN TIMESTEP" => self.options.time_options.pattern_timestep = seconds,
+      "PATTERN START" => self.options.time_options.pattern_start = seconds,
+      "START CLOCKTIME" => self.options.time_options.start_clocktime = seconds,
+      _ => ()
+    }
+
+
+
+
+
+
+
+
 
 
   }

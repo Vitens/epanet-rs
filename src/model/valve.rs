@@ -1,5 +1,5 @@
 use crate::model::link::LinkTrait;
-use crate::model::options::HeadlossFormula;
+use crate::constants::*;
 
 pub enum ValveType {
   PRV, // Pressure Reducing Valve
@@ -19,8 +19,8 @@ pub struct Valve {
 }
 
 impl LinkTrait for Valve {
-  fn coefficients(&self, _q: f64, _resistance: f64) -> (f64, f64) {
-    (0.0, 0.0)
+  fn coefficients(&self, q: f64, _resistance: f64) -> (f64, f64) {
+    (SMALL_VALUE, q * SMALL_VALUE)
   }
   fn resistance(&self) -> f64 {
     0.0
