@@ -390,6 +390,7 @@ impl Network {
     }
   }
   fn read_times(&mut self, line: &str) {
+    println!("Reading times: {}", line);
     let mut parts = line.split_whitespace();
     // read the time option name
     let mut time_option = parts.next().unwrap().to_uppercase();
@@ -409,9 +410,13 @@ impl Network {
     }
 
 
-    let time_units = parts.next().unwrap_or("HOURS").to_uppercase();
+    let mut time_units = parts.next().unwrap_or("HOURS").to_uppercase();
+    // remove last "S" if it exists
+    if time_units.ends_with("S") {
+      time_units.pop();
+    }
 
-    let mut seconds = 0;
+    let mut seconds : usize;
 
     // if ":" in duration, split into hours and minutes
     if duration.contains(":") {
@@ -427,17 +432,16 @@ impl Network {
 
     } else {
       let duration_value = duration.parse::<usize>().unwrap();
+
       seconds = match time_units.as_str() {
-        "HOURS" => duration_value * 3600,
         "HOUR" => duration_value * 3600,
-        "MINUTES" => duration_value * 60,
         "MINUTE" => duration_value * 60,
         "MIN" => duration_value * 60,
-        "SECONDS" => duration_value,
         "SECOND" => duration_value,
         "SEC" => duration_value,
-        "DAYS" => duration_value * 86400,
         "DAY" => duration_value * 86400,
+        "AM" => duration_value * 3600,    // AM is the same as hours
+        "PM" => duration_value * 3600 + 12 * 3600, // add 12 hours to the seconds 
         _ => panic!("Invalid time units: {}", time_units),
       };
     }

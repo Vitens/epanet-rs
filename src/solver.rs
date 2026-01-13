@@ -67,8 +67,8 @@ impl<'a> HydraulicSolver<'a> {
   /// Run the hydraulic solver
   pub fn run(self, parallel: bool) -> SolverResult {
     
-    let steps = 24*4;
-    let steps = 1;
+    // calculate setps
+    let steps = (self.network.options.time_options.duration / self.network.options.time_options.hydraulic_timestep).max(1);
 
     // initialize the flows and heads result vectors
     let mut flows: Vec<Vec<f64>> = vec![vec![0.0; self.network.links.len()]; steps];
