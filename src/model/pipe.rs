@@ -57,21 +57,21 @@ impl LinkTrait for Pipe {
     }
 
     // take the absolute value of the flow
-    let q = q.abs();
+    let q_abs = q.abs();
     // minor loss coefficient
     let ml = self.minor_loss;
     // hydraulic exponent factor
     let n = H_EXPONENT;
 
     // Friction head loss gradient
-    let mut hgrad = n * r * q.powf(n-1.0);
+    let mut hgrad = n * r * q_abs.powf(n-1.0);
     // Headloss
-    let mut hloss = hgrad * q / n;
+    let mut hloss = hgrad * q_abs / n;
 
     // contribution of minor losses
     if ml > 0.0 {
-      hloss += ml * q.powi(2);
-      hgrad += 2.0 * ml * q;
+      hloss += ml * q_abs.powi(2);
+      hgrad += 2.0 * ml * q_abs;
     }
     // adjust the headloss to the sign of the flow
     hloss *= q.signum();
