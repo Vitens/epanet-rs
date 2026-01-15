@@ -10,6 +10,7 @@ pub struct Link {
   pub minor_loss: f64,
   pub start_node: usize,
   pub end_node: usize,
+  pub initial_status: LinkStatus,
 }
 
 pub enum LinkType {
@@ -18,19 +19,46 @@ pub enum LinkType {
     Valve(Valve)
 }
 
+// Source: EPANET 2.3 types.h
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
+pub enum LinkStatus {
+  Xhead,         // pump cannot deliver head (closed)
+  TempClosed,    // temporarily closed
+  Closed,        // closed
+  Open,          // open
+  Active,        // valve active (partially open)
+  Xflow,         // pump exceeds maximum flow
+  XFCV,          // FCV cannot supply flow
+  XPressure,     // valve cannot supply pressure
+  Filling,       // tank filling
+  Emptying,      // tank emptying
+  Overflowing    // tank overflowing
+}
+
+impl LinkStatus {
+  pub fn from_str(status: &str) -> LinkStatus {
+    match status.to_uppercase().as_str() {
+      "CLOSED" => LinkStatus::Closed,
+      "OPEN" => LinkStatus::Open,
+      "ACTIVE" => LinkStatus::Active,
+      _ => panic!("Invalid link status")
+    }
+  }
+}
+
 pub trait LinkTrait {
   /// Calculate the 1/G_ij and Y_ij coefficients for the link
-  fn coefficients(&self, q: f64, resistance: f64) -> (f64, f64);
+  fn coefficients(&self, q: f64, resistance: f64, status: LinkStatus) -> (f64, f64, LinkStatus);
   /// Calculate the resistance of the link
   fn resistance(&self) -> f64;
 }
 
 impl LinkTrait for Link {
-  fn coefficients(&self, q: f64, resistance: f64) -> (f64, f64) {
+  fn coefficients(&self, q: f64, resistance: f64, status: LinkStatus) -> (f64, f64, LinkStatus) {
     match &self.link_type {
-      LinkType::Pipe(pipe) => pipe.coefficients(q, resistance),
-      LinkType::Pump(pump) => pump.coefficients(q, resistance),
-      LinkType::Valve(valve) => valve.coefficients(q, resistance),
+      LinkType::Pipe(pipe) => pipe.coefficients(q, resistance, status),
+      LinkType::Pump(pump) => pump.coefficients(q, resistance, status),
+      LinkType::Valve(valve) => valve.coefficients(q, resistance, status),
     }
   }
   fn resistance(&self) -> f64 {

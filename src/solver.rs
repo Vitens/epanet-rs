@@ -7,7 +7,7 @@ use serde::Serialize;
 use rayon::prelude::*;
 
 use crate::model::node::NodeType;
-use crate::model::link::{LinkType, LinkTrait};
+use crate::model::link::{LinkType, LinkTrait, LinkStatus};
 use crate::model::network::Network;
 use crate::model::units::{FlowUnits, PressureUnits};
 
@@ -92,8 +92,6 @@ impl<'a> HydraulicSolver<'a> {
     // set the initial heads
     let mut initial_heads: Vec<f64> = self.get_initial_heads();
 
-
-
     // run the solver in parallel using Rayon if enabled
     if parallel {
 
@@ -161,6 +159,8 @@ impl<'a> HydraulicSolver<'a> {
 
     // gather demands
     let demands: Vec<f64> = self.get_demands(pattern_index);
+    // gather link initial statuses
+    let mut statuses: Vec<LinkStatus> = self.get_initial_status();
 
     // calculate the resistances of the links
     let resistances: Vec<f64> = self.network.links.iter().map(|l| l.resistance()).collect::<Vec<f64>>();
@@ -199,10 +199,12 @@ impl<'a> HydraulicSolver<'a> {
       for (i, link) in self.network.links.iter().enumerate() {
         let q = flows[i];
         let csc_index = &self.csc_indices[i];
-        let (g_inv, y) = link.coefficients(q, resistances[i]);
+        let (g_inv, y, status) = link.coefficients(q, resistances[i], statuses[i]);
 
         g_invs[i] = g_inv;
         ys[i] = y;
+        // update the status of the link
+        statuses[i] = status;
 
         // Get the CSC indices for the start and end nodes
         let u = self.node_to_unknown[link.start_node];
@@ -359,7 +361,10 @@ impl<'a> HydraulicSolver<'a> {
     node_to_unknown
   }
 
-  /// Compute the initial flows of the links (1 ft/s velocity)
+  fn get_initial_status(&self) -> Vec<LinkStatus> {
+    self.network.links.iter().map(|l| l.initial_status).collect::<Vec<LinkStatus>>()
+  }
+  /// Compute the initial flows ofthe links (1 ft/s velocity)
   fn get_initial_flows(&self) -> Vec<f64> {
     self.network.links.iter().map(|l| {
       if let LinkType::Pipe(pipe) = &l.link_type {
@@ -367,6 +372,12 @@ impl<'a> HydraulicSolver<'a> {
         let velocity = 1.0;
         let flow = area * velocity;
         return flow;
+      } else if let LinkType::Pump(pump) = &l.link_type {
+        if let Some(head_curve_statistics) = &pump.head_curve_statistics {
+          return head_curve_statistics.q_initial;
+        } else {
+          return 0.0;
+        }
       } else {
         return 0.0;
       }

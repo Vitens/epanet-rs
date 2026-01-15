@@ -4,14 +4,14 @@ use std::str::FromStr;
 
 use crate::model::network::Network;
 use crate::model::node::{Node, NodeType};
-use crate::model::link::{Link, LinkType};
+use crate::model::link::{Link, LinkType, LinkStatus};
 use crate::model::curve::Curve;
 use crate::model::pattern::Pattern;
 use crate::model::junction::Junction;
 use crate::model::reservoir::Reservoir;
-use crate::model::pipe::{Pipe, PipeStatus};
+use crate::model::pipe::Pipe;
 use crate::model::pump::Pump;
-use crate::model::valve::{Valve, ValveType, ValveStatus};
+use crate::model::valve::{Valve, ValveType};
 use crate::model::units::{FlowUnits, UnitSystem, PressureUnits, UnitConversion};
 use crate::model::options::*;
 // use crate::model::tank::Tank;
@@ -121,6 +121,14 @@ impl Network {
     }
     // convert units
     self.convert_units();
+    // update pump statistics
+
+    for pump in self.links.iter_mut() {
+      if let LinkType::Pump(pump) = &mut pump.link_type {
+        let head_curve_statistics = self.curves.get(&pump.head_curve).unwrap().head_curve_statistics();
+        pump.head_curve_statistics = Some(head_curve_statistics);
+      }
+    }
 
     Ok(())
   }
@@ -219,7 +227,8 @@ impl Network {
       id,
       start_node: start_node_index,
       end_node: end_node_index,
-      link_type: LinkType::Valve(Valve { diameter, setting, curve, valve_type, status: ValveStatus::Open }),
+      link_type: LinkType::Valve(Valve { diameter, setting, curve, valve_type }),
+      initial_status: LinkStatus::Active,
       minor_loss: minor_loss,
     }
   }
@@ -245,14 +254,15 @@ impl Network {
     // convert minor los
     let minor_loss = 0.02517 * minor_loss / diameter.powi(2) / diameter.powi(2);
     // check if the pipe has a status
-    let mut status = PipeStatus::Open;
+    let mut status = LinkStatus::Open;
+    let mut check_valve = false;
 
     if let Some(status_str) = parts.next() {
-      match status_str.to_uppercase().as_str() {
-        "OPEN" => status = PipeStatus::Open,
-        "CLOSED" => status = PipeStatus::Closed,
-        "CV" => status = PipeStatus::CheckValve,
-        _ => panic!("Invalid pipe status: {}", status_str),
+      if status_str.to_uppercase().as_str() == "CV" {
+        check_valve = true;
+      }
+      if status_str.to_uppercase().as_str() == "CLOSED" {
+        status = LinkStatus::Closed;
       }
     }
 
@@ -265,7 +275,8 @@ impl Network {
       start_node: start_node_index,
       end_node: end_node_index,
       minor_loss: minor_loss,
-      link_type: LinkType::Pipe(Pipe { diameter, length, roughness, minor_loss, status, headloss_formula }),
+      link_type: LinkType::Pipe(Pipe { diameter, length, roughness, minor_loss, check_valve, headloss_formula }),
+      initial_status: status,
     }
   }
   /// Read a pump from a parts iterator
@@ -279,7 +290,7 @@ impl Network {
     let end_node: Box<str> = parts.next().unwrap().into();
 
     // read the parameters
-    let mut parameters = parts.skip(3);
+    let mut parameters = parts;
 
     let mut speed = 1.0;
     let mut head_curve = "";
@@ -309,7 +320,8 @@ impl Network {
       start_node: start_node_index,
       end_node: end_node_index,
       minor_loss: 0.0,
-      link_type: LinkType::Pump(Pump { speed, head_curve, power }),
+      link_type: LinkType::Pump(Pump { speed, head_curve, power, head_curve_statistics: None}),
+      initial_status: LinkStatus::Open,
     }
   }
   /// Read a curve from a parts iterator
@@ -501,15 +513,8 @@ impl Network {
     // get the corresponding link type
     let link = &mut self.links[*self.link_map.get(id).unwrap()];
 
-    match &mut link.link_type {
-      LinkType::Pipe(pipe) => {
-        pipe.status = PipeStatus::from_str(status);
-      }
-      LinkType::Valve(valve) => {
-        valve.status = ValveStatus::from_str(status);
-      }
-      _ => panic!("Status can only be set for pipes and valves"),
-    }
+    // set the initial status of the link
+    link.initial_status = LinkStatus::from_str(status);
   }
 }
 

@@ -1,6 +1,7 @@
 use crate::model::link::LinkTrait;
 use crate::model::options::HeadlossFormula;
 use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::link::LinkStatus;
 use crate::constants::*;
 
 
@@ -15,29 +16,12 @@ const A9 : f64 = -8.68588963806503655300e-01;  // -2/ln(10)
 const AB : f64 =  3.28895476345399058690e-03;   // 5.74/(4000^.9)
 const AC : f64 = -5.14214965799093883760e-03;  // AA*AB
 
-#[derive(Debug, Eq, PartialEq)]
-pub enum PipeStatus {
-  Open,
-  Closed,
-  CheckValve
-}
-impl PipeStatus {
-  pub fn from_str(status: &str) -> PipeStatus {
-    match status.to_uppercase().as_str() {
-      "OPEN" => PipeStatus::Open,
-      "CLOSED" => PipeStatus::Closed,
-      "CV" => PipeStatus::CheckValve,
-      _ => panic!("Invalid pipe status")
-    }
-  }
-}
-
 pub struct Pipe {
   pub diameter: f64,
   pub length: f64,
   pub roughness: f64,
   pub minor_loss: f64,
-  pub status: PipeStatus,
+  pub check_valve: bool,
   /// Headloss formula to use for the pipe
   pub headloss_formula: HeadlossFormula
 }
@@ -45,15 +29,16 @@ pub struct Pipe {
 const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
 
 impl LinkTrait for Pipe {
-  fn coefficients(&self, q: f64, r: f64) -> (f64, f64) {
+  fn coefficients(&self, q: f64, r: f64, status: LinkStatus) -> (f64, f64, LinkStatus) {
 
     // for closed pipes use headloss formula hloss = BIG_VALUE * q
-    if self.status == PipeStatus::Closed {
-      return (1.0 / BIG_VALUE, q);
+    if status == LinkStatus::Closed {
+      return (1.0 / BIG_VALUE, q, status);
     }
 
     if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
-      return self.dw_coefficients(q, r);
+      let (g_inv, y) = self.dw_coefficients(q, r);
+      return (g_inv, y, status);
     }
 
     // take the absolute value of the flow
@@ -77,7 +62,7 @@ impl LinkTrait for Pipe {
     hloss *= q.signum();
 
     // return the coefficients
-    (1.0 / hgrad, hloss/hgrad)
+    (1.0 / hgrad, hloss/hgrad, status)
   }
 
   fn resistance(&self) -> f64 {

@@ -4,7 +4,7 @@ mod solver;
 mod constants;
 mod output;
 
-use std::{env, time::Instant};
+use std::time::Instant;
 use clap::Parser;
 
 use model::network::Network;
@@ -21,6 +21,9 @@ struct Args {
   parallel: bool,
   #[arg(short, long)]
   verbose: bool,
+  #[arg(long)]
+  print_results: bool
+
 }
 
 fn main() {
@@ -31,6 +34,7 @@ fn main() {
   let parallel = args.parallel;
   let output_file = args.output_file;
   let verbose = args.verbose;
+  let print_results = args.print_results;
 
   let start_time = Instant::now();
 
@@ -55,4 +59,15 @@ fn main() {
     let end_time = Instant::now();
     println!("Results written in {:?}", end_time.duration_since(start_time));
   }
+
+  if print_results {
+    for (i, node) in network.nodes.iter().enumerate() {
+      println!("Node {}: {:.2}", node.id, result.heads[0][i]);
+    }
+    for (i, link) in network.links.iter().enumerate() {
+      println!("Link {}: {:.2}", link.id, result.flows[0][i]);
+    }
+  }
+
+
 }
