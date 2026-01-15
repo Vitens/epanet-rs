@@ -384,9 +384,6 @@ impl<'a> HydraulicSolver<'a> {
     }).collect::<Vec<f64>>()
   }
 
-  // get heads of the nodes for a given pattern index, for reservoirs with a head pattern, apply the pattern
-
-
   /// Get the demands of the junctions for a given pattern index
   fn get_demands(&self, pattern_index: usize) -> Vec<f64> {
     let demands = self.network.nodes.iter().map(|n| {

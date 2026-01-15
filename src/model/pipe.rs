@@ -31,6 +31,9 @@ const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
 impl LinkTrait for Pipe {
   fn coefficients(&self, q: f64, r: f64, status: LinkStatus) -> (f64, f64, LinkStatus) {
 
+    if self.check_valve && q < 0.0 {
+      return (1.0 / BIG_VALUE, q, LinkStatus::TempClosed);
+    }
     // for closed pipes use headloss formula hloss = BIG_VALUE * q
     if status == LinkStatus::Closed {
       return (1.0 / BIG_VALUE, q, status);
