@@ -130,6 +130,7 @@ impl Pipe {
 
   }
 
+  #[inline(always)]
   // Calculate the Darcy Weisbach friction factor and its derivative
   fn dw_friction_factor(&self, q: f64, e: f64, s: f64) -> (f64, f64) {
 

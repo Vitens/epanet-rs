@@ -2,44 +2,57 @@ mod input;
 mod model;
 mod solver;
 mod constants;
+mod output;
 
 use std::{env, time::Instant};
+use clap::Parser;
 
 use model::network::Network;
 use solver::HydraulicSolver;
 
 const BANNER: [&str; 6] = [r"  _____ ____   _    _   _ _____ _____     ____  ____  ", r" | ____|  _ \ / \  | \ | | ____|_   _|   |  _ \/ ___| ", r" |  _| | |_) / _ \ |  \| |  _|   | |_____| |_) \___ \ ", r" | |___|  __/ ___ \| |\  | |___  | |_____|  _ < ___) |", r" |_____|_| /_/   \_\_| \_|_____| |_|     |_| \_\____/ ", r"                                                      "];
+
+#[derive(Parser, Debug)]
+#[command(author="Abel Heinsbroek (Vitens N.V.)", version = "0.1.0", about, long_about = "A very fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust")]
+struct Args {
+  input_file: String,
+  output_file: Option<String>,
+  #[arg(short, long)]
+  parallel: bool,
+  #[arg(short, long)]
+  verbose: bool,
+}
+
 fn main() {
+
+  let args = Args::parse();
+
+  let input_file = args.input_file;
+  let parallel = args.parallel;
+  let output_file = args.output_file;
+  let verbose = args.verbose;
+
   let start_time = Instant::now();
-  let file = env::args().nth(1).unwrap_or("networks/dtd.inp".to_string());
-  let parallel = env::args().nth(2).unwrap_or("false".to_string()) == "true";
 
   println!("{}", BANNER.join("\n"));
-  println!("Loading network from file: {}", file);
+  println!("Loading network from file: {}", input_file);
 
   let mut network = Network::default();
-  network.read_inp(&file.as_str()).expect("Failed to load network");
-  println!("Options: {:?}", network.options);
+  network.read_inp(&input_file.as_str()).expect("Failed to load network");
   let end_time = Instant::now();
   println!("Loaded network with {} nodes and {} links", network.nodes.len(), network.links.len());
   println!("Network loaded in {:?}", end_time.duration_since(start_time));
 
   let start_time = Instant::now();
   let solver = HydraulicSolver::new(&network);
-  let result = solver.run(parallel);
+  let result = solver.run(parallel, verbose);
   let end_time = Instant::now();
   println!("Solver finished in {:?}", end_time.duration_since(start_time));
-  // let pipeid = "338609172";
-  // let pipe_index = network.link_map.get(pipeid).unwrap();
-  // let pipe = &network.links[*pipe_index];
-  // println!("Pipe: {:?}", pipe.id);
-  // println!("Flow: {:?}", result.flows[0][*pipe_index]);
-  // println!("Heads: {:?}", result.heads[0].iter().map(|h| format!("{:.2}", h)).collect::<Vec<String>>().join(", "));
-  // println!("Flows: {:?}", result.flows[0].iter().map(|f| format!("{:.2}", f)).collect::<Vec<String>>().join(", "));
-  // for (i, n) in network.nodes.iter().enumerate() {
-  //   println!("{}:{}", n.id, result.heads[0][i])
-  // }
-  // for (i, link) in network.links.iter().enumerate() {
-  //   println!("{}:{}", link.id, result.flows[0][i])
-  // }
+
+  if let Some(output_file) = output_file {
+    let start_time = Instant::now();
+    network.write_results(&result, &output_file).expect("Failed to write results");
+    let end_time = Instant::now();
+    println!("Results written in {:?}", end_time.duration_since(start_time));
+  }
 }
