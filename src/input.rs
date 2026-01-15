@@ -508,13 +508,20 @@ impl Network {
   fn read_status(&mut self, line: &str) {
     let mut parts = line.split_whitespace();
     let id : &str = parts.next().unwrap().into();
-    let status = parts.next().unwrap().into();
+    let status : &str = parts.next().unwrap().into();
 
     // get the corresponding link type
     let link = &mut self.links[*self.link_map.get(id).unwrap()];
 
-    // set the initial status of the link
-    link.initial_status = LinkStatus::from_str(status);
+    if let Ok(setting) = status.parse::<f64>() {
+      match &mut link.link_type {
+        LinkType::Valve(valve) => valve.setting = setting,
+        LinkType::Pump(pump) => pump.speed = setting,
+        _ => panic!("Status can only be set for valves and pumps"),
+      }
+    } else {
+      link.initial_status = LinkStatus::from_str(status);
+    }
   }
 }
 

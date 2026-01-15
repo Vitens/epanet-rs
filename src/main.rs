@@ -61,9 +61,12 @@ fn main() {
   }
 
   if print_results {
+    println!("Results:");
+    println!("=== Heads:");
     for (i, node) in network.nodes.iter().enumerate() {
       println!("Node {}: {:.2}", node.id, result.heads[0][i]);
     }
+    println!("=== Flows:");
     for (i, link) in network.links.iter().enumerate() {
       println!("Link {}: {:.2}", link.id, result.flows[0][i]);
     }

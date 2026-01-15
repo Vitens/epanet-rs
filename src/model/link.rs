@@ -41,7 +41,7 @@ impl LinkStatus {
       "CLOSED" => LinkStatus::Closed,
       "OPEN" => LinkStatus::Open,
       "ACTIVE" => LinkStatus::Active,
-      _ => panic!("Invalid link status")
+      _ => panic!("Invalid link status {}", status)
     }
   }
 }

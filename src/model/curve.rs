@@ -39,14 +39,8 @@ impl Curve {
       }
     }
 
-    // return fixed values for now
-    return HeadCurveStatistics {
-      h_max: 66.67,
-      h_shutoff: 66.67,
-      q_max: 89.0,
-      q_initial: 50.0,
-      r: 0.006667,
-      n: 2.00,
+    else {
+      panic!("Only single point curves are supported for now");
     }
   }
 }
