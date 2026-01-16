@@ -64,7 +64,7 @@ cargo test --test solver_test
 ## Supported Features and To-Do
 
 - [x] INP file support
-- [-] Parallel Hydraulic Solver for extended period simulations
+- [ ] Parallel Hydraulic Solver for extended period simulations
 - [ ] Quality simulations
 - [ ] CONTROLS and RULES
 - [ ] EMITTERS and LEAKAGE

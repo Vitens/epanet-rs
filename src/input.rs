@@ -633,7 +633,7 @@ mod tests {
   #[test]
   fn test_read_reservoir_with_pattern() {
     let mut network = test_network(false);
-    let node = network.read_reservoir("RES2  200.0  HEADPAT");
+    let node = network.read_reservoir("RES2  200.0  HEADPAT; Comment");
     
     let NodeType::Reservoir(reservoir) = &node.node_type else {
       panic!("Expected Reservoir node type");
