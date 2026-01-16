@@ -562,12 +562,12 @@ mod tests {
     assert_eq!(&*node.id, "J1");
     assert_eq!(node.elevation, 100.5);
     
-    if let NodeType::Junction(junction) = &node.node_type {
-      assert_eq!(junction.basedemand, 25.0);
-      assert!(junction.pattern.is_none());
-    } else {
+    let NodeType::Junction(junction) = &node.node_type else {
       panic!("Expected Junction node type");
-    }
+    };
+
+    assert_eq!(junction.basedemand, 25.0);
+    assert!(junction.pattern.is_none());
   }
 
   #[test]
@@ -578,12 +578,12 @@ mod tests {
     assert_eq!(&*node.id, "J2");
     assert_eq!(node.elevation, 50.0);
     
-    if let NodeType::Junction(junction) = &node.node_type {
-      assert_eq!(junction.basedemand, 100.0);
-      assert_eq!(junction.pattern.as_deref(), Some("PAT1"));
-    } else {
+    let NodeType::Junction(junction) = &node.node_type else {
       panic!("Expected Junction node type");
-    }
+    };
+
+    assert_eq!(junction.basedemand, 100.0);
+    assert_eq!(junction.pattern.as_deref(), Some("PAT1"));
   }
 
   #[test]
@@ -592,11 +592,11 @@ mod tests {
     // Pattern field contains semicolon (comment marker) - should be ignored
     let node = network.read_junction("J3  75.0  50.0  ;comment");
     
-    if let NodeType::Junction(junction) = &node.node_type {
-      assert!(junction.pattern.is_none());
-    } else {
+    let NodeType::Junction(junction) = &node.node_type else {
       panic!("Expected Junction node type");
-    }
+    };
+
+    assert!(junction.pattern.is_none());
   }
 
   #[test]
@@ -604,12 +604,13 @@ mod tests {
     let mut network = test_network(false);
     // Only ID and elevation provided - demand should default to 0.0
     let node = network.read_junction("J4  200.0");
-    
-    if let NodeType::Junction(junction) = &node.node_type {
-      assert_eq!(junction.basedemand, 0.0);
-    } else {
+
+    let NodeType::Junction(junction) = &node.node_type else {
       panic!("Expected Junction node type");
-    }
+    };
+
+    assert_eq!(junction.basedemand, 0.0);
+    
   }
 
   // ==================== Reservoir Tests ====================
@@ -622,11 +623,11 @@ mod tests {
     assert_eq!(&*node.id, "RES1");
     assert_eq!(node.elevation, 150.0);
     
-    if let NodeType::Reservoir(reservoir) = &node.node_type {
-      assert!(reservoir.head_pattern.is_none());
-    } else {
+    let NodeType::Reservoir(reservoir) = &node.node_type else {
       panic!("Expected Reservoir node type");
-    }
+    };
+
+    assert!(reservoir.head_pattern.is_none());
   }
 
   #[test]
@@ -634,11 +635,11 @@ mod tests {
     let mut network = test_network(false);
     let node = network.read_reservoir("RES2  200.0  HEADPAT");
     
-    if let NodeType::Reservoir(reservoir) = &node.node_type {
-      assert_eq!(reservoir.head_pattern.as_deref(), Some("HEADPAT"));
-    } else {
+    let NodeType::Reservoir(reservoir) = &node.node_type else {
       panic!("Expected Reservoir node type");
-    }
+    };
+
+    assert_eq!(reservoir.head_pattern.as_deref(), Some("HEADPAT"));
   }
 
   // ==================== Pipe Tests ====================
@@ -647,21 +648,21 @@ mod tests {
   fn test_read_pipe_basic() {
     let network = test_network(true);
 
-    let link = network.read_pipe("P1  N2  N1  1000.0  12.0  100.0  0.0  Open");
+    let link = network.read_pipe("P1  N2  N1  1000.0  12.0  100.0  0.0");
     
     assert_eq!(&*link.id, "P1");
     assert_eq!(link.start_node, 1);
     assert_eq!(link.end_node, 0);
     assert_eq!(link.initial_status, LinkStatus::Open);
     
-    if let LinkType::Pipe(pipe) = &link.link_type {
-      assert_eq!(pipe.length, 1000.0);
-      assert_eq!(pipe.diameter, 12.0);
-      assert_eq!(pipe.roughness, 100.0);
-      assert!(!pipe.check_valve);
-    } else {
+    let LinkType::Pipe(pipe) = &link.link_type else {
       panic!("Expected Pipe link type");
-    }
+    };
+
+    assert_eq!(pipe.length, 1000.0);
+    assert_eq!(pipe.diameter, 12.0);
+    assert_eq!(pipe.roughness, 100.0);
+    assert!(!pipe.check_valve);
   }
 
   #[test]
@@ -670,11 +671,11 @@ mod tests {
 
     let link = network.read_pipe("P2  N1  N2  500.0  8.0  120.0  0.0  CV");
     
-    if let LinkType::Pipe(pipe) = &link.link_type {
-      assert!(pipe.check_valve);
-    } else {
+    let LinkType::Pipe(pipe) = &link.link_type else {
       panic!("Expected Pipe link type");
-    }
+    };
+
+    assert!(pipe.check_valve);
   }
 
   #[test]
@@ -697,12 +698,12 @@ mod tests {
     assert_eq!(&*link.id, "PUMP1");
     assert_eq!(link.initial_status, LinkStatus::Open);
     
-    if let LinkType::Pump(pump) = &link.link_type {
-      assert_eq!(&*pump.head_curve, "CURVE1");
-      assert_eq!(pump.speed, 1.0); // default speed
-    } else {
+    let LinkType::Pump(pump) = &link.link_type else {
       panic!("Expected Pump link type");
-    }
+    };
+
+    assert_eq!(&*pump.head_curve, "CURVE1");
+    assert_eq!(pump.speed, 1.0); // default speed
   }
 
   #[test]
@@ -711,12 +712,12 @@ mod tests {
 
     let link = network.read_pump("PUMP2  N1  N2  HEAD C1  SPEED 1.5");
     
-    if let LinkType::Pump(pump) = &link.link_type {
-      assert_eq!(pump.speed, 1.5);
-      assert_eq!(&*pump.head_curve, "C1");
-    } else {
+    let LinkType::Pump(pump) = &link.link_type else {
       panic!("Expected Pump link type");
-    }
+    };
+
+    assert_eq!(pump.speed, 1.5);
+    assert_eq!(&*pump.head_curve, "C1");
   }
 
   // ==================== Curve Tests ====================
