@@ -1,16 +1,12 @@
 # EPANET-RS
 
-A very fast, modern and *safe* re-implementation of the EPANET2 hydraulic solver, written in Rust.
+An extremely fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust.
 
-## Features
+## Why?
 
-- **Global Gradient Algorithm** (Todini & Pilati, 1987) for hydraulic simulation
-- **Hazen-Williams** and **Darcy-Weisbach** headloss formulas
-- **Pump curves** with single-point curve support
-- **Demand patterns** for extended period simulation
-- **Parallel solving** for independent timesteps using Rayon
-- **Sparse matrix solver** using faer with symbolic Cholesky factorization
-- **INP file format** compatible with EPANET2
+The EPANET2 solver has been the industry standard for hydraulic network simulation for decades due to its robustness, numerical stability, and extensive validation. Its algorithms and results are widely trusted in both academic and industrial applications.
+The core EPANET2 codebase, however, is several decades old and written in C, making it difficult to maintain, extend, and optimize using modern software engineering practices. In addition, the original implementation predates modern CPU architectures and therefore does not fully exploit multi-core processors or SIMD (Single Instruction, Multiple Data) capabilities.
+`epanet-rs` is a modern reimplementation of the EPANET2 hydraulic solver written in Rust, designed to preserve the original algorithms and numerical behavior while enabling safer memory management, improved maintainability, and performance optimizations through multi-threading and SIMD acceleration.
 
 ## Usage
 
