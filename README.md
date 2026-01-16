@@ -19,6 +19,8 @@ Modern applications of the EPANET solver, such as monte-carlo simulations, leak 
 - **High Performance** through multi-threading, SIMD acceleration and a modern, [faer](https://crates.io/crates/faer) based sparse solver
 - **Parallelization** of the solver loop by rewriting the solver to return vectors of heads and flows instead of in-place assignment
 - **Memory Safety** through Rust's ownership and borrowing system
+- **Modern API** with a focus on ease of use and parallelization
+- **Backwards Compatibility** with EPANET2_3 network API methods
 
 ## Usage
 
