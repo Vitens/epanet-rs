@@ -1,5 +1,7 @@
 # EPANET-RS
 
+[![Rust](https://github.com/AbelHeinsbroek/epanet-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/AbelHeinsbroek/epanet-rs/actions/workflows/rust.yml)
+
 An extremely fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust.
 
 ## Background
