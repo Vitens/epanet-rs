@@ -83,7 +83,11 @@ cargo test --test solver_test
 
 ## License
 
-See [LICENSE](LICENSE) file.
+EPANET-RS is licensed under the MIT License.
+
+## Acknowledgments
+
+EPANET-RS is heavily inspired by [EPANET 2.3](https://github.com/OpenWaterAnalytics/EPANET) and implements the same hydraulic algorithms and models, with slight modifications to improve performance and memory safety. We acknowledge the original EPANET developers, the [OpenWaterAnalytics](https://github.com/OpenWaterAnalytics) team and the broader water distribution modeling community for their decades of work establishing these foundations.
 
 ## Author
 
