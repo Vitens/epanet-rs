@@ -35,6 +35,20 @@ enum ReadState {
 
 impl Network {
 
+  pub fn read_file(&mut self, file: &str) -> Result<(), String> {
+    let file_extension = file.split('.').last().unwrap();
+    if file_extension == "inp" {
+      self.read_inp(file).unwrap();
+    } else if file_extension == "json" {
+      self.read_json(file).unwrap();
+    } else if file_extension == "mpk" || file_extension == "msgpack" {
+      self.read_msgpack(file).unwrap();
+    } else {
+      return Err(format!("Unsupported file extension: {}", file_extension));
+    }
+    Ok(())
+  }
+
   pub fn read_msgpack(&mut self, msgpack: &str) -> Result<(), String> {
     let file = File::open(msgpack).or_else(|e| Err(format!("Failed to open file: {}: {}", msgpack, e)))?;
     let reader = BufReader::new(file);

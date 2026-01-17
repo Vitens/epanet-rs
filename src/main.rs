@@ -36,7 +36,7 @@ fn main() {
   println!("Loading network from file: {}", input_file);
 
   let mut network = Network::default();
-  network.read_inp(&input_file.as_str()).expect("Failed to load network");
+  network.read_file(&input_file.as_str()).expect("Failed to load network");
   let end_time = Instant::now();
   println!("Loaded network with {} nodes and {} links", network.nodes.len(), network.links.len());
   println!("Network loaded in {:?}", end_time.duration_since(start_time));
