@@ -8,12 +8,24 @@ use serde::{Deserialize, Serialize};
 #[derive(Deserialize, Serialize)]
 /// Link struct
 pub struct Link {
+  /// Link ID
   pub id: Box<str>,
+  /// Link type (pipe, pump, valve)
   pub link_type: LinkType,
+  /// Minor loss coefficient
   pub minor_loss: f64,
-  pub start_node: usize,
-  pub end_node: usize,
+  /// Start node ID
+  pub start_node_id: Box<str>,
+  /// End node ID
+  pub end_node_id: Box<str>,
+  /// Initial status (open, closed, active)
   pub initial_status: LinkStatus,
+
+  /// Cached start and end node indices to avoid looking up the node map every time
+  #[serde(skip)]
+  pub start_node: usize,
+  #[serde(skip)]
+  pub end_node: usize,
 }
 
 #[derive(Deserialize, Serialize)]

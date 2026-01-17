@@ -36,6 +36,7 @@ impl<'de> Deserialize<'de> for Network {
   where
     D: Deserializer<'de>,
   {
+    // Deserialize the network data
     #[derive(Deserialize)]
     struct NetworkData {
       options: SimulationOptions,
@@ -45,7 +46,7 @@ impl<'de> Deserialize<'de> for Network {
       patterns: HashMap<Box<str>, Pattern>,
     }
 
-    let data = NetworkData::deserialize(deserializer)?;
+    let mut data = NetworkData::deserialize(deserializer)?;
 
     // Build node_map from nodes
     let node_map: HashMap<Box<str>, usize> = data.nodes
@@ -60,6 +61,12 @@ impl<'de> Deserialize<'de> for Network {
       .enumerate()
       .map(|(i, l)| (l.id.clone(), i))
       .collect();
+
+    // Update link start and end node indices
+    for link in data.links.iter_mut() {
+      link.start_node = *node_map.get(&link.start_node_id).unwrap();
+      link.end_node = *node_map.get(&link.end_node_id).unwrap();
+    }
 
     Ok(Network {
       options: data.options,

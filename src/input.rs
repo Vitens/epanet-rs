@@ -243,6 +243,8 @@ impl Network {
       id,
       start_node: start_node_index,
       end_node: end_node_index,
+      start_node_id: start_node,
+      end_node_id: end_node,
       link_type: LinkType::Valve(Valve { diameter, setting, curve, valve_type }),
       initial_status: LinkStatus::Active,
       minor_loss: minor_loss,
@@ -290,6 +292,8 @@ impl Network {
       id,
       start_node: start_node_index,
       end_node: end_node_index,
+      start_node_id: start_node,
+      end_node_id: end_node,
       minor_loss: minor_loss,
       link_type: LinkType::Pipe(Pipe { diameter, length, roughness, minor_loss, check_valve, headloss_formula }),
       initial_status: status,
@@ -333,6 +337,8 @@ impl Network {
 
     Link {
       id,
+      start_node_id: start_node,
+      end_node_id: end_node,
       start_node: start_node_index,
       end_node: end_node_index,
       minor_loss: 0.0,
