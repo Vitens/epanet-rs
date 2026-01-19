@@ -132,20 +132,36 @@ impl HeadCurve {
   }
   // find intercept and slope of pump curve segment which contains speed adjusted flow 
   pub fn custom_curve_coefficients(&self, q: f64, speed: f64) -> (f64, f64) {
-    // find 
-    panic!("Custom head curve type not yet implemented");
+    // speed adjust the flow
+    let q_adjusted = q / speed;
+    // find the index of the curve segment that contains the speed adjusted flow
+    let x2 = self.curve.x.partition_point(|&x| x < q_adjusted).max(1);
+    let x1 = x2 - 1;
+
+    let y1 = self.curve.y[x1];
+    let y2 = self.curve.y[x2];
+
+    let r = (y2 - y1) / (self.curve.x[x2] - self.curve.x[x1]);
+    let h0 = y1 - r * self.curve.x[x1];
+
+    let hgrad = -r * speed;
+    let hloss = -h0 * speed.powi(2) + hgrad * q;
+
+    (hgrad, hloss)
   }
+
   // return hydraulic gradient and head loss
   pub fn curve_coefficients(&self, q: f64, speed: f64) -> (f64, f64) {
 
+    // for a custom curve, find the slope and intercept of the curve segment that contains the speed adjusted flow
     if self.curve_type == HeadCurveType::Custom {
       return self.custom_curve_coefficients(q, speed);
-
     }
     else {
-
       // for single point and three point with shutoff curves, use the same formula as EPANET
       // shutoff head is negative to represent head gain
+      // H = a - b * Q^n
+
       let h0 = speed.powi(2) * -self.statistics.h_shutoff;
       let mut n = self.statistics.n;
       if (self.statistics.n-1.0) < TINY { n = 1.0; }
