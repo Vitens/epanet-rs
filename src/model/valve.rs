@@ -82,13 +82,30 @@ impl LinkTrait for Valve {
 impl Valve {
   /// Compute the coefficients for pressure sustaining valve with a flow q and excess flow upstream
   fn psv_coefficients(&self, q: f64, excess_flow_upstream: f64) -> LinkCoefficients {
-    return LinkCoefficients::simple(1.0/SMALL_VALUE, q);
+
+    let set = self.setting;
+    let mut rhs_add = (set * BIG_VALUE);
+
+    if excess_flow_upstream > 0.0 {
+      rhs_add += excess_flow_upstream;
+    }
+
+    return LinkCoefficients {
+      g_inv: 0.0,
+      y: -excess_flow_upstream,
+      new_status: None,
+      upstream_modification: Some(NodeModification {
+        diagonal_add: BIG_VALUE,
+        rhs_add: rhs_add,
+      }),
+      downstream_modification: None,
+    }
   }
 
   /// Compute the coefficients for pressure reducing valve with a flow q and excess flow downstream
   fn prv_coefficients(&self, q: f64, excess_flow_downstream: f64) -> LinkCoefficients {
 
-    let set = 23.0789;
+    let set = self.setting;
 
     let mut rhs_add = (set * BIG_VALUE);
     if excess_flow_downstream < 0.0 {
