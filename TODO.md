@@ -10,17 +10,18 @@
 - [x] Implement unit conversion
 - [x] Implement pumps
 - [x] Single point curves
+- [x] Three point curves
+- [x] Custom curves
 - [x] Use serde for serializing to/from json and msgpack files
+- [x] Implement FCV, TCV, FCV, PBV
+- [ ] Implement GPV, FCV with Curve
+- [ ] Implement PRV and PSV valves
 - [ ] Unit conversion when serializing using Serde
-- [ ] Use strum-lite for enum parsing
 - [ ] Setup unit and integration testing
 - [ ] Get rid of all the Panics and Unwraps, use Result instead
-- [ ] Three point curves
-- [ ] Custom curves
 - [ ] Fixed power pumps
 - [ ] Unit conversion for curves
 - [ ] Coeff stability checks (pipe, valve, pump) (RQTol)
-- [ ] Implement Valves
 - [ ] Implement tank logic
 - [ ] Try to get the solver working for f32 in addition to f64 (SIMD speedup?)
 - [ ] Setup automated benchmarks
