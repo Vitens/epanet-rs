@@ -199,34 +199,34 @@ impl<'a> HydraulicSolver<'a> {
       for (i, link) in self.network.links.iter().enumerate() {
         let q = flows[i];
         let csc_index = &self.csc_indices[i];
-        let (g_inv, y, status) = link.coefficients(q, resistances[i], statuses[i]);
+        let coefficients = link.coefficients(q, resistances[i], statuses[i]);
 
-        g_invs[i] = g_inv;
-        ys[i] = y;
+        g_invs[i] = coefficients.g_inv;
+        ys[i] = coefficients.y;
         // update the status of the link
-        statuses[i] = status;
+        statuses[i] = coefficients.status;
 
         // Get the CSC indices for the start and end nodes
         let u = self.node_to_unknown[link.start_node];
         let v = self.node_to_unknown[link.end_node];
 
         if let Some(i) = u {
-            values[csc_index.diag_u.unwrap()] += g_inv;
-            rhs[i] -= q - y;
+            values[csc_index.diag_u.unwrap()] += coefficients.g_inv;
+            rhs[i] -= q - coefficients.y;
             if self.network.nodes[link.end_node].is_fixed() {
-              rhs[i] += g_inv * heads[link.end_node];
+              rhs[i] += coefficients.g_inv * heads[link.end_node];
             }
         }
         if let Some(j) = v {
-            values[csc_index.diag_v.unwrap()] += g_inv;
-            rhs[j] += q - y;
+            values[csc_index.diag_v.unwrap()] += coefficients.g_inv;
+            rhs[j] += q - coefficients.y;
             if self.network.nodes[link.start_node].is_fixed() {
-              rhs[j] += g_inv * heads[link.start_node];
+              rhs[j] += coefficients.g_inv * heads[link.start_node];
             }
         }
         if let (Some(_i), Some(_j)) = (u, v) {
-            values[csc_index.off_diag_uv.unwrap()] -= g_inv;
-            values[csc_index.off_diag_vu.unwrap()] -= g_inv;
+            values[csc_index.off_diag_uv.unwrap()] -= coefficients.g_inv;
+            values[csc_index.off_diag_vu.unwrap()] -= coefficients.g_inv;
         }
       }
 

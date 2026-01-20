@@ -1,4 +1,4 @@
-use crate::model::link::{LinkTrait, LinkStatus};
+use crate::model::link::{LinkTrait, LinkStatus, LinkCoefficients};
 use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
 use crate::constants::*;
 use serde::{Deserialize, Serialize};
@@ -25,39 +25,39 @@ pub struct Valve {
 
 
 impl LinkTrait for Valve {
-  fn coefficients(&self, q: f64, _resistance: f64, status: LinkStatus) -> (f64, f64, LinkStatus) {
+  fn coefficients(&self, q: f64, _resistance: f64, status: LinkStatus) -> LinkCoefficients {
     if status == LinkStatus::Closed {
-      return (1.0/BIG_VALUE, q, status);
+      return LinkCoefficients::simple(1.0/BIG_VALUE, q, status);
     }
     match self.valve_type {
       ValveType::TCV => {
         // Minor loss coefficient is the setting of the valve
         let km = 0.02517 * self.setting / self.diameter.powi(4);
         let (g_inv, y) = self.valve_coefficients(q, km);
-        return (g_inv, y, status);
+        return LinkCoefficients::simple(g_inv, y, status);
       }
       // Positional Control Valve (PCV)
       ValveType::PCV => {
         let km = self.pcv_minor_loss();
         let (g_inv, y) = self.valve_coefficients(q, km);
-        return (g_inv, y, status);
+        return LinkCoefficients::simple(g_inv, y, status);
       }
       // Flow Control Valve (FCV)
       ValveType::FCV => {
         let (g_inv, y) = self.valve_coefficients(q, SMALL_VALUE);
         // if flow is less than the setting, treat as a regular valve (no flow control/restrictions)
         if q < self.setting {
-          return (g_inv, y, status);
+          return LinkCoefficients::simple(g_inv, y, status);
         }
         else {
           let hloss = y / g_inv + BIG_VALUE * (q - self.setting);
           let hgrad = BIG_VALUE;
-          return (1.0 / hgrad, hloss / hgrad, status);
+          return LinkCoefficients::simple(1.0 / hgrad, hloss / hgrad, status);
         }
       }
       // Pressure Reducing Valve (PRV)
       _ => {
-        return (1.0/SMALL_VALUE, q, status);
+        return LinkCoefficients::simple(1.0/SMALL_VALUE, q, status);
       }
     }
   }

@@ -59,16 +59,38 @@ impl LinkStatus {
     }
   }
 }
+pub struct NodeModification {
+  pub diagonal_add: f64,
+  pub rhs_add: f64
+}
+
+pub struct LinkCoefficients {
+  pub g_inv: f64,
+  pub y: f64,
+  /// New status of the link
+  pub status: LinkStatus,
+  /// Optional modification to upstream node (for PSV valves)
+  pub upstream_modification: Option<NodeModification>,
+  /// Optional modification to downstream node (for PSV valves)
+  pub downstream_modification: Option<NodeModification>,
+}
+
+impl LinkCoefficients {
+  /// Create a simple link coefficients struct with no matrix modifications (all links except PRV/PSV valves)
+  pub fn simple(g_inv: f64, y: f64, status: LinkStatus) -> Self {
+    Self { g_inv, y, status, upstream_modification: None, downstream_modification: None }
+  }
+}
 
 pub trait LinkTrait {
   /// Calculate the 1/G_ij and Y_ij coefficients for the link
-  fn coefficients(&self, q: f64, resistance: f64, status: LinkStatus) -> (f64, f64, LinkStatus);
+  fn coefficients(&self, q: f64, resistance: f64, status: LinkStatus) -> LinkCoefficients;
   /// Calculate the resistance of the link
   fn resistance(&self) -> f64;
 }
 
 impl LinkTrait for Link {
-  fn coefficients(&self, q: f64, resistance: f64, status: LinkStatus) -> (f64, f64, LinkStatus) {
+  fn coefficients(&self, q: f64, resistance: f64, status: LinkStatus) -> LinkCoefficients {
     match &self.link_type {
       LinkType::Pipe(pipe) => pipe.coefficients(q, resistance, status),
       LinkType::Pump(pump) => pump.coefficients(q, resistance, status),

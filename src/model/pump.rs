@@ -1,4 +1,4 @@
-use crate::model::link::{LinkTrait, LinkStatus};
+use crate::model::link::{LinkTrait, LinkStatus, LinkCoefficients};
 use crate::model::curve::{HeadCurve};
 use crate::constants::*;
 use serde::{Deserialize, Serialize};
@@ -17,11 +17,11 @@ pub struct Pump {
 }
 
 impl LinkTrait for Pump {
-  fn coefficients(&self, q: f64, _resistance: f64, status: LinkStatus) -> (f64, f64, LinkStatus) {
+  fn coefficients(&self, q: f64, _resistance: f64, status: LinkStatus) -> LinkCoefficients {
 
     // for closed pumps, stalled pumps, or pumps with speed, act as closed pipe
     if status == LinkStatus::Closed || status == LinkStatus::Xhead || self.speed == 0.0 {
-      return (1.0 / BIG_VALUE, q, status);
+      return LinkCoefficients::simple(1.0 / BIG_VALUE, q, status);
     }
 
     let curve = self.head_curve.as_ref().unwrap();
@@ -30,18 +30,18 @@ impl LinkTrait for Pump {
     if q < 0.0 {
       let hloss = -(self.speed.powi(2) * curve.statistics.h_max) + BIG_VALUE * q;
       let hgrad = BIG_VALUE;
-      return (1.0/hgrad, hloss/hgrad, LinkStatus::Xhead);
+      return LinkCoefficients::simple(1.0/hgrad, hloss/hgrad, LinkStatus::Xhead);
     }
     // if no pump curve, treat pump as open valve
     if self.head_curve.is_none() {
-      return (1.0 / SMALL_VALUE, q, status);
+      return LinkCoefficients::simple(1.0 / SMALL_VALUE, q, status);
     }
 
     let q_abs = q.abs();
     // get the curve coefficients
     let (hgrad, hloss) = curve.curve_coefficients(q_abs, self.speed);
 
-    (1.0 / hgrad, hloss/hgrad, status)
+    LinkCoefficients::simple(1.0 / hgrad, hloss/hgrad, status)
   }
   fn resistance(&self) -> f64 {
     BIG_VALUE
