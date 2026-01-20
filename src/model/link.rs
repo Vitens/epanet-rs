@@ -12,8 +12,6 @@ pub struct Link {
   pub id: Box<str>,
   /// Link type (pipe, pump, valve)
   pub link_type: LinkType,
-  /// Minor loss coefficient
-  pub minor_loss: f64,
   /// Start node ID
   pub start_node_id: Box<str>,
   /// End node ID

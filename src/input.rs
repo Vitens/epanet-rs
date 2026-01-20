@@ -236,6 +236,8 @@ impl Network {
     let setting = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
     // read the minor loss
     let minor_loss = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
+    // convert minor loss to minor loss coefficient
+    // let minor_loss = 0.02517 * minor_loss / diameter.powi(2) / diameter.powi(2);
 
     // read the curve ID (optional, default none)
     let curve: Option<Box<str>> = parts.next().map(|s| s.to_string().into_boxed_str());
@@ -249,9 +251,8 @@ impl Network {
       end_node: end_node_index,
       start_node_id: start_node,
       end_node_id: end_node,
-      link_type: LinkType::Valve(Valve { diameter, setting, curve, valve_type }),
+      link_type: LinkType::Valve(Valve { diameter, setting, curve, valve_type, minor_loss }),
       initial_status: LinkStatus::Active,
-      minor_loss: minor_loss,
     }
   }
 
@@ -273,8 +274,6 @@ impl Network {
 
     // create the link
     let minor_loss = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
-    // convert minor los
-    let minor_loss = 0.02517 * minor_loss / diameter.powi(2) / diameter.powi(2);
     // check if the pipe has a status
     let mut status = LinkStatus::Open;
     let mut check_valve = false;
@@ -298,7 +297,6 @@ impl Network {
       end_node: end_node_index,
       start_node_id: start_node,
       end_node_id: end_node,
-      minor_loss: minor_loss,
       link_type: LinkType::Pipe(Pipe { diameter, length, roughness, minor_loss, check_valve, headloss_formula }),
       initial_status: status,
     }
@@ -345,7 +343,6 @@ impl Network {
       end_node_id: end_node,
       start_node: start_node_index,
       end_node: end_node_index,
-      minor_loss: 0.0,
       link_type: LinkType::Pump(Pump { speed, head_curve_id, power, head_curve: None }),
       initial_status: LinkStatus::Open,
     }
@@ -636,6 +633,23 @@ mod tests {
 
     assert_eq!(junction.basedemand, 0.0);
     
+  }
+  // ==================== Valve Tests ====================
+
+  #[test]
+  fn test_read_valve_basic() {
+    let mut network = test_network(true);
+    let valve = network.read_valve("V1  N1  N2 12.0 PRV 50.0  100.0");
+    
+    assert_eq!(&*valve.id, "V1");
+    let LinkType::Valve(valve) = &valve.link_type else {
+      panic!("Expected Valve link type");
+    };
+
+    assert_eq!(valve.valve_type, ValveType::PRV);
+    assert_eq!(valve.diameter, 12.0);
+    assert_eq!(valve.setting, 50.0);
+    assert_eq!(valve.minor_loss, 100.0);
   }
 
   // ==================== Reservoir Tests ====================

@@ -368,16 +368,15 @@ impl<'a> HydraulicSolver<'a> {
   fn get_initial_flows(&self) -> Vec<f64> {
     self.network.links.iter().map(|l| {
       if let LinkType::Pipe(pipe) = &l.link_type {
-        let area = 0.25 * std::f64::consts::PI * pipe.diameter.powi(2);
-        let velocity = 1.0;
-        let flow = area * velocity;
-        return flow;
+        return 0.25 * std::f64::consts::PI * pipe.diameter.powi(2);
       } else if let LinkType::Pump(pump) = &l.link_type {
         if let Some(head_curve) = &pump.head_curve {
           return head_curve.statistics.q_initial;
         } else {
           return 0.0;
         }
+      } else if let LinkType::Valve(valve) = &l.link_type {
+        return 0.25 * std::f64::consts::PI * valve.diameter.powi(2);
       } else {
         return 0.0;
       }

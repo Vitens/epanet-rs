@@ -7,6 +7,9 @@ pub const TINY: f64 = 1e-6;
 pub const VISCOSITY: f64 = 1.1e-5;
 pub const PI : f64 = std::f64::consts::PI;
 
+// Tolerance for head loss gradient
+pub const RQ_TOL: f64 = 1e-7;
+
 // allow non uppercase consts
 // Conversion factors for US flow units
 pub const GPMperCFS: f64 =  448.831;

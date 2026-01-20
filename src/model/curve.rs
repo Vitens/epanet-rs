@@ -38,6 +38,10 @@ impl HeadCurve {
     // precompute the curve statistics
     let statistics = Self::compute_curve_statistics(&curve);
 
+    if !Self::validate_curve(&curve) {
+      panic!("Invalid head curve: Head is not decreasing or flow is not increasing monotonically");
+    }
+
     let curve_type = match (curve.x.len(), curve.x[0] == 0.0) {
       (1, _) => HeadCurveType::SinglePoint,
       (3, true) => HeadCurveType::ThreePointWithShutoff,
@@ -110,12 +114,6 @@ impl HeadCurve {
     }
     else {
       // return head curve statistics for a custom curve
-      // check if self.y (HEAD) is continously decreasing and self.x (FLOW) is increasing
-      for i in 1..curve.y.len() {
-        if curve.x[i] <= curve.x[i-1] || curve.y[i] >= curve.y[i-1] {
-          panic!("Invalid head curve: Head is not decreasing or flow is not increasing");
-        }
-      }
       let q_max = curve.x[curve.x.len()-1];
       let q_initial = (curve.x[0] + q_max) / 2.0;
       let h_max = curve.y[0];
@@ -130,12 +128,22 @@ impl HeadCurve {
       }
     }
   }
-  // find intercept and slope of pump curve segment which contains speed adjusted flow 
+  /// Validate the curve to ensure the head is decreasing and the flow is increasing monotonically
+  pub fn validate_curve(curve: &Curve) -> bool {
+    for i in 1..curve.y.len() {
+      if curve.x[i] <= curve.x[i-1] || curve.y[i] >= curve.y[i-1] {
+        return false;
+      }
+    }
+    true
+  }
+  /// Find intercept and slope of custom pump curve segment which contains speed adjusted flow 
   pub fn custom_curve_coefficients(&self, q: f64, speed: f64) -> (f64, f64) {
     // speed adjust the flow
     let q_adjusted = q / speed;
     // find the index of the curve segment that contains the speed adjusted flow
-    let x2 = self.curve.x.partition_point(|&x| x < q_adjusted).max(1);
+    // clamp the index to the valid range
+    let x2 = self.curve.x.partition_point(|&x| x < q_adjusted).max(1).min(self.curve.x.len()-1);
     let x1 = x2 - 1;
 
     let y1 = self.curve.y[x1];
@@ -147,6 +155,7 @@ impl HeadCurve {
     let hgrad = -r * speed;
     let hloss = -h0 * speed.powi(2) + hgrad * q;
 
+    // return the gradient and head loss
     (hgrad, hloss)
   }
 
@@ -161,7 +170,6 @@ impl HeadCurve {
       // for single point and three point with shutoff curves, use the same formula as EPANET
       // shutoff head is negative to represent head gain
       // H = a - b * Q^n
-
       let h0 = speed.powi(2) * -self.statistics.h_shutoff;
       let mut n = self.statistics.n;
       if (self.statistics.n-1.0) < TINY { n = 1.0; }

@@ -3,36 +3,21 @@
 
 [JUNCTIONS]
 ;ID              	Elev        	Demand      	Pattern         
- 1               	0           	1           	                	;
- 2               	0           	2           	                	;
- 3               	0           	1           	                	;
- 4               	0           	2           	                	;
- 5               	0           	1           	                	;
- 6               	0           	2           	                	;
- 7               	0           	1           	                	;
 
 [RESERVOIRS]
 ;ID              	Head        	Pattern         
- FH              	100         	                	;
- FH2             	85          	                	;
+ 1               	0           	                	;
+ 2               	10          	                	;
 
 [TANKS]
 ;ID              	Elevation   	InitLevel   	MinLevel    	MaxLevel    	Diameter    	MinVol      	VolCurve        	Overflow
 
 [PIPES]
 ;ID              	Node1           	Node2           	Length      	Diameter    	Roughness   	MinorLoss   	Status
- B               	1               	3               	100         	12          	100         	0           	Open  	;
- C               	1               	2               	100         	12          	100         	0           	Open  	;
- D               	2               	4               	100         	12          	100         	0           	Open  	;
- E               	3               	4               	100         	12          	100         	0           	Open  	;
- F               	4               	5               	100         	12          	100         	0           	Open  	;
- G               	4               	6               	100         	12          	100         	0           	Open  	;
- H               	6               	7               	100         	12          	100         	0           	Open  	;
- I               	FH2             	7               	100         	12          	100         	0           	Open  	;
 
 [PUMPS]
 ;ID              	Node1           	Node2           	Parameters
- 1               	FH              	1               	HEAD P1	SPEED 1	;
+ 1               	1               	2               	HEAD P1	;
 
 [VALVES]
 ;ID              	Node1           	Node2           	Diameter    	Type	Setting     	MinorLoss   
@@ -44,23 +29,21 @@
 
 [STATUS]
 ;ID              	Status/Setting
- 1               	Closed
 
 [PATTERNS]
 ;ID              	Multipliers
 
 [CURVES]
 ;ID              	X-Value     	Y-Value
-;PUMP: PUMP: 
- P1              	50          	50          
+;PUMP: 
+ P1              	10          	40          
+ P1              	20          	25          
+ P1              	30          	3           
+ P1              	35          	0           
 
 [CONTROLS]
 
-
-
 [RULES]
-
-
 
 [ENERGY]
  Global Efficiency  	75
@@ -93,15 +76,15 @@
 ;Tank            	Model
 
 [TIMES]
- Duration           	0:00 
- Hydraulic Timestep 	1:00 
- Quality Timestep   	0:05 
- Pattern Timestep   	1:00 
- Pattern Start      	0:00 
- Report Timestep    	1:00 
- Report Start       	0:00 
+ Duration           	0
+ Hydraulic Timestep 	1:00
+ Quality Timestep   	0:05
+ Pattern Timestep   	1:00
+ Pattern Start      	0:00
+ Report Timestep    	1:00
+ Report Start       	0:00
  Start ClockTime    	12 am
- Statistic          	NONE
+ Statistic          	None
 
 [REPORT]
  Status             	No
@@ -110,7 +93,7 @@
 
 [OPTIONS]
  Units              	CFS
- Headloss           	H-W
+ Headloss           	D-W
  Specific Gravity   	1
  Viscosity          	1
  Trials             	40
@@ -128,15 +111,8 @@
 
 [COORDINATES]
 ;Node            	X-Coord           	Y-Coord
-1               	180.525           	6466.083          
-2               	1821.663          	6422.319          
-3               	202.407           	4835.886          
-4               	1788.840          	4879.650          
-5               	1810.722          	3358.862          
-6               	3320.569          	4901.532          
-7               	4907.002          	4890.591          
-FH              	-1099.562         	6466.083          
-FH2             	5333.698          	5448.578          
+1               	1460.613          	5842.451          
+2               	4130.197          	5919.037          
 
 [VERTICES]
 ;Link            	X-Coord           	Y-Coord
