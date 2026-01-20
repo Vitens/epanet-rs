@@ -271,6 +271,8 @@ impl<'a> HydraulicSolver<'a> {
       // update the flows of the links (Equation 12.12)
       let mut sum_dq = 0.0;
       let mut sum_q  = 0.0;
+      let mut status_changed = false;
+
 
       for (i, link) in self.network.links.iter().enumerate() {
           // calculate the head difference between the start and end nodes
@@ -285,7 +287,15 @@ impl<'a> HydraulicSolver<'a> {
 
           // update the flow of the link
           flows[i] -= dq;
-          
+          // update the status
+
+          let new_status = link.update_status(statuses[i], flows[i], heads[link.start_node], heads[link.end_node]);
+          if let Some(status) = new_status {
+            statuses[i] = status;
+            status_changed = true;
+          }
+
+
           // update the sum of the absolute changes in flow and the sum of the absolute flows
           sum_dq += dq.abs();
           sum_q  += flows[i].abs();
@@ -293,7 +303,7 @@ impl<'a> HydraulicSolver<'a> {
 
       let rel_change = sum_dq / (sum_q + 1e-6);
 
-      if rel_change < self.network.options.accuracy {
+      if rel_change < self.network.options.accuracy && !status_changed {
 
 
         if verbose {

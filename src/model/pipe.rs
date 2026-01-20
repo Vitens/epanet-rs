@@ -84,6 +84,10 @@ impl LinkTrait for Pipe {
       }
     }
   }
+
+  fn update_status(&self, _: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
+    None
+  }
 }
 
 impl Pipe {

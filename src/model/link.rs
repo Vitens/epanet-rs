@@ -90,6 +90,8 @@ pub trait LinkTrait {
   fn coefficients(&self, q: f64, resistance: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients;
   /// Calculate the resistance of the link
   fn resistance(&self) -> f64;
+  /// Update the status of the link
+  fn update_status(&self, status: LinkStatus, flow: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus>;
 }
 
 impl LinkTrait for Link {
@@ -107,7 +109,15 @@ impl LinkTrait for Link {
       LinkType::Valve(valve) => valve.resistance(),
     }
   }
+  fn update_status(&self, status: LinkStatus, flow: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
+    match &self.link_type {
+      LinkType::Pipe(pipe) => pipe.update_status(status, flow, head_upstream, head_downstream),
+      LinkType::Pump(pump) => pump.update_status(status, flow, head_upstream, head_downstream),
+      LinkType::Valve(valve) => valve.update_status(status, flow, head_upstream, head_downstream),
+    }
+  }
 }
+
 
 impl UnitConversion for Link {
   fn convert_units(&mut self, flow: &FlowUnits, system: &UnitSystem, reverse: bool) {

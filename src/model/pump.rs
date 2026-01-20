@@ -46,4 +46,8 @@ impl LinkTrait for Pump {
   fn resistance(&self) -> f64 {
     BIG_VALUE
   }
+
+  fn update_status(&self, _: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
+    None
+  }
 }

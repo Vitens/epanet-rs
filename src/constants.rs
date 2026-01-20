@@ -9,6 +9,9 @@ pub const PI : f64 = std::f64::consts::PI;
 
 // Tolerance for head loss gradient
 pub const RQ_TOL: f64 = 1e-7;
+// Tolerance for flow difference
+pub const Q_TOL : f64 = 0.0001;
+pub const H_TOL : f64 = 0.0005;
 
 // allow non uppercase consts
 // Conversion factors for US flow units

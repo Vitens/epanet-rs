@@ -77,14 +77,48 @@ impl LinkTrait for Valve {
     SMALL_VALUE
   }
 
+  fn update_status(&self, status: LinkStatus, q: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
+    match self.valve_type {
+      ValveType::PRV => {
+        self.prv_status(status, q, head_upstream, head_downstream)
+
+      }
+      _ => None,
+    }
+  }
+
 
 }
 impl Valve {
+  fn prv_status(&self, status: LinkStatus, q: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
+    match status {
+      LinkStatus::Active => {
+        if q < -Q_TOL { Some(LinkStatus::Closed) }
+        else if head_upstream < self.setting - H_TOL { Some(LinkStatus::Open) }
+        else { None } // no status change
+      }
+      LinkStatus::Open => {
+        if q < -Q_TOL { Some(LinkStatus::Closed) }
+        else if head_downstream > self.setting + H_TOL { Some (LinkStatus::Active)}
+        else { None } // no status change
+      }
+      LinkStatus::Closed => {
+        if head_upstream >= self.setting + H_TOL && head_downstream < self.setting - H_TOL {
+          Some(LinkStatus::Active)
+        } else if head_upstream < self.setting - H_TOL && head_upstream > head_downstream + H_TOL {
+          Some(LinkStatus::Open)
+        } else {
+          None
+        }
+      }
+      _ => None
+    }
+
+  }
   /// Compute the coefficients for pressure sustaining valve with a flow q and excess flow upstream
   fn psv_coefficients(&self, q: f64, excess_flow_upstream: f64) -> LinkCoefficients {
 
-    let set = self.setting;
-    let mut rhs_add = (set * BIG_VALUE);
+    let mut rhs_add = self.setting * BIG_VALUE;
 
     if excess_flow_upstream > 0.0 {
       rhs_add += excess_flow_upstream;
