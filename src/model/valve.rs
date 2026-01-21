@@ -234,6 +234,7 @@ impl Valve {
     let ratio = if self.valve_curve.is_some() {
       // Use the valve curve to compute the ratio
       let curve = self.valve_curve.as_ref().unwrap();
+      // get intercept and slope of the curve at the setting
       let (h0, r) = curve.coefficients(self.setting);
       let ratio = h0 + r * self.setting;
       ratio / 100.0

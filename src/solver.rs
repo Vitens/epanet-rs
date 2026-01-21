@@ -93,11 +93,14 @@ impl<'a> HydraulicSolver<'a> {
     // set the initial heads
     let mut initial_heads: Vec<f64> = self.get_initial_heads();
 
+    // set the initial statuses
+    let mut initial_statuses: Vec<LinkStatus> = self.get_initial_status();
+
     // run the solver in parallel using Rayon if enabled
     if parallel {
 
       // solve the first step to use as initial values for the next, parallel computed steps
-      let (flow, head) = self.solve(&initial_flows, &initial_heads, 0, verbose).unwrap();
+      let (flow, head, statuses) = self.solve(&initial_flows, &initial_heads, &initial_statuses, 0, verbose).unwrap();
 
       // store the results
       flows[0] = flow.clone();
@@ -106,12 +109,13 @@ impl<'a> HydraulicSolver<'a> {
       // update the initial flows and heads for the next step
       initial_flows = flow;
       initial_heads = head;
+      initial_statuses = statuses.clone();
 
       // do parallel solves using Rayon
-      let results: Vec<(Vec<f64>, Vec<f64>)> = (1..steps).into_par_iter().map(|step| {
-        self.solve(&initial_flows, &initial_heads, step, verbose).unwrap()
+      let results: Vec<(Vec<f64>, Vec<f64>, _)> = (1..steps).into_par_iter().map(|step| {
+        self.solve(&initial_flows, &initial_heads, &initial_statuses, step, verbose).unwrap()
       }).collect();
-      for (step, (flow, head)) in results.iter().enumerate() {
+      for (step, (flow, head, _)) in results.iter().enumerate() {
         flows[step+1] = flow.clone();
         heads[step+1] = head.clone();
       }
@@ -119,11 +123,12 @@ impl<'a> HydraulicSolver<'a> {
     } else {
       // do sequential solves
       for step in 0..steps {
-        let (flow, head) = self.solve(&initial_flows, &initial_heads, step, verbose).unwrap();
+        let (flow, head, statuses) = self.solve(&initial_flows, &initial_heads, &initial_statuses, step, verbose).unwrap();
         flows[step] = flow.clone();
         heads[step] = head.clone();
         initial_flows = flow;
         initial_heads = head;
+        initial_statuses = statuses.clone();
       }
     }
     let mut result = SolverResult { flows, heads };
@@ -134,7 +139,7 @@ impl<'a> HydraulicSolver<'a> {
 
   /// Solve the network using the Global Gradient Algorithm (Todini & Pilati, 1987) for a single step
   /// Returns the flows and heads
-  fn solve(&self, initial_flows: &Vec<f64>, initial_heads: &Vec<f64>, step: usize, verbose: bool) -> Result<(Vec<f64>, Vec<f64>), String> {
+  fn solve(&self, initial_flows: &Vec<f64>, initial_heads: &Vec<f64>, initial_statuses: &Vec<LinkStatus>, step: usize, verbose: bool) -> Result<(Vec<f64>, Vec<f64>, Vec<LinkStatus>), String> {
 
     let time_options = &self.network.options.time_options;
     let mut flows = initial_flows.clone();
@@ -160,7 +165,7 @@ impl<'a> HydraulicSolver<'a> {
     // gather demands
     let demands: Vec<f64> = self.get_demands(pattern_index);
     // gather link initial statuses
-    let mut statuses: Vec<LinkStatus> = self.get_initial_status();
+    let mut statuses: Vec<LinkStatus> = initial_statuses.clone();
 
     // calculate the resistances of the links
     let resistances: Vec<f64> = self.network.links.iter().map(|l| l.resistance()).collect::<Vec<f64>>();
@@ -333,7 +338,7 @@ impl<'a> HydraulicSolver<'a> {
           println!("Converged in {} iterations: Error = {:.4}, Supply = {:.4}, Demand = {:.4}", iteration, flow_balance.error, flow_balance.total_supply, flow_balance.total_demand);
         }
 
-        return Ok((flows, heads));
+        return Ok((flows, heads, statuses));
       }
     }
     Err(format!("Maximum number of iterations reached: {}", self.network.options.max_trials))
