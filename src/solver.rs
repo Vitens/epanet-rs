@@ -203,8 +203,6 @@ impl<'a> HydraulicSolver<'a> {
         excess_flows[link.end_node] += q;
       }
 
-      // clone the symbolic LLT to avoid borrowing issues
-      let symbolic_llt = self.symbolic_llt.clone();
 
       // assemble Jacobian and RHS contributions from links
       for (i, link) in self.network.links.iter().enumerate() {
@@ -256,12 +254,12 @@ impl<'a> HydraulicSolver<'a> {
 
       // solve the system of equations: J * dh = rhs
       jac.val_mut().copy_from_slice(&values);
-      
+
+
       // Perform numerical factorization using pre-computed symbolic factorization
-      let llt = Llt::try_new_with_symbolic(symbolic_llt, jac.as_ref(), Side::Lower)
+      let llt = Llt::try_new_with_symbolic(self.symbolic_llt.clone(), jac.as_ref(), Side::Lower)
         .expect("Singular matrix – check connectivity");
 
-      
       let dh = llt.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
 
       // update the heads of the nodes
