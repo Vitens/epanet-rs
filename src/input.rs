@@ -153,8 +153,12 @@ impl Network {
     }
     // convert units
     self.convert_units();
+    self.update_links();
+    Ok(())
+  }
 
-    // update pump statistics (TODO: move to separate method)
+  fn update_links(&mut self) {
+    // update link specific statistics (TODO: move to separate method)
     for link in self.links.iter_mut() {
       if let LinkType::Pump(pump) = &mut link.link_type {
         // get the head c
@@ -162,10 +166,17 @@ impl Network {
         // assign the head curve to the pump
         pump.head_curve = Some(HeadCurve::new(Arc::new(curve.clone())));
       }
+      if let LinkType::Valve(valve) = &mut link.link_type {
+        // if the valve is a PSV, add the elevation of the start node to the setting
+        if valve.valve_type == ValveType::PSV {
+          valve.setting += self.nodes[link.start_node].elevation;
+        }
+        // if the valve is a PRV, subtract the elevation of the end node from the setting
+        if valve.valve_type == ValveType::PRV {
+          valve.setting -= self.nodes[link.end_node].elevation;
+        }
+      }
     }
-
-    Ok(())
-
   }
 
   /// convert units
@@ -236,8 +247,6 @@ impl Network {
     let setting = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
     // read the minor loss
     let minor_loss = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
-    // convert minor loss to minor loss coefficient
-    // let minor_loss = 0.02517 * minor_loss / diameter.powi(2) / diameter.powi(2);
 
     // read the curve ID (optional, default none)
     let curve: Option<Box<str>> = parts.next().map(|s| s.to_string().into_boxed_str());

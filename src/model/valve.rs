@@ -30,11 +30,16 @@ impl LinkTrait for Valve {
       return LinkCoefficients::simple(1.0/BIG_VALUE, q);
     }
     match self.valve_type {
+      // Throttle Control Valve (TCV)
       ValveType::TCV => {
         // Minor loss coefficient is the setting of the valve
         let km = 0.02517 * self.setting / self.diameter.powi(4);
         let (g_inv, y) = self.valve_coefficients(q, km);
         return LinkCoefficients::simple(g_inv, y);
+      }
+      // Pressure Breaking Valve (PBV)
+      ValveType::PBV => {
+        return LinkCoefficients::simple(BIG_VALUE, self.setting * BIG_VALUE);
       }
       // Positional Control Valve (PCV)
       ValveType::PCV => {
@@ -238,7 +243,7 @@ impl Valve {
 }
 
 impl UnitConversion for Valve {
-  fn convert_units(&mut self, _flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
+  fn convert_units(&mut self, flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
     if system == &UnitSystem::SI {
       if reverse {
         self.diameter = self.diameter * MperFT * 1e3; // convert in to mm
@@ -247,7 +252,20 @@ impl UnitConversion for Valve {
         self.diameter = self.diameter / 1e3 / MperFT; // convert mm to in
       }
     } else {
+
       self.diameter = self.diameter / 12.0; // convert in to ft
+
+      if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV || self.valve_type == ValveType::PBV {
+        self.setting = self.setting / PSIperFT; // convert PSI to feet
+      }
     }
+
+    // for FCV, convert the setting to CFS
+    if self.valve_type == ValveType::FCV {
+      self.setting = self.setting * flow.per_cfs();
+    }
+
+
+
   }
 }

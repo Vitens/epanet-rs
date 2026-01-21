@@ -23,6 +23,6 @@
 - [ ] Unit conversion for curves
 - [ ] Coeff stability checks (pipe, valve, pump) (RQTol)
 - [ ] Implement tank logic
-- [ ] Try to get the solver working for f32 in addition to f64 (SIMD speedup?)
+- [ ] Try to get the solver working for f64 in addition to Flt (SIMD speedup?)
 - [ ] Setup automated benchmarks
 - [ ] Create EPANET2_3 API compatibility layer

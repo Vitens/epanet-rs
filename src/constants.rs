@@ -38,4 +38,4 @@ pub const MperFT : f64    =  0.3048;
 // Conversion factors for pressure units
 pub const BARperFT : f64 =  0.02953;
 pub const KPAperFT : f64 =  2.988;
-pub const PSIperFT : f64 =  0.43353;
+pub const PSIperFT : f64 =  0.4333;
