@@ -9,6 +9,22 @@ pub struct Curve {
   pub y: Vec<f64>,
 }
 
+impl Curve {
+  // Compute the intercept and slope of the curve at a given flow rate
+  pub fn coefficients(&self, q: f64) -> (f64, f64) {
+    // find the index of the curve segment that contains the flow
+    // clamp the index to the valid range
+    let x2 = self.x.partition_point(|&x| x < q).max(1).min(self.x.len()-1);
+    let x1 = x2 - 1;
+    let y1 = self.y[x1];
+    let y2 = self.y[x2];
+    let r = (y2 - y1) / (self.x[x2] - self.x[x1]);
+    let h0 = y1 - r * self.x[x1];
+    (h0, r)
+  }
+}
+
+
 #[derive(Debug, Clone)]
 pub struct HeadCurve {
   pub curve: Arc<Curve>,
@@ -141,16 +157,8 @@ impl HeadCurve {
   pub fn custom_curve_coefficients(&self, q: f64, speed: f64) -> (f64, f64) {
     // speed adjust the flow
     let q_adjusted = q / speed;
-    // find the index of the curve segment that contains the speed adjusted flow
-    // clamp the index to the valid range
-    let x2 = self.curve.x.partition_point(|&x| x < q_adjusted).max(1).min(self.curve.x.len()-1);
-    let x1 = x2 - 1;
-
-    let y1 = self.curve.y[x1];
-    let y2 = self.curve.y[x2];
-
-    let r = (y2 - y1) / (self.curve.x[x2] - self.curve.x[x1]);
-    let h0 = y1 - r * self.curve.x[x1];
+    // compute the coefficients of the curve segment that contains the speed adjusted flow
+    let (h0, r) = self.curve.coefficients(q_adjusted);
 
     let mut hgrad = -r * speed;
     let mut hloss = -h0 * speed.powi(2) + hgrad * q;

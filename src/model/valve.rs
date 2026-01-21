@@ -1,7 +1,9 @@
 use crate::model::link::{LinkTrait, LinkStatus, LinkCoefficients, NodeModification};
+use crate::model::curve::Curve;
 use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
 use crate::constants::*;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub enum ValveType {
@@ -18,17 +20,22 @@ pub enum ValveType {
 pub struct Valve {
   pub diameter: f64,
   pub setting: f64,
-  pub curve: Option<Box<str>>,
+  pub curve_id: Option<Box<str>>,
   pub valve_type: ValveType,
   pub minor_loss: f64,
+  #[serde(skip)]
+  pub valve_curve: Option<Arc<Curve>>
 }
 
 
 impl LinkTrait for Valve {
   fn coefficients(&self, q: f64, _resistance: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients {
+
+    // if the valve is closed or XPressure, return a high resistance valve
     if status == LinkStatus::Closed || status == LinkStatus::XPressure {
       return LinkCoefficients::simple(1.0/BIG_VALUE, q);
     }
+
     match self.valve_type {
       // Throttle Control Valve (TCV)
       ValveType::TCV => {
@@ -72,8 +79,8 @@ impl LinkTrait for Valve {
       ValveType::PSV => {
         return self.psv_coefficients(excess_flow_upstream);
       }
-      _ => {
-        return LinkCoefficients::simple(1.0/SMALL_VALUE, q);
+      ValveType::GPV => {
+        return self.gpv_coefficients(q);
       }
     }
   }
@@ -97,6 +104,8 @@ impl LinkTrait for Valve {
 
 }
 impl Valve {
+
+  /// Compute the updated status of the pressure reducing valve
   fn prv_status(&self, status: LinkStatus, q: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
     match status {
       LinkStatus::Active => {
@@ -125,6 +134,8 @@ impl Valve {
       _ => None
     }
   }
+
+  /// Compute the updated status of the pressure sustaining valve
   fn psv_status(&self, status: LinkStatus, q: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
     match status {
       LinkStatus::Active => {
@@ -151,6 +162,17 @@ impl Valve {
   }
 
 
+  /// Compute the coefficients for general purpose valve with a flow q
+  fn gpv_coefficients(&self, q: f64) -> LinkCoefficients {
+    let curve = self.valve_curve.as_ref().unwrap();
+
+    let q_abs = q.abs().max(TINY);
+
+    let (h0, r) = curve.coefficients(q_abs);
+    let r = r.max(TINY);
+
+    return LinkCoefficients::simple(1.0/r, (h0 / r + q_abs) * q.signum());
+  }
 
   /// Compute the coefficients for pressure sustaining valve with a flow q and excess flow upstream
   fn psv_coefficients(&self, excess_flow_upstream: f64) -> LinkCoefficients {
@@ -206,8 +228,19 @@ impl Valve {
     if self.setting >= 100.0 {
       return k_open;
     }
-    // Valve is partially open
-    let ratio = self.setting / 100.0;
+
+
+    // Valve is partially open 
+    let ratio = if self.valve_curve.is_some() {
+      // Use the valve curve to compute the ratio
+      let curve = self.valve_curve.as_ref().unwrap();
+      let (h0, r) = curve.coefficients(self.setting);
+      let ratio = h0 + r * self.setting;
+      ratio / 100.0
+    } else {
+      // Assume a linear relationship between the setting and the minor loss coefficient
+      self.setting / 100.0
+    };
 
     // clamp the ratio to SMALL_VALUE and 1.0 to avoid division by zero
     let ratio = ratio.clamp(SMALL_VALUE, 1.0);

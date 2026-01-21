@@ -19,6 +19,10 @@
  12              	0           	50          	                	;
  13              	0           	0           	                	;
  14              	0           	1           	                	;
+ 15              	0           	10          	                	;
+ 16              	0           	5           	                	;
+ 17              	0           	0           	                	;
+ 18              	0           	0           	                	;
 
 [RESERVOIRS]
 ;ID              	Head        	Pattern         
@@ -40,6 +44,8 @@
  9               	1               	7               	10          	12          	80          	0           	Open  	;
  10              	1               	11              	10          	300         	0.25        	0           	Open  	;
  11              	1               	13              	10          	120         	100         	0           	Open  	;
+ 1               	1               	17              	10          	300         	100         	0           	Open  	;
+ 12              	1               	18              	10          	300         	100         	0           	Open  	;
 
 [PUMPS]
 ;ID              	Node1           	Node2           	Parameters
@@ -54,6 +60,8 @@
  PSV             	7               	8               	300         	PSV 	20          	0           	                	;
  FCV-WARN        	11              	12              	300         	FCV 	100         	0           	                	;
  PSV-WARN        	13              	14              	300         	PSV 	10          	0           	                	;
+ GPV             	17              	15              	25          	GPV 	GPV_CURVE   	0           	                	;
+ PCV_CURVE       	18              	16              	12          	PCV 	20          	20          	PCV_CURVE       	;
 
 [TAGS]
 
@@ -68,11 +76,20 @@
 
 [CURVES]
 ;ID              	X-Value     	Y-Value
+;HEADLOSS: 
+ GPV_CURVE       	0           	0           
+ GPV_CURVE       	30          	30          
+;VALVE: 
+ PCV_CURVE       	0           	0           
+ PCV_CURVE       	20          	50          
+ PCV_CURVE       	100         	100         
 
 [CONTROLS]
 
 
+
 [RULES]
+
 
 
 [ENERGY]
@@ -134,10 +151,6 @@
  Unbalanced         	Continue 10
  Pattern            	1
  Demand Multiplier  	1.0
- Demand Model       	PDA
- Minimum Pressure   	0
- Required Pressure  	0.1
- Pressure Exponent  	0.5
  Emitter Exponent   	0.5
  Quality            	None mg/L
  Diffusivity        	1
@@ -161,6 +174,10 @@ PCV-o           	4305.043          	5461.255
 12              	3639.363          	3299.622          
 13              	2416.189          	2609.242          
 14              	3661.875          	2616.746          
+15              	3603.936          	2078.721          
+16              	3628.536          	1562.116          
+17              	2435.424          	2091.021          
+18              	2460.025          	1562.116          
 1               	1254.613          	6457.565          
 6               	4231.242          	4182.042          
 

@@ -108,7 +108,9 @@ fn test_solve_valve_network() {
     ("8", 0.296530),
     ("1", 100.000000),
     ("6", 0.000000),
-    ("13", 100.000)
+    ("13", 100.000),
+    ("15", 90.000),
+    ("16", 49.659997)
   ];
 
   verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);

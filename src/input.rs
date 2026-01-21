@@ -175,6 +175,11 @@ impl Network {
         if valve.valve_type == ValveType::PRV {
           valve.setting -= self.nodes[link.end_node].elevation;
         }
+        // assign the valve curve to the valve
+        if let Some(curve_id) = &valve.curve_id {
+          let curve = self.curves.get(curve_id).unwrap_or_else(|| panic!("Curve not found for valve {}", curve_id));
+          valve.valve_curve = Some(Arc::new(curve.clone()));
+        }
       }
     }
   }
@@ -243,13 +248,27 @@ impl Network {
       "PCV" => ValveType::PCV,
       _ => panic!("Invalid valve type: {}", parts.next().unwrap()),
     };
-    // read the setting
-    let setting = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
+
+    // read the setting or curve ID
+    let (curve_id, setting) = if valve_type == ValveType::GPV {
+      let curve_id = parts.next().map(|s| s.to_string().into_boxed_str());
+      (curve_id, 0.0)
+    } else {
+      let setting = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
+      (None, setting)
+    };
+
     // read the minor loss
     let minor_loss = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
 
-    // read the curve ID (optional, default none)
-    let curve: Option<Box<str>> = parts.next().map(|s| s.to_string().into_boxed_str());
+    // read the PCV curve ID (optional, default none)
+    let fcv_curve_id: Option<Box<str>> = parts.next().map(|s| s.to_string().into_boxed_str());
+    // overwrite curve ID with FCV curve ID if present
+    let curve_id = if let Some(fcv_curve_id) = fcv_curve_id {
+      Some(fcv_curve_id)
+    } else {
+      curve_id
+    };
 
     let start_node_index = *self.node_map.get(&start_node).unwrap();
     let end_node_index = *self.node_map.get(&end_node).unwrap();
@@ -260,7 +279,7 @@ impl Network {
       end_node: end_node_index,
       start_node_id: start_node,
       end_node_id: end_node,
-      link_type: LinkType::Valve(Valve { diameter, setting, curve, valve_type, minor_loss }),
+      link_type: LinkType::Valve(Valve { diameter, setting, curve_id, valve_type, minor_loss, valve_curve: None }),
       initial_status: LinkStatus::Active,
     }
   }
@@ -659,6 +678,35 @@ mod tests {
     assert_eq!(valve.diameter, 12.0);
     assert_eq!(valve.setting, 50.0);
     assert_eq!(valve.minor_loss, 100.0);
+  }
+
+  #[test]
+  fn test_read_valve_gpv() {
+    let mut network = test_network(true);
+    let valve = network.read_valve("V2  N1  N2 12.0 GPV GPV_CURVE  100.0");
+    
+    assert_eq!(&*valve.id, "V2");
+    let LinkType::Valve(valve) = &valve.link_type else {
+      panic!("Expected Valve link type");
+    };
+    assert_eq!(valve.valve_type, ValveType::GPV);
+    assert_eq!(valve.curve_id.as_deref(), Some("GPV_CURVE"));
+  }
+
+  #[test]
+  fn test_read_valve_fcv() {
+    let mut network = test_network(true);
+    let valve = network.read_valve("V3  N1  N2 12.0 FCV 50.0  100.0 FCV_CURVE");
+    
+    assert_eq!(&*valve.id, "V3");
+    let LinkType::Valve(valve) = &valve.link_type else {
+      panic!("Expected Valve link type");
+    };
+    assert_eq!(valve.valve_type, ValveType::FCV);
+    assert_eq!(valve.diameter, 12.0);
+    assert_eq!(valve.setting, 50.0);
+    assert_eq!(valve.minor_loss, 100.0);
+    assert_eq!(valve.curve_id.as_deref(), Some("FCV_CURVE"));
   }
 
   // ==================== Reservoir Tests ====================

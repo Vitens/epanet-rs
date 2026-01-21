@@ -14,15 +14,16 @@
 - [x] Custom curves
 - [x] Use serde for serializing to/from json and msgpack files
 - [x] Implement FCV, TCV, FCV, PBV
-- [ ] Implement GPV, FCV with Curve
-- [ ] Implement PRV and PSV valves
+- [x] Implement PRV and PSV valves
+- [x] Coeff stability checks (pipe, valve, pump) (RQTol)
+- [x] FCV with Curve
+- [x] Implement GPV
+- [ ] Implement tank logic
+- [ ] Fixed power pumps
 - [ ] Unit conversion when serializing using Serde
 - [ ] Setup unit and integration testing
 - [ ] Get rid of all the Panics and Unwraps, use Result instead
-- [ ] Fixed power pumps
-- [ ] Unit conversion for curves
-- [ ] Coeff stability checks (pipe, valve, pump) (RQTol)
-- [ ] Implement tank logic
-- [ ] Try to get the solver working for f64 in addition to Flt (SIMD speedup?)
+- [ ] Unit conversion for head curves
+- [ ] Try to get the solver working for f32 in addition to f64 (SIMD speedup?)
 - [ ] Setup automated benchmarks
 - [ ] Create EPANET2_3 API compatibility layer
