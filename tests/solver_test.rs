@@ -90,6 +90,7 @@ fn test_solve_valve_network() {
     ("PCV", 5.000000),
     ("FCV", 50.000001),
     ("PSV", 76.813931),
+    ("FCV-WARN", 50.0000),
   ];
 
   let expected_heads: Vec<(&str, f64)> = vec![
@@ -107,6 +108,7 @@ fn test_solve_valve_network() {
     ("8", 0.296530),
     ("1", 100.000000),
     ("6", 0.000000),
+    ("13", 100.000)
   ];
 
   verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);

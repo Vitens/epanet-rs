@@ -26,7 +26,7 @@ pub struct Valve {
 
 impl LinkTrait for Valve {
   fn coefficients(&self, q: f64, _resistance: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients {
-    if status == LinkStatus::Closed {
+    if status == LinkStatus::Closed || status == LinkStatus::XPressure {
       return LinkCoefficients::simple(1.0/BIG_VALUE, q);
     }
     match self.valve_type {

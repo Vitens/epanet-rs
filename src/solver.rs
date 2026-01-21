@@ -1,5 +1,6 @@
-use faer::sparse::{SparseColMat, Triplet};
-use faer::sparse::SymbolicSparseColMat;
+use faer::sparse::{SparseColMat, Triplet, SymbolicSparseColMat};
+use faer::sparse::linalg::LltError;
+use faer::linalg::cholesky::llt::factor::LltError::NonPositivePivot;
 use faer::sparse::linalg::solvers::{SymbolicLlt, Llt};
 use faer::{Mat, Side};
 use faer::prelude::*;
@@ -9,6 +10,7 @@ use rayon::prelude::*;
 use crate::model::node::NodeType;
 use crate::model::link::{LinkType, LinkTrait, LinkStatus};
 use crate::model::network::Network;
+use crate::model::valve::ValveType;
 use crate::model::units::{FlowUnits, PressureUnits};
 
 #[derive(Serialize)]
@@ -153,7 +155,6 @@ impl<'a> HydraulicSolver<'a> {
       // TODO: FIX THIS TO USE THE CORRECT UNIT CONVERSION
       heads[i] = pattern.multipliers[pattern_index % pattern.multipliers.len()] / 0.3048;
       // println!("{}:{}", node.id, heads[i]);
-
     }
 
     // gather demands
@@ -181,7 +182,7 @@ impl<'a> HydraulicSolver<'a> {
 
     let mut excess_flows = vec![0.0; self.network.nodes.len()];
 
-    for iteration in 1..=self.network.options.max_trials {
+    'gga: for iteration in 1..=self.network.options.max_trials {
       // reset values and rhs
       values.fill(0.0);
       rhs.fill(0.0);
@@ -255,10 +256,28 @@ impl<'a> HydraulicSolver<'a> {
       // solve the system of equations: J * dh = rhs
       jac.val_mut().copy_from_slice(&values);
 
-
       // Perform numerical factorization using pre-computed symbolic factorization
-      let llt = Llt::try_new_with_symbolic(self.symbolic_llt.clone(), jac.as_ref(), Side::Lower)
-        .expect("Singular matrix – check connectivity");
+      let llt = match Llt::try_new_with_symbolic(self.symbolic_llt.clone(), jac.as_ref(), Side::Lower) {
+        Ok(llt) => llt,
+        Err(LltError::Numeric(NonPositivePivot { index })) => {
+          // fix the bad valve
+          if self.fix_bad_valve(index-1, &mut statuses) {
+            continue 'gga;
+          }
+          panic!("Singular matrix – check connectivity: {}", index);
+        }
+        Err(e) => {
+          eprintln!("error = {}", e);
+          panic!("{}", e);
+        }
+      };
+
+
+
+
+
+
+
 
       let dh = llt.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
 
@@ -318,6 +337,31 @@ impl<'a> HydraulicSolver<'a> {
       }
     }
     Err(format!("Maximum number of iterations reached: {}", self.network.options.max_trials))
+  }
+
+  /// Fix a bad valve by setting its status to Closed
+  fn fix_bad_valve(&self, unknown_node_index: usize, statuses: &mut Vec<LinkStatus>) -> bool {
+    // get the node index
+    let node_index = self.node_to_unknown.iter().position(|&x| x.is_some() && x.unwrap() == unknown_node_index).unwrap();
+    // find links connected to the node
+    for (i, link) in self.network.links.iter().enumerate() {
+      // skip if the link is not connected to the node
+      if link.start_node != node_index && link.end_node != node_index {
+        continue;
+      }
+      // check if the link is a PSV or PRV valve
+      if let LinkType::Valve(valve) = &link.link_type {
+        if valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV {
+          if statuses[i] == LinkStatus::Active {
+            // set the status to XPressure to indicate a bad valve
+            statuses[i] = LinkStatus::XPressure;
+            return true;
+          }
+        }
+      }
+    }
+    // if no valves found, return false
+    false
   }
 
   /// Calculate the flow balance error

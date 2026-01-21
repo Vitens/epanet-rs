@@ -39,7 +39,7 @@ impl LinkTrait for Pump {
 
     let q_abs = q.abs();
     // get the curve coefficients
-    let (mut hgrad, mut hloss) = curve.curve_coefficients(q_abs, self.speed);
+    let (hgrad, hloss) = curve.curve_coefficients(q_abs, self.speed);
 
     LinkCoefficients::simple(1.0 / hgrad, hloss/hgrad)
   }
@@ -47,11 +47,8 @@ impl LinkTrait for Pump {
     BIG_VALUE
   }
 
-  fn update_status(&self, status: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
+  fn update_status(&self, _: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
     // Reopen the pump if it was temporarily closed
-    // if status == LinkStatus::Xhead {
-    //   return Some(LinkStatus::Open);
-    // }
     None
   }
 }
