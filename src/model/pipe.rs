@@ -181,12 +181,16 @@ impl UnitConversion for Pipe {
       if reverse {
         self.diameter = self.diameter * MperFT * 1e3; // convert in to ft to mm
         self.length = self.length * MperFT; // convert ft to m
-        self.roughness = self.roughness * MperFT; // convert mmft to ft
+        if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
+          self.roughness = self.roughness * MperFT; // convert mmft to ft
+        }
       }
       else {
         self.diameter = self.diameter / 1e3 / MperFT; // convert mm to in
         self.length = self.length / MperFT;
-        self.roughness = self.roughness / MperFT; // convert mm to mmft
+        if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
+          self.roughness = self.roughness / MperFT; // convert mm to mmft
+        }
       }
     }
     else {
