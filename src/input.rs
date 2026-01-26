@@ -10,12 +10,12 @@ use crate::model::curve::{Curve, HeadCurve};
 use crate::model::pattern::Pattern;
 use crate::model::junction::Junction;
 use crate::model::reservoir::Reservoir;
+use crate::model::tank::Tank;
 use crate::model::pipe::Pipe;
 use crate::model::pump::Pump;
 use crate::model::valve::{Valve, ValveType};
 use crate::model::units::{FlowUnits, UnitSystem, PressureUnits, UnitConversion};
 use crate::model::options::*;
-// use crate::model::tank::Tank;
 
 
 #[derive(Debug)]
@@ -23,6 +23,7 @@ enum ReadState {
   Junctions,
   Pipes,
   Reservoirs,
+  Tanks,
   Demands,
   Valves,
   Pumps,
@@ -94,6 +95,7 @@ impl Network {
           "[DEMANDS]" => ReadState::Demands,
           "[VALVES]" => ReadState::Valves,
           "[PUMPS]" => ReadState::Pumps,
+          "[TANKS]" => ReadState::Tanks,
           "[CURVES]" => ReadState::Curves,
           "[PATTERNS]" => ReadState::Patterns,
           "[OPTIONS]" => ReadState::Options,
@@ -116,6 +118,10 @@ impl Network {
           ReadState::Pipes => { 
             let pipe = self.read_pipe(line);
             self.add_link(pipe).unwrap(); 
+          }
+          ReadState::Tanks => { 
+            let tank = self.read_tank(line);
+            self.add_node(tank).unwrap(); 
           }
           ReadState::Reservoirs => { 
             let reservoir = self.read_reservoir(line);
@@ -159,7 +165,7 @@ impl Network {
 
   fn update_links(&mut self) {
     // update link specific statistics (TODO: move to separate method)
-    for link in self.links.iter_mut() {
+    for (link_index, link) in self.links.iter_mut().enumerate() {
       if let LinkType::Pump(pump) = &mut link.link_type {
         // get the head c
         let curve = self.curves.get(&pump.head_curve_id).unwrap_or_else(|| panic!("Head curve not found for pump {}", pump.head_curve_id));
@@ -180,6 +186,13 @@ impl Network {
           let curve = self.curves.get(curve_id).unwrap_or_else(|| panic!("Curve not found for valve {}", curve_id));
           valve.valve_curve = Some(Arc::new(curve.clone()));
         }
+      }
+      // check if the link is connected to a tank
+      if let NodeType::Tank(tank) = &mut self.nodes[link.end_node].node_type {
+        tank.links_to.push(link_index);
+      }
+      if let NodeType::Tank(tank) = &mut self.nodes[link.start_node].node_type {
+        tank.links_from.push(link_index);
       }
     }
   }
@@ -223,6 +236,39 @@ impl Network {
       id,
       elevation,
       node_type: NodeType::Reservoir(Reservoir { head_pattern: pattern }),
+    }
+  }
+
+  fn read_tank(&mut self, line: &str) -> Node {
+    let mut parts = parse_line(line);
+    let id = parts.next().unwrap().into();
+    let elevation = parts.next().unwrap().parse::<f64>().unwrap();
+    let initial_level = parts.next().unwrap().parse::<f64>().unwrap();
+    let min_level = parts.next().unwrap().parse::<f64>().unwrap();
+    let max_level = parts.next().unwrap().parse::<f64>().unwrap();
+    let diameter = parts.next().unwrap().parse::<f64>().unwrap();
+    let min_volume = parts.next().unwrap().parse::<f64>().unwrap();
+    // read the volume curve ID (optional, default none. if asterisk, no volume curve)
+    let volume_curve_id: Option<Box<str>> = if let Some(volume_curve_id) = parts.next() {
+      if volume_curve_id == "*" {
+        None
+      } else {
+        Some(volume_curve_id.to_string().into_boxed_str())
+      }
+    } else { None };
+    // read the overflow (optional, default false)
+    let overflow = if let Some(overflow) = parts.next() {
+      if overflow.to_uppercase().as_str() == "YES" {
+        true
+      } else {
+        false
+      }
+    } else { false };
+
+    Node {
+      id,
+      elevation,
+      node_type: NodeType::Tank(Tank { elevation, initial_level, min_level, max_level, diameter, min_volume, volume_curve_id, overflow, volume_curve: None, links_to: Vec::new(), links_from: Vec::new() }),
     }
   }
 
@@ -781,6 +827,37 @@ mod tests {
     let link = network.read_pipe("P3  N1  N2  200.0  6.0  110.0  0.0  CLOSED");
     
     assert_eq!(link.initial_status, LinkStatus::Closed);
+  }
+  // ==================== Tank Tests ====================
+
+  #[test]
+  fn test_read_tank_basic() {
+    let mut network = test_network(false);
+    let node = network.read_tank("T1  100  15  5  25  120  0  *  Yes");
+
+    let NodeType::Tank(tank) = &node.node_type else {
+      panic!("Expected Tank node type");
+    };
+
+    assert_eq!(node.elevation, 100.0);
+    assert_eq!(tank.initial_level, 15.0);
+    assert_eq!(tank.min_level, 5.0);
+    assert_eq!(tank.max_level, 25.0);
+    assert_eq!(tank.diameter, 120.0);
+    assert_eq!(tank.min_volume, 0.0);
+    assert!(tank.volume_curve_id.is_none());
+    assert!(tank.overflow);
+  }
+  #[test]
+  fn test_read_tank_with_volume_curve() {
+    let mut network = test_network(false);
+    let node = network.read_tank("T2  100  15  5  25  120  0  VOLCURVE");
+    
+    let NodeType::Tank(tank) = &node.node_type else {
+      panic!("Expected Tank node type");
+    };
+    assert_eq!(tank.volume_curve_id.as_deref(), Some("VOLCURVE"));
+    assert!(!tank.overflow);
   }
 
   // ==================== Pump Tests ====================

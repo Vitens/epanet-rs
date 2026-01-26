@@ -39,7 +39,7 @@ impl LinkTrait for Pipe {
       return LinkCoefficients::new_status(1.0 / BIG_VALUE, q, LinkStatus::TempClosed);
     }
     // for closed pipes use headloss formula hloss = BIG_VALUE * q
-    if status == LinkStatus::Closed {
+    if status == LinkStatus::Closed || status == LinkStatus::TempClosed {
       return LinkCoefficients::simple(1.0 / BIG_VALUE, q);
     }
 
@@ -92,8 +92,11 @@ impl LinkTrait for Pipe {
     }
   }
 
-  fn update_status(&self, _: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
-    None // no status change
+  fn update_status(&self, status: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
+    if status == LinkStatus::TempClosed {
+      return Some(LinkStatus::Open); // reopen the pipe if it was temporarily closed
+    }
+    return None;
   }
 }
 

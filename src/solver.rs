@@ -98,7 +98,9 @@ impl<'a> HydraulicSolver<'a> {
 
     // run the solver in parallel using Rayon if enabled
     if parallel {
-
+      if self.network.has_tanks() {
+        panic!("Networks with tanks cannot be solved in parallel");
+      }
       // solve the first step to use as initial values for the next, parallel computed steps
       let (flow, head, statuses) = self.solve(&initial_flows, &initial_heads, &initial_statuses, 0, verbose).unwrap();
 
@@ -129,6 +131,10 @@ impl<'a> HydraulicSolver<'a> {
         initial_flows = flow;
         initial_heads = head;
         initial_statuses = statuses.clone();
+        // update the heads of the tanks (= elevation + level) before running the next step
+        if steps > 1 {
+          self.update_tanks(&initial_flows, &mut initial_heads);
+        }
       }
     }
     let mut result = SolverResult { flows, heads };
@@ -145,7 +151,6 @@ impl<'a> HydraulicSolver<'a> {
     let mut flows = initial_flows.clone();
     let mut heads = initial_heads.clone();
 
-
     // get the time
     let time = step * time_options.hydraulic_timestep;
     // get the pattern time
@@ -159,7 +164,6 @@ impl<'a> HydraulicSolver<'a> {
       let pattern = &self.network.patterns[head_pattern];
       // TODO: FIX THIS TO USE THE CORRECT UNIT CONVERSION
       heads[i] = pattern.multipliers[pattern_index % pattern.multipliers.len()] / 0.3048;
-      // println!("{}:{}", node.id, heads[i]);
     }
 
     // gather demands
@@ -264,40 +268,34 @@ impl<'a> HydraulicSolver<'a> {
       // Perform numerical factorization using pre-computed symbolic factorization
       let llt = match Llt::try_new_with_symbolic(self.symbolic_llt.clone(), jac.as_ref(), Side::Lower) {
         Ok(llt) => llt,
+        // if the pivot is non-positive, try to fix the bad valve
         Err(LltError::Numeric(NonPositivePivot { index })) => {
           // fix the bad valve
           if self.fix_bad_valve(index-1, &mut statuses) {
             continue 'gga;
           }
+          // if no valves found, panic
           panic!("Singular matrix – check connectivity: {}", index);
         }
         Err(e) => {
-          eprintln!("error = {}", e);
+          // if other error, panic
           panic!("{}", e);
         }
       };
 
-
-
-
-
-
-
-
+      // solve the system of equations: J * dh = rhs
       let dh = llt.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
 
-      // update the heads of the nodes
+      // update the heads of the nodes (unknown nodes only)
       for (global, &head_id) in self.node_to_unknown.iter().enumerate() {
         if let Some(i) = head_id {
           heads[global] = dh[(i, 0)];
         }
       }
 
-      // update the flows of the links (Equation 12.12)
       let mut sum_dq = 0.0;
       let mut sum_q  = 0.0;
       let mut status_changed = false;
-
 
       for (i, link) in self.network.links.iter().enumerate() {
           // calculate the head difference between the start and end nodes
@@ -323,15 +321,17 @@ impl<'a> HydraulicSolver<'a> {
             statuses[i] = status;
           }
 
-
           // update the sum of the absolute changes in flow and the sum of the absolute flows
           sum_dq += dq.abs();
           sum_q  += flows[i].abs();
       }
+      // update links connected to tanks
+      self.update_tank_links(&flows, &heads, &mut statuses);
 
       let rel_change = sum_dq / (sum_q + 1e-6);
 
       if rel_change < self.network.options.accuracy && !status_changed {
+
 
         if verbose {
           let flow_balance = self.flow_balance(&demands, &flows);
@@ -342,6 +342,56 @@ impl<'a> HydraulicSolver<'a> {
       }
     }
     Err(format!("Maximum number of iterations reached: {}", self.network.options.max_trials))
+  }
+
+  fn update_tank_links(&self, flows: &Vec<f64>, heads: &Vec<f64>, statuses: &mut Vec<LinkStatus>) {
+    // iterate over the tanks
+    for (tank_index, node) in self.network.nodes.iter().enumerate() {
+      if let NodeType::Tank(tank) = &node.node_type {
+        // check if the tank is closed for filling
+        let fill_closed = heads[tank_index] >= tank.elevation + tank.max_level && !tank.overflow;
+        let empty_closed = heads[tank_index] <= tank.elevation + tank.min_level;
+
+        println!("Tank {}: Fill closed = {}, Empty closed = {}, overflow = {}", node.id, fill_closed, empty_closed, tank.overflow);
+
+        // iterate over the links connected to the tank
+        for link_index in &tank.links_to {
+          if fill_closed && flows[*link_index] > 0.0 { statuses[*link_index] = LinkStatus::TempClosed; }
+          if empty_closed && flows[*link_index] < 0.0 { statuses[*link_index] = LinkStatus::TempClosed; }
+        }
+        for link_index in &tank.links_from {
+          if fill_closed && flows[*link_index] < 0.0 { statuses[*link_index] = LinkStatus::TempClosed; }
+          if empty_closed && flows[*link_index] > 0.0 { statuses[*link_index] = LinkStatus::TempClosed; }
+        }
+      }
+    }
+    
+
+  }
+  
+  /// Update the heads of tanks, and the statuses of the links connected to tanks
+  fn update_tanks(&self, flows: &Vec<f64>, heads: &mut Vec<f64>) {
+
+    for (tank_index, node) in self.network.nodes.iter().enumerate() {
+      if let NodeType::Tank(tank) = &node.node_type {
+        // calculate flow balance of the tank
+        let mut flow_balance = 0.0;
+
+        for link_index in &tank.links_to {
+          flow_balance += flows[*link_index];
+        }
+        for link_index in &tank.links_from {
+          flow_balance -= flows[*link_index];
+        }
+
+        let delta_volume = flow_balance * self.network.options.time_options.hydraulic_timestep as f64; // in ft^3
+        // update the head of the tank
+        let new_head = tank.new_head(delta_volume, heads[tank_index]);
+        // update the head of the tank
+        heads[tank_index] = new_head;
+      }
+    }
+
   }
 
   /// Fix a bad valve by setting its status to Closed
@@ -489,7 +539,11 @@ impl<'a> HydraulicSolver<'a> {
   /// Set the initial heads of the nodes
   fn get_initial_heads(&self) -> Vec<f64> {
     self.network.nodes.iter().map(|n| {
+      // if the node is a fixed head node, return the elevation + initial level (for tanks) or just the elevation (for reservoirs)
       if n.is_fixed() {
+        if let NodeType::Tank(tank) = &n.node_type {
+          return n.elevation + tank.initial_level;
+        }
         return n.elevation;
       } else {
         return 0.0;

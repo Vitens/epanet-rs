@@ -115,3 +115,30 @@ fn test_solve_valve_network() {
 
   verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);
 }
+
+#[test]
+fn test_solve_tanks_network() {
+  let mut network = Network::default();
+  network.read_inp("networks/tanks.inp").expect("Failed to load tanks.inp");
+
+  let solver = HydraulicSolver::new(&network);
+  let result = solver.run(false, false);
+
+  let expected_heads: Vec<(&str, f64)> = vec![
+    ("1", 15.00),
+    ("3", 25.00),
+    ("4", 10.00),
+    ("5", 5.00),
+    ("6", 5.00),
+  ];
+
+  let expected_flows: Vec<(&str, f64)> = vec![
+    ("1", 0.00),
+    ("2", 0.00),
+    ("3", 8.58),
+    ("4", 15.52),
+    ("5", 29.73),
+  ];
+
+  verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);
+}

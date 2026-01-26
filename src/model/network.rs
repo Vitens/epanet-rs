@@ -1,7 +1,7 @@
 use hashbrown::HashMap;
 
 use crate::model::link::Link;
-use crate::model::node::Node;
+use crate::model::node::{Node, NodeType};
 use crate::model::curve::Curve;
 use crate::model::pattern::Pattern;
 use crate::model::options::SimulationOptions;
@@ -28,6 +28,12 @@ pub struct Network {
     pub node_map: HashMap<Box<str>, usize>,
     #[serde(skip)]
     pub link_map: HashMap<Box<str>, usize>,
+}
+impl Network {
+  /// Check if the network has any tanks
+  pub fn has_tanks(&self) -> bool {
+    self.nodes.iter().any(|n| matches!(n.node_type, NodeType::Tank(_)))
+  }
 }
 
 /// Deserialize a network from a JSON or MessagePack file and build the node_map and link_map.
