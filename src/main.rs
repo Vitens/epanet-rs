@@ -1,14 +1,14 @@
 use std::process::Command;
 use std::process::Stdio;
-
 use std::time::Instant;
+
 use clap::{Parser, Subcommand};
+
+use simplelog::{info, warn, error, debug, LevelFilter, TerminalMode, ColorChoice, Config, TermLogger};
 
 use epanet_rs::model::network::Network;
 use epanet_rs::solver::HydraulicSolver;
-
 use epanet_rs::utils::binfile::read_outfile;
-
 
 const BANNER: [&str; 6] = [
   r"  _____ ____   _    _   _ _____ _____     ____  ____  ",
@@ -68,18 +68,44 @@ enum Commands {
   },
 }
 
-fn main() {
+fn main() -> Result<(), String> {
   let cli = Cli::parse();
 
+  // Determine log level based on command
+  let log_level = match &cli.command {
+    Commands::Run { quiet, verbose, .. } => {
+      if *quiet { LevelFilter::Error }
+      else if *verbose { LevelFilter::Debug }
+      else { LevelFilter::Info }
+    }
+    _ => LevelFilter::Info,
+  };
+
+  // Initialize the logger with colors
+  TermLogger::init(
+    log_level,
+    Config::default(),
+    TerminalMode::Mixed,
+    ColorChoice::Auto,
+  ).expect("Failed to initialize logger");
+
+  // Run the command
   match cli.command {
     Commands::Run { input_file, output_file, parallel, verbose, print_results, quiet } => {
       run_solver(&input_file, output_file.as_deref(), parallel, verbose, print_results, quiet);
+      Ok(())
     }
     Commands::Convert { input_file, output_file } => {
       convert_network(&input_file, &output_file);
+      Ok(())
     }
     Commands::Validate { input_file, precision } => {
-      validate_network(&input_file, precision);
+      if validate_network(&input_file, precision) {
+        Ok(())
+      } else {
+        Err("Validation failed".to_string())
+      }
+
     }
   }
 }
@@ -90,33 +116,27 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, verbo
 
   if !quiet {
     println!("{}", BANNER.join("\n"));
-    println!("Loading network from file: {}", input_file);
   }
+  info!("Loading network from file: {}", input_file);
 
   let mut network = Network::default();
   network.read_file(input_file).expect("Failed to load network");
   let end_time = Instant::now();
 
-  if !quiet {
-    println!("Loaded network with {} nodes and {} links", network.nodes.len(), network.links.len());
-    println!("Network loaded in {:?}", end_time.duration_since(start_time));
-  }
+  info!("Loaded network with {} nodes and {} links", network.nodes.len(), network.links.len());
+  debug!("Network loaded in {:?}", end_time.duration_since(start_time));
 
   let start_time = Instant::now();
   let solver = HydraulicSolver::new(&network);
   let result = solver.run(parallel, verbose);
   let end_time = Instant::now();
-  if !quiet {
-    println!("Solver finished in {:?}", end_time.duration_since(start_time));
-  }
+  info!("Solver finished in {:?}", end_time.duration_since(start_time));
 
   if let Some(output_file) = output_file {
     let start_time = Instant::now();
     network.write_results(&result, output_file).expect("Failed to write results");
     let end_time = Instant::now();
-    if !quiet {
-      println!("Results written in {:?}", end_time.duration_since(start_time));
-    }
+    info!("Results written to {} in {:?}", output_file, end_time.duration_since(start_time));
   }
 
   if print_results {
@@ -136,19 +156,19 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, verbo
 fn convert_network(input_file: &str, output_file: &str) {
   let start_time = Instant::now();
 
-  println!("Loading network from file: {}", input_file);
+  info!("Loading network from file: {}", input_file);
   let mut network = Network::default();
   network.read_file(input_file).expect("Failed to load network");
   
   let load_time = Instant::now();
-  println!("Loaded network with {} nodes and {} links in {:?}", 
+  info!("Loaded network with {} nodes and {} links in {:?}", 
     network.nodes.len(), network.links.len(), load_time.duration_since(start_time));
 
-  println!("Converting to: {}", output_file);
+  info!("Converting to: {}", output_file);
   network.save_network(output_file).expect("Failed to save network");
   
   let end_time = Instant::now();
-  println!("Network saved in {:?}", end_time.duration_since(load_time));
+  info!("Network saved in {:?}", end_time.duration_since(load_time));
 }
 
 /// Check if two values are equal within a tolerance based on decimal precision
@@ -159,14 +179,15 @@ fn values_equal(a: f64, b: f64, precision: u32) -> bool {
 }
 
 /// Validate the results of a network with EPANET
-fn validate_network(input_file: &str, precision: u32) {
+fn validate_network(input_file: &str, precision: u32) -> bool {
   let tolerance = 0.5 * 10_f64.powi(-(precision as i32));
-  println!("Loading network from file: {}", input_file);
-  println!("Using precision: {} decimal places (tolerance: {})", precision, tolerance);
+  info!("Loading network from file: {}", input_file);
+  info!("Using precision: {} decimal places (tolerance: {})", precision, tolerance);
 
   // check if the input file is a .inp file
   if !input_file.ends_with(".inp") {
-    panic!("Input file must be a .inp file");
+    error!("Input file must be a .inp file");
+    return false;
   }
 
   let mut network = Network::default();
@@ -174,20 +195,25 @@ fn validate_network(input_file: &str, precision: u32) {
   let solver = HydraulicSolver::new(&network);
   let rs_result = solver.run(false, false);
 
-  println!("Running EPANET to validate results");
-
-  let mut epanet_process = Command::new("runepanet")
+  info!("Running EPANET to validate results");
+  
+  let mut epanet_process = match Command::new("runepanet")
     .arg(input_file)
     .arg("/dev/null")
     .arg("/tmp/validate.out")
     .stdout(Stdio::null())
-    .spawn()
-    .expect("Failed to run EPANET");
+    .spawn() {
+      Ok(p) => p,
+      Err(e) => {
+        error!("Failed to run EPANET: {}. Make sure 'runepanet' is installed and in PATH.", e);
+        return false;
+      }
+    };
 
   let epanet_result = epanet_process.wait().expect("Failed to wait for EPANET");
   if !epanet_result.success() {
-    println!("EPANET failed to run");
-    return;
+    error!("EPANET failed to run");
+    return false;
   }
 
   let epanet_results = read_outfile("/tmp/validate.out");
@@ -201,8 +227,8 @@ fn validate_network(input_file: &str, precision: u32) {
       if !values_equal(rs_result.heads[i][j], epanet_results.heads[i][j], precision) {
         if head_mismatches < 5 {
           let diff = (rs_result.heads[i][j] - epanet_results.heads[i][j]).abs();
-          println!("Head mismatch at node {} in period {}: {} vs {} (diff: {:.6})", 
-            j, i, rs_result.heads[i][j], epanet_results.heads[i][j], diff);
+          warn!("Head mismatch at node '{}' in period {} (RS vs EPA): {} vs {} (diff: {:.6})", 
+            epanet_results.node_ids[j], i, rs_result.heads[i][j], epanet_results.heads[i][j], diff);
         }
         head_mismatches += 1;
       }
@@ -215,8 +241,8 @@ fn validate_network(input_file: &str, precision: u32) {
       if !values_equal(rs_result.flows[i][j], epanet_results.flows[i][j], precision) {
         if flow_mismatches < 5 {
           let diff = (rs_result.flows[i][j] - epanet_results.flows[i][j]).abs();
-          println!("Flow mismatch at link {} in period {}: {} vs {} (diff: {:.6})", 
-            j, i, rs_result.flows[i][j], epanet_results.flows[i][j], diff);
+          warn!("Flow mismatch at link '{}' in period {} (RS vs EPA): {} vs {} (diff: {:.6})", 
+            epanet_results.link_ids[j], i, rs_result.flows[i][j], epanet_results.flows[i][j], diff);
         }
         flow_mismatches += 1;
       }
@@ -224,8 +250,10 @@ fn validate_network(input_file: &str, precision: u32) {
   }
 
   if head_mismatches > 0 || flow_mismatches > 0 {
-    println!("Validation FAILED: {} head mismatches, {} flow mismatches", head_mismatches, flow_mismatches);
+    error!("Validation <on-red><b> FAILED </> : {} head mismatches, {} flow mismatches", head_mismatches, flow_mismatches);
+    return false;
   } else {
-    println!("Validation PASSED!");
+    info!("Validation <on-green><b> PASSED! </>");
+    return true;
   }
 }

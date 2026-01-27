@@ -162,8 +162,7 @@ impl<'a> HydraulicSolver<'a> {
     for (i, node) in self.network.nodes.iter().enumerate() {
       let Some(head_pattern) = node.head_pattern() else { continue };
       let pattern = &self.network.patterns[head_pattern];
-      // TODO: FIX THIS TO USE THE CORRECT UNIT CONVERSION
-      heads[i] = pattern.multipliers[pattern_index % pattern.multipliers.len()] / 0.3048;
+      heads[i] = node.elevation * pattern.multipliers[pattern_index % pattern.multipliers.len()];
     }
 
     // gather demands
