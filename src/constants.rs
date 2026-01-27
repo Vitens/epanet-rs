@@ -33,7 +33,7 @@ pub const MLDperCFS: f64 =  2.4466;
 pub const M3perFT3 : f64  =  0.028317;
 pub const MperFT : f64    =  0.3048;
 // pub const KPAperPSI : f64 =  6.895;
-// pub const KWperHP : f64   =  0.7457;
+pub const KWperHP : f64   =  0.7457;
 
 // Conversion factors for pressure units
 pub const BARperFT : f64 =  0.02953;

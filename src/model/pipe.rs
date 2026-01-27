@@ -126,8 +126,6 @@ impl Pipe {
       let hloss = r1 * q_abs * q;
       let hgrad = (2.0 * r1 * q_abs) + (dfdq * r * q_abs.powi(2));
 
-      // println!("hloss: {}, hgrad: {}", hloss, hgrad);
-
       (1.0/hgrad, hloss/hgrad)
 
     }

@@ -167,10 +167,12 @@ impl Network {
     // update link specific statistics (TODO: move to separate method)
     for (link_index, link) in self.links.iter_mut().enumerate() {
       if let LinkType::Pump(pump) = &mut link.link_type {
-        // get the head c
-        let curve = self.curves.get(&pump.head_curve_id).unwrap_or_else(|| panic!("Head curve not found for pump {}", pump.head_curve_id));
-        // assign the head curve to the pump
-        pump.head_curve = Some(HeadCurve::new(Arc::new(curve.clone())));
+        // get the head curve
+        if let Some(head_curve_id) = &pump.head_curve_id {
+          let curve = self.curves.get(head_curve_id).unwrap_or_else(|| panic!("Head curve not found for pump {}", head_curve_id));
+          // assign the head curve to the pump
+          pump.head_curve = Some(HeadCurve::new(Arc::new(curve.clone())));
+        }
       }
       if let LinkType::Valve(valve) = &mut link.link_type {
         // if the valve is a PSV, add the elevation of the start node to the setting
@@ -389,7 +391,7 @@ impl Network {
     let mut parameters = parts;
 
     let mut speed = 1.0;
-    let mut head_curve = "";
+    let mut head_curve_id = None;
     let mut power = 0.0;
 
     // create the link
@@ -403,13 +405,12 @@ impl Network {
       if let Some(value) = parameters.next() {
         match parameter {
           "SPEED" => speed = value.parse::<f64>().unwrap(),
-          "HEAD" => head_curve = value.trim(),
+          "HEAD" => head_curve_id = Some(value.trim().into()),
           "POWER" => power = value.parse::<f64>().unwrap(),
           _ => continue,
         }
       }
     }
-    let head_curve_id = head_curve.to_string().into_boxed_str();
 
     Link {
       id,
@@ -878,7 +879,7 @@ mod tests {
       panic!("Expected Pump link type");
     };
 
-    assert_eq!(&*pump.head_curve_id, "CURVE1");
+    assert_eq!(pump.head_curve_id, Some("CURVE1".into()));
     assert_eq!(pump.speed, 1.0); // default speed
   }
 
@@ -893,7 +894,18 @@ mod tests {
     };
 
     assert_eq!(pump.speed, 1.5);
-    assert_eq!(&*pump.head_curve_id, "C1");
+    assert_eq!(pump.head_curve_id, Some("C1".into()));
+  }
+
+  #[test]
+  fn test_read_pump_with_power() {
+    let network = test_network(true);
+    let link = network.read_pump("PUMP3  N1  N2  HEAD C1  POWER 100.0");
+    
+    let LinkType::Pump(pump) = &link.link_type else {
+      panic!("Expected Pump link type");
+    };
+    assert_eq!(pump.power, 100.0);
   }
 
   // ==================== Curve Tests ====================

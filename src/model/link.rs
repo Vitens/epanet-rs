@@ -123,7 +123,7 @@ impl UnitConversion for Link {
   fn convert_units(&mut self, flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
     match &mut self.link_type {
       LinkType::Pipe(pipe) => pipe.convert_units(flow, system, reverse),
-      LinkType::Pump(_pump) => (),
+      LinkType::Pump(pump) => pump.convert_units(flow, system, reverse),
       LinkType::Valve(valve) => valve.convert_units(flow, system, reverse),
     }
   }

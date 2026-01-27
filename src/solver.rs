@@ -352,8 +352,6 @@ impl<'a> HydraulicSolver<'a> {
         let fill_closed = heads[tank_index] >= tank.elevation + tank.max_level && !tank.overflow;
         let empty_closed = heads[tank_index] <= tank.elevation + tank.min_level;
 
-        println!("Tank {}: Fill closed = {}, Empty closed = {}, overflow = {}", node.id, fill_closed, empty_closed, tank.overflow);
-
         // iterate over the links connected to the tank
         for link_index in &tank.links_to {
           if fill_closed && flows[*link_index] > 0.0 { statuses[*link_index] = LinkStatus::TempClosed; }
@@ -506,7 +504,7 @@ impl<'a> HydraulicSolver<'a> {
         if let Some(head_curve) = &pump.head_curve {
           return head_curve.statistics.q_initial;
         } else {
-          return 0.0;
+          return 1.0; // constant power pump
         }
       } else if let LinkType::Valve(valve) = &l.link_type {
         return 0.25 * std::f64::consts::PI * valve.diameter.powi(2);
