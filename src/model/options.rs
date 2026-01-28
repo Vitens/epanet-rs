@@ -42,6 +42,7 @@ pub struct SimulationOptions {
 
   pub max_trials: usize,
   pub accuracy: f64,
+  pub max_flow_change: Option<f64>,
   pub check_frequency: usize,
   pub max_check: usize,
 
@@ -61,6 +62,7 @@ impl Default for SimulationOptions {
       demand_multiplier: 1.0,
       max_trials: 40,
       accuracy: 0.001,
+      max_flow_change: None,
       check_frequency: 2,
       max_check: 10,
       pattern: None,

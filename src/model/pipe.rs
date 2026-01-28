@@ -108,7 +108,6 @@ impl Pipe {
     let ml = self.minor_loss;
     let e = (self.roughness / 1000.0) / self.diameter; // relative roughness (use mf to ft)
     let s = VISCOSITY * self.diameter;      // kinematic viscosity * diameter
-
     // Laminar flow (Re <= 2000)
     // use Hagen-Poiseuille formula
     if q_abs <= A2 * s {
@@ -154,7 +153,7 @@ impl Pipe {
     // Use interpolating polynomials by E. Dunlop for transition flow (2000 < Re < 4000)
     } else {
       let y2 = e / 3.7 + AB;
-      //let y3 = A9 * y2.ln();
+      // let y3 = A9 * y2.ln();
       let y3 = A9 * fastapprox::fast::ln(y2 as f32) as f64;
       let fa = 1.0 / (y3*y3);
       let fb = (2.0 + AC / (y2*y3)) * fa;

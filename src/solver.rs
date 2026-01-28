@@ -7,6 +7,9 @@ use faer::prelude::*;
 use serde::Serialize;
 use rayon::prelude::*;
 
+use simplelog::{info, warn, error, debug};
+
+use crate::constants::BIG_VALUE;
 use crate::model::node::NodeType;
 use crate::model::link::{LinkType, LinkTrait, LinkStatus};
 use crate::model::network::Network;
@@ -163,6 +166,8 @@ impl<'a> HydraulicSolver<'a> {
   /// Returns the flows and heads
   fn solve(&self, initial_flows: &Vec<f64>, initial_heads: &Vec<f64>, initial_statuses: &Vec<LinkStatus>, step: usize, verbose: bool) -> Result<StepResult, String> {
 
+    debug!("Solving step {}...", step);
+
     let time_options = &self.network.options.time_options;
     let mut flows = initial_flows.clone();
     let mut heads = initial_heads.clone();
@@ -310,9 +315,12 @@ impl<'a> HydraulicSolver<'a> {
         }
       }
 
+      // gather solver statistics (TODO: move to a struct)
       let mut sum_dq = 0.0;
       let mut sum_q  = 0.0;
       let mut status_changed = false;
+      let mut max_dq = 0.0;
+      let mut max_dq_index = 0;
 
       for (i, link) in self.network.links.iter().enumerate() {
           // calculate the head difference between the start and end nodes
@@ -325,6 +333,11 @@ impl<'a> HydraulicSolver<'a> {
           // Flow update: dq = y - g_inv * dh
           let dq = y - g_inv * dh;
 
+          if dq.abs() > max_dq {
+            max_dq = dq.abs();
+            max_dq_index = i;
+          }
+
           // update the flow of the link
           flows[i] -= dq;
 
@@ -335,6 +348,7 @@ impl<'a> HydraulicSolver<'a> {
             if statuses[i] != LinkStatus::TempClosed && statuses[i] != LinkStatus::Xhead {
               status_changed = true;
             }
+            debug!("Status changed for link {} to {:?}", link.id, status);
             statuses[i] = status;
           }
 
@@ -346,8 +360,15 @@ impl<'a> HydraulicSolver<'a> {
       self.update_tank_links(&flows, &heads, &mut statuses);
 
       let rel_change = sum_dq / (sum_q + 1e-6);
+      // convert max_dq and max_dh to correct units
+      max_dq *= self.network.options.flow_units.per_cfs();
 
-      if rel_change < self.network.options.accuracy && !status_changed {
+      debug!(">> Iteration {}: Relative change: {:.6}, Status changed: {}", iteration, rel_change, status_changed);
+      debug!(">>>> Max flow change: {:.6} for link {}", max_dq, self.network.links[max_dq_index].id);
+
+      let max_flow_change = self.network.options.max_flow_change.unwrap_or(BIG_VALUE);
+
+      if rel_change < self.network.options.accuracy && !status_changed && max_dq < max_flow_change {
 
 
         if verbose {

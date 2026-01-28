@@ -4,7 +4,9 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
-use simplelog::{info, warn, error, debug, LevelFilter, TerminalMode, ColorChoice, Config, TermLogger};
+use simplelog::{info, warn, error, debug, LevelFilter, TerminalMode, ColorChoice, Config, TermLogger, ConfigBuilder};
+use simplelog::{format_description};
+
 
 use epanet_rs::model::network::Network;
 use epanet_rs::solver::HydraulicSolver;
@@ -87,10 +89,16 @@ fn main() -> Result<(), String> {
     _ => LevelFilter::Info,
   };
 
+  let logconfig = ConfigBuilder::new()
+    .set_time_format_custom(format_description!("[hour]:[minute]:[second].[subsecond digits:3]"))
+    .set_location_level(LevelFilter::Trace)
+    .set_target_level(LevelFilter::Trace)
+    .build();
+
   // Initialize the logger with colors
   TermLogger::init(
     log_level,
-    Config::default(),
+    logconfig,
     TerminalMode::Mixed,
     ColorChoice::Auto,
   ).expect("Failed to initialize logger");

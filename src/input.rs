@@ -32,6 +32,8 @@ enum ReadState {
   Patterns,
   Status,
   Times,
+  Rules,
+  Controls,
   None,
 }
 
@@ -101,6 +103,8 @@ impl Network {
           "[OPTIONS]" => ReadState::Options,
           "[STATUS]" => ReadState::Status,
           "[TIMES]" => ReadState::Times,
+          "[RULES]" => ReadState::Rules,
+          "[CONTROLS]" => ReadState::Controls,
           _ => ReadState::None,
         }
       }
@@ -152,6 +156,12 @@ impl Network {
           ReadState::Status => {
             self.read_status(line);
           }
+          ReadState::Rules => {
+            panic!("Rules are not supported yet!");
+          }
+          ReadState::Controls => {
+            panic!("Controls are not supported yet!");
+          }
         }
       }
       // clear the line buffer
@@ -188,6 +198,10 @@ impl Network {
           let curve = self.curves.get(curve_id).unwrap_or_else(|| panic!("Curve not found for valve {}", curve_id));
           valve.valve_curve = Some(Arc::new(curve.clone()));
         }
+      }
+      if let LinkType::Pipe(pipe) = &mut link.link_type {
+        // convert the minor loss to a coefficient
+        pipe.minor_loss = 0.02517 * pipe.minor_loss / pipe.diameter.powi(4);
       }
       // check if the link is connected to a tank
       if let NodeType::Tank(tank) = &mut self.nodes[link.end_node].node_type {
@@ -249,7 +263,10 @@ impl Network {
     let min_level = parts.next().unwrap().parse::<f64>().unwrap();
     let max_level = parts.next().unwrap().parse::<f64>().unwrap();
     let diameter = parts.next().unwrap().parse::<f64>().unwrap();
-    let min_volume = parts.next().unwrap().parse::<f64>().unwrap();
+    let min_volume = if let Some(min_volume) = parts.next() {
+      min_volume.parse::<f64>().unwrap()
+    } else { 0.0 };
+
     // read the volume curve ID (optional, default none. if asterisk, no volume curve)
     let volume_curve_id: Option<Box<str>> = if let Some(volume_curve_id) = parts.next() {
       if volume_curve_id == "*" {
@@ -349,7 +366,9 @@ impl Network {
     let roughness = parts.next().unwrap().parse::<f64>().unwrap();
 
     // create the link
-    let minor_loss = parts.next().unwrap().parse::<f64>().unwrap_or(0.0);
+    let minor_loss = if let Some(minor_loss) = parts.next() {
+      minor_loss.parse::<f64>().unwrap()
+    } else { 0.0 };
     // check if the pipe has a status
     let mut status = LinkStatus::Open;
     let mut check_valve = false;
@@ -544,6 +563,9 @@ impl Network {
       },
       "MAXCHECK" => {
         self.options.max_check = value.parse::<usize>().unwrap();
+      },
+      "FLOWCHANGE" => {
+        self.options.max_flow_change = Some(value.parse::<f64>().unwrap());
       },
       "PATTERN" => {
         let pattern: Box<str> = value.into();
