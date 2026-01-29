@@ -10,4 +10,5 @@ pub mod reservoir;
 pub mod tank;
 pub mod junction;
 pub mod options;
+pub mod control;
 pub mod units;

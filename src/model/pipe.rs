@@ -33,6 +33,7 @@ pub struct Pipe {
 const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
 
 impl LinkTrait for Pipe {
+  #[inline]
   fn coefficients(&self, q: f64, r: f64, status: LinkStatus, _:f64, _:f64) -> LinkCoefficients {
 
     if self.check_valve && q < 0.0 {

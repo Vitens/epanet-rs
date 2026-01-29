@@ -154,6 +154,7 @@ impl<'a> HydraulicSolver<'a> {
     // run the solver in parallel using Rayon if enabled
     if parallel {
       // solve the first step to use as initial values for the next, parallel computed steps
+      self.apply_patterns(&mut state, 0);
       let step_result = self.solve(&mut state, 0).unwrap();
 
       // store the results of step 0
@@ -167,6 +168,7 @@ impl<'a> HydraulicSolver<'a> {
         self.solve(&mut state, step).unwrap()
       }).collect();
       for (step,step_result) in par_results.iter().enumerate() {
+        println!("Step {}", step);
         results.append(step_result, step);
       }
     } else {

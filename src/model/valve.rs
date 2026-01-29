@@ -29,6 +29,7 @@ pub struct Valve {
 
 
 impl LinkTrait for Valve {
+  #[inline]
   fn coefficients(&self, q: f64, _resistance: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients {
 
     // if the valve is closed, fixed closed, or XPressure, return a high resistance valve

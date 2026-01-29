@@ -6,6 +6,7 @@ use crate::model::curve::Curve;
 use crate::model::valve::ValveType;
 use crate::model::pattern::Pattern;
 use crate::model::options::SimulationOptions;
+use crate::model::control::Control;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -23,6 +24,9 @@ pub struct Network {
 
     /// Patterns in the network
     pub patterns: HashMap<Box<str>, Pattern>,
+
+    /// Controls in the network
+    pub controls: Vec<Control>,
 
     // Skip serialization of the node_map and link_map to avoid bloating the file size with unnecessary data.
     #[serde(skip)]
@@ -53,6 +57,7 @@ impl<'de> Deserialize<'de> for Network {
       links: Vec<Link>,
       curves: HashMap<Box<str>, Curve>,
       patterns: HashMap<Box<str>, Pattern>,
+      controls: Vec<Control>,
     }
 
     let mut data = NetworkData::deserialize(deserializer)?;
@@ -89,6 +94,7 @@ impl<'de> Deserialize<'de> for Network {
       links: data.links,
       curves: data.curves,
       patterns: data.patterns,
+      controls: data.controls,
       node_map,
       link_map,
       contains_pressure_control_valve,

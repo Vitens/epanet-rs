@@ -14,6 +14,7 @@ use crate::model::tank::Tank;
 use crate::model::pipe::Pipe;
 use crate::model::pump::Pump;
 use crate::model::valve::{Valve, ValveType};
+use crate::model::control::{Control, ControlCondition};
 use crate::model::units::{FlowUnits, UnitSystem, PressureUnits, UnitConversion};
 use crate::model::options::*;
 
@@ -160,7 +161,7 @@ impl Network {
             panic!("Rules are not supported yet!");
           }
           ReadState::Controls => {
-            panic!("Controls are not supported yet!");
+            self.read_control(line);
           }
         }
       }
@@ -604,41 +605,9 @@ impl Network {
       duration = parts.next().unwrap();
     }
 
-    let mut time_units = parts.next().unwrap_or("HOURS").to_uppercase();
-    // remove last "S" if it exists
-    if time_units.ends_with("S") {
-      time_units.pop();
-    }
+    let time_units = parts.next();
+    let seconds = parse_time(duration, time_units);
 
-    let mut seconds : usize;
-
-    // if ":" in duration, split into hours and minutes
-    if duration.contains(":") {
-      let mut time_parts = duration.split(":");
-      let hours = time_parts.next().unwrap().parse::<usize>().unwrap();
-      let minutes = time_parts.next().unwrap().parse::<usize>().unwrap();
-      seconds = hours * 3600 + minutes * 60;
-
-      if time_units == "PM" {
-        // add 12 hours to the seconds
-        seconds += 12 * 3600;
-      }
-
-    } else {
-      let duration_value = duration.parse::<usize>().unwrap();
-
-      seconds = match time_units.as_str() {
-        "HOUR" => duration_value * 3600,
-        "MINUTE" => duration_value * 60,
-        "MIN" => duration_value * 60,
-        "SECOND" => duration_value,
-        "SEC" => duration_value,
-        "DAY" => duration_value * 86400,
-        "AM" => duration_value * 3600,    // AM is the same as hours
-        "PM" => duration_value * 3600 + 12 * 3600, // add 12 hours to the seconds 
-        _ => panic!("Invalid time units: {}", time_units),
-      };
-    }
     // assign the duration to the time options
     match time_option.as_str() {
       "DURATION" => self.options.time_options.duration = seconds,
@@ -649,6 +618,61 @@ impl Network {
       _ => ()
     }
   }
+
+  fn read_control(&mut self, line: &str) {
+    let mut parts = parse_line(line);
+
+    // Skip "LINK" keyword
+    let first = parts.next().unwrap().to_uppercase();
+    if first != "LINK" {
+      return;
+    }
+
+    // Read link id
+    let link_id: Box<str> = parts.next().unwrap().into();
+
+    // Read status or setting
+    let status_or_setting = parts.next().unwrap();
+    let (status, setting) = if let Ok(value) = status_or_setting.parse::<f64>() {
+      (None, Some(value))
+    } else {
+      (Some(LinkStatus::from_str(status_or_setting, false)), None)
+    };
+
+    // Skip "IF" keyword
+    parts.next();
+
+    // Read condition type
+    let condition_type = parts.next().unwrap().to_uppercase();
+
+    let condition = match condition_type.as_str() {
+      "NODE" => {
+        let node_id: Box<str> = parts.next().unwrap().into();
+        let above = parts.next().unwrap().to_uppercase() == "ABOVE";
+        let value = parts.next().unwrap().parse::<f64>().unwrap();
+        ControlCondition::Pressure { node_id, above, below: value }
+      }
+      "TIME" => {
+        let time_str = parts.next().unwrap();
+        let seconds = parse_time(time_str, parts.next());
+        ControlCondition::Time { seconds }
+      }
+      "CLOCKTIME" => {
+        let time_str = parts.next().unwrap();
+        let seconds = parse_time(time_str, parts.next());
+        ControlCondition::ClockTime { seconds }
+      }
+      _ => panic!("Invalid control condition type: {}", condition_type),
+    };
+
+    self.controls.push(Control {
+      condition,
+      link_id,
+      setting,
+      status,
+    });
+  }
+
   fn read_status(&mut self, line: &str) {
     let mut parts = parse_line(line);
     let id : &str = parts.next().unwrap().into();
@@ -675,6 +699,51 @@ impl Network {
 /// Strip comments (after ';') from a line and split into whitespace-separated parts
 fn parse_line(line: &str) -> std::str::SplitWhitespace<'_> {
   line.split(';').next().unwrap_or("").trim().split_whitespace()
+}
+
+/// Parse a time string with optional time unit suffix.
+/// Supports formats:
+/// - "HH:MM" with optional AM/PM suffix
+/// - Numeric value with unit (HOUR, MINUTE, MIN, SECOND, SEC, DAY, AM, PM)
+/// - If no unit is provided, defaults to HOURS
+fn parse_time(time_str: &str, unit_or_suffix: Option<&str>) -> usize {
+  let mut seconds: usize;
+
+  // If time contains ":", parse as HH:MM format
+  if time_str.contains(":") {
+    let mut time_parts = time_str.split(":");
+    let hours = time_parts.next().unwrap().parse::<usize>().unwrap();
+    let minutes = time_parts.next().unwrap().parse::<usize>().unwrap();
+    seconds = hours * 3600 + minutes * 60;
+
+    // Handle AM/PM suffix for HH:MM format
+    if let Some(suffix) = unit_or_suffix {
+      if suffix.to_uppercase() == "PM" {
+        seconds += 12 * 3600;
+      }
+    }
+  } else {
+    // Parse as numeric value with optional time unit
+    let value = time_str.parse::<usize>().unwrap();
+    let mut unit = unit_or_suffix.unwrap_or("HOURS").to_uppercase();
+    
+    // Remove trailing "S" for singular form
+    if unit.ends_with("S") && unit != "HOURS" {
+      unit.pop();
+    }
+
+    seconds = match unit.as_str() {
+      "HOUR" | "HOURS" => value * 3600,
+      "MINUTE" | "MIN" => value * 60,
+      "SECOND" | "SEC" => value,
+      "DAY" => value * 86400,
+      "AM" => value * 3600,
+      "PM" => value * 3600 + 12 * 3600,
+      _ => panic!("Invalid time unit: {}", unit),
+    };
+  }
+
+  seconds
 }
 
 #[cfg(test)]
@@ -1144,5 +1213,62 @@ mod tests {
     
     assert_eq!(network.options.time_options.duration, 86400);
   }
+
+  // ==================== Control Tests ====================
+  #[test]
+  fn test_pressure_control_above() {
+    let mut network = test_network(false);
+    network.read_control("LINK 12 CLOSED IF NODE 23 BELOW 20");
+
+    assert_eq!(network.controls.len(), 1);
+    let control = network.controls.get(0).unwrap();
+    assert_eq!(control.link_id, "12".into());
+    assert_eq!(control.setting, None);
+    assert_eq!(control.status, Some(LinkStatus::Closed));
+    let ControlCondition::Pressure { node_id, above, below } = &control.condition else {
+      panic!("Expected Pressure control condition");
+    };
+    assert_eq!(*node_id, "23".into());
+    assert!(!above);
+    assert_eq!(*below, 20.0);
+  }
+  #[test]
+  fn test_pressure_control_setting() {
+    let mut network = test_network(false);
+    network.read_control("LINK 12 1.5 IF NODE 23 ABOVE 20");
+
+    assert_eq!(network.controls.len(), 1);
+    let control = network.controls.get(0).unwrap();
+    assert_eq!(control.link_id, "12".into());
+    assert_eq!(control.setting, Some(1.5));
+  }
+
+  #[test]
+  fn test_time_control() {
+    let mut network = test_network(false);
+    network.read_control("LINK 12 CLOSED IF TIME 1:15");
+
+    assert_eq!(network.controls.len(), 1);
+    let control = network.controls.get(0).unwrap();
+    assert_eq!(control.link_id, "12".into());
+    let ControlCondition::Time { seconds } = &control.condition else {
+      panic!("Expected Time control condition");
+    };
+    assert_eq!(*seconds, 1 * 3600 + 15 * 60);
+  }
+  #[test]
+  fn test_clock_time_control() {
+    let mut network = test_network(false);
+    network.read_control("LINK 12 CLOSED IF CLOCKTIME 1:15 PM");
+
+    assert_eq!(network.controls.len(), 1);
+    let control = network.controls.get(0).unwrap();
+    assert_eq!(control.link_id, "12".into());
+    let ControlCondition::ClockTime { seconds } = &control.condition else {
+      panic!("Expected ClockTime control condition");
+    };
+    assert_eq!(*seconds, 13 * 3600 + 15 * 60);
+  }
+
 }
 

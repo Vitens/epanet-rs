@@ -77,9 +77,11 @@ pub struct LinkCoefficients {
 
 impl LinkCoefficients {
   /// Create a simple link coefficients struct with no matrix modifications (all links except PRV/PSV valves)
+  #[inline]
   pub fn simple(g_inv: f64, y: f64) -> Self {
     Self { g_inv, y, new_status: None, upstream_modification: None, downstream_modification: None }
   }
+  #[inline]
   pub fn new_status(g_inv: f64, y: f64, new_status: LinkStatus) -> Self {
     Self { g_inv, y, new_status: Some(new_status), upstream_modification: None, downstream_modification: None }
   }
@@ -97,6 +99,7 @@ pub trait LinkTrait {
 }
 
 impl LinkTrait for Link {
+  #[inline]
   fn coefficients(&self, q: f64, resistance: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients {
     match &self.link_type {
       LinkType::Pipe(pipe) => pipe.coefficients(q, resistance, status, excess_flow_upstream, excess_flow_downstream),
@@ -104,6 +107,7 @@ impl LinkTrait for Link {
       LinkType::Valve(valve) => valve.coefficients(q, resistance, status, excess_flow_upstream, excess_flow_downstream),
     }
   }
+  #[inline]
   fn resistance(&self) -> f64 {
     match &self.link_type {
       LinkType::Pipe(pipe) => pipe.resistance(),
@@ -111,6 +115,7 @@ impl LinkTrait for Link {
       LinkType::Valve(valve) => valve.resistance(),
     }
   }
+  #[inline]
   fn update_status(&self, status: LinkStatus, flow: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
     match &self.link_type {
       LinkType::Pipe(pipe) => pipe.update_status(status, flow, head_upstream, head_downstream),

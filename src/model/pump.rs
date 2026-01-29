@@ -18,6 +18,7 @@ pub struct Pump {
 }
 
 impl LinkTrait for Pump {
+  #[inline]
   fn coefficients(&self, q: f64, _resistance: f64, status: LinkStatus, _:f64, _:f64) -> LinkCoefficients {
 
     // for closed pumps, stalled pumps, or pumps with speed, act as closed pipe
