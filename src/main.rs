@@ -134,7 +134,10 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, print
   info!("Loading network from file: {}", input_file);
 
   let mut network = Network::default();
-  network.read_file(input_file).expect("Failed to load network");
+  network.read_file(input_file).unwrap_or_else(|e| {
+    error!("Failed to load network: {}", e);
+    std::process::exit(1);
+  });
   let end_time = Instant::now();
 
   info!("Loaded network with {} nodes and {} links", network.nodes.len(), network.links.len());
@@ -172,7 +175,10 @@ fn convert_network(input_file: &str, output_file: &str) {
 
   info!("Loading network from file: {}", input_file);
   let mut network = Network::default();
-  network.read_file(input_file).expect("Failed to load network");
+  network.read_file(input_file).unwrap_or_else(|e| {
+    error!("Failed to load network: {}", e);
+    std::process::exit(1);
+  });
   
   let load_time = Instant::now();
   info!("Loaded network with {} nodes and {} links in {:?}", 
@@ -207,7 +213,10 @@ fn validate_network(input_file: &str, rtol: f64, atol: f64, parallel: bool) -> b
   }
 
   let mut network = Network::default();
-  network.read_file(input_file).expect("Failed to load network");
+  network.read_file(input_file).unwrap_or_else(|e| {
+    error!("Failed to load network: {}", e);
+    std::process::exit(1);
+  });
   let solver = HydraulicSolver::new(&network);
   let rs_result = solver.run(parallel);
 

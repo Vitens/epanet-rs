@@ -6,3 +6,4 @@ pub mod solver;
 pub mod constants;
 pub mod output;
 pub mod utils;
+pub mod error;
