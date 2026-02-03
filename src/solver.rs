@@ -168,7 +168,7 @@ impl<'a> HydraulicSolver<'a> {
         self.solve(&mut state, step).unwrap()
       }).collect();
       for (step,step_result) in par_results.iter().enumerate() {
-        results.append(step_result, step);
+        results.append(step_result, step+1);
       }
     } else {
       // do sequential solves
