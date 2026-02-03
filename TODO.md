@@ -32,4 +32,5 @@
 - [ ] Get rid of all the Panics and Unwraps, use Result instead
 - [ ] Try to get the solver working for f32 in addition to f64 (SIMD speedup?)
 - [ ] Setup automated benchmarks
+- [ ] Pressure Driven Analysis
 - [ ] Create EPANET2_3 API compatibility layer
