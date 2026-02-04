@@ -24,6 +24,53 @@ pub struct Tank {
 }
 
 impl Tank {
+  // calculate the time to fill or drain the tank given the head and flow
+  pub fn time_to_fill_or_drain(&self, head: f64, flow: f64) -> usize {
+
+    let current_volume = self.volume_at_head(head);
+
+    let max_volume = self.max_volume();
+    let min_volume = self.min_volume();
+
+    // if flow is positive, the tank is filling
+    if flow > 0.0 {
+      let time_to_fill = (max_volume - current_volume) / flow;
+      return time_to_fill as usize;
+    }
+    // if flow is negative, the tank is draining
+    else {
+      let time_to_drain = (current_volume - min_volume) / flow;
+      return time_to_drain as usize;
+    }
+
+  }
+
+  pub fn volume_at_head(&self, head: f64) -> f64 {
+    let level = head - self.elevation;
+    if self.volume_curve.is_some() {
+      panic!("Tank volume curves not supported yet!");
+    }
+    else {
+      return level * PI * self.diameter * self.diameter / 4.0;
+    }
+  }
+  pub fn min_volume(&self) -> f64 {
+    if self.volume_curve.is_some() {
+      panic!("Tank volume curves not supported yet!");
+    }
+    else {
+      return self.min_level * PI * self.diameter * self.diameter / 4.0;
+    }
+  }
+  pub fn max_volume(&self) -> f64 {
+    if self.volume_curve.is_some() {
+      panic!("Tank volume curves not supported yet!");
+    }
+    else {
+      return self.max_level * PI * self.diameter * self.diameter / 4.0;
+    }
+  }
+
   pub fn new_head(&self, delta_volume: f64, current_head: f64) -> f64 {
 
     let mut level = current_head - self.elevation;

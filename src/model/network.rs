@@ -44,6 +44,10 @@ impl Network {
   pub fn has_pressure_controls(&self) -> bool {
     self.controls.iter().any(|c| matches!(c.condition, ControlCondition::Pressure { .. }))
   }
+  pub fn has_quality(&self) -> bool {
+    // return false for now, quality simulation is not supported
+    return false
+  }
 }
 
 /// Deserialize a network from a JSON or MessagePack file and build the node_map and link_map.

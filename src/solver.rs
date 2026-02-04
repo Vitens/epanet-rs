@@ -136,11 +136,11 @@ impl<'a> HydraulicSolver<'a> {
   /// Run the hydraulic solver
   pub fn run(self, mut parallel: bool) -> SolverResult {
     
-    // calculate number of steps to run the solver for
-    let steps = (self.network.options.time_options.duration / self.network.options.time_options.report_timestep) + 1;
+    // calculate number of report steps to run the solver for
+    let report_steps = (self.network.options.time_options.duration / self.network.options.time_options.report_timestep) + 1;
 
     // initialize the results struct
-    let mut results = SolverResult::new(self.network.links.len(), self.network.nodes.len(), steps);
+    let mut results = SolverResult::new(self.network.links.len(), self.network.nodes.len(), report_steps);
 
     // calculate the initial state
     let mut state = SolverState::new_with_initial_values(self.network);
@@ -161,10 +161,10 @@ impl<'a> HydraulicSolver<'a> {
       results.append(&step_result, 0);
 
       // do parallel solves using Rayon
-      let par_results: Vec<SolverState> = (1..steps).into_par_iter().map(|step| {
+      let par_results: Vec<SolverState> = (1..report_steps).into_par_iter().map(|step| {
         let mut state = state.clone();
         // apply the head/demand patterns to the state
-        self.apply_patterns(&mut state, step);
+        self.apply_patterns(&mut state, step * self.network.options.time_options.report_timestep);
         self.solve(&mut state, step).unwrap()
       }).collect();
       for (step,step_result) in par_results.iter().enumerate() {
@@ -172,22 +172,57 @@ impl<'a> HydraulicSolver<'a> {
       }
     } else {
       // do sequential solves
-      for step in 0..steps {
+      let mut time = 0;
+      while time <= self.network.options.time_options.duration {
         // apply the head pattern to reservoirs with a head pattern
-        self.apply_patterns(&mut state, step);
+        self.apply_patterns(&mut state, time);
         // solve the step, update the state
-        state = self.solve(&mut state, step).unwrap();
+        state = self.solve(&mut state, time).unwrap();
         // update the heads of the tanks (= elevation + level) before running the next step
-        results.append(&state, step);
-        if steps > 1 {
-          self.update_tanks(&state.flows, &mut state.heads);
+        if time % self.network.options.time_options.report_timestep == 0 {
+          results.append(&state, time / self.network.options.time_options.report_timestep);
         }
+        time += self.next_time_step(time, &mut state);
+        // time += self.network.options.time_options.hydraulic_timestep;
       }
     }
     // convert the units back to the original units
     results.convert_units(&self.network.options.flow_units, &self.network.options.unit_system);
 
     results
+  }
+
+  // Calculate the next time step. The next time step is:
+  // - the report timestep if no quality, tanks, or pressure controls
+  
+
+  fn next_time_step(&self, current_time: usize, state: &mut SolverState) -> usize {
+
+    let times = &self.network.options.time_options;
+
+    // if no quality, tanks, rules and controls, simply return report time
+    if self.network.controls.len() == 0 && !self.network.has_tanks() && !self.network.has_quality() {
+      return times.report_timestep;
+    }
+
+    // time to next report
+    let t_report = current_time % times.report_timestep;
+    // time to next pattern
+    let t_pattern = current_time % times.pattern_timestep;
+
+    // time for the next tank to fill or drain
+    let t_tanks = self.network.nodes.iter()
+        .zip(state.heads.iter())
+        .zip(state.demands.iter())
+        .map(|((node, head), demand)| {
+          let NodeType::Tank(tank) = &node.node_type else { return usize::MAX };
+          tank.time_to_fill_or_drain(*head, *demand)
+        })
+        .min().unwrap_or(usize::MAX);
+
+    let next_time = *[t_report, t_pattern, t_tanks, times.hydraulic_timestep].iter().filter(|&x| *x > 0).min().unwrap();
+
+    return next_time
   }
 
   /// Solve the network using the Global Gradient Algorithm (Todini & Pilati, 1987) for a single step
@@ -274,8 +309,8 @@ impl<'a> HydraulicSolver<'a> {
       // update flows and statuses and get the iteration statistics
       let stats = self.update_links(state, &link_coefficients);
 
-      // update links connected to tanks (close/open them based on tank level)
-      self.update_tank_links(&state.flows, &state.heads, &mut state.statuses);
+      // update links connected to tanks (close/open them based on tank level) and gather flow balance into/out of tanks
+      self.update_tank_links(state);
 
 
       debug!(">> Iteration {}: Relative change: {:.6}, Status changed: {}", iteration, stats.relative_change, stats.status_changed);
@@ -399,11 +434,9 @@ impl<'a> HydraulicSolver<'a> {
     stats
   }
 
-  fn apply_patterns(&self, state: &mut SolverState, step: usize) {
+  fn apply_patterns(&self, state: &mut SolverState, time: usize) {
 
     let time_options = &self.network.options.time_options;
-    // get the time
-    let time = step * time_options.report_timestep;
     // get the pattern time
     let pattern_time = time_options.pattern_start + time;
     // get pattern index
@@ -434,22 +467,26 @@ impl<'a> HydraulicSolver<'a> {
 
   }
 
-  fn update_tank_links(&self, flows: &Vec<f64>, heads: &Vec<f64>, statuses: &mut Vec<LinkStatus>) {
+  fn update_tank_links(&self, state: &mut SolverState) {
     // iterate over the tanks
     for (tank_index, node) in self.network.nodes.iter().enumerate() {
       if let NodeType::Tank(tank) = &node.node_type {
         // check if the tank is closed for filling
-        let fill_closed = heads[tank_index] >= tank.elevation + tank.max_level && !tank.overflow;
-        let empty_closed = heads[tank_index] <= tank.elevation + tank.min_level;
+        let fill_closed = state.heads[tank_index] >= tank.elevation + tank.max_level && !tank.overflow;
+        let empty_closed = state.heads[tank_index] <= tank.elevation + tank.min_level;
 
         // iterate over the links connected to the tank
         for link_index in &tank.links_to {
-          if fill_closed && flows[*link_index] > 0.0 { statuses[*link_index] = LinkStatus::TempClosed; }
-          if empty_closed && flows[*link_index] < 0.0 { statuses[*link_index] = LinkStatus::TempClosed; }
+          // add the flow to the demand of the tank (positive flow is into the tank)
+          state.demands[tank_index] += state.flows[*link_index];
+          if fill_closed && state.flows[*link_index] > 0.0 { state.statuses[*link_index] = LinkStatus::TempClosed; }
+          if empty_closed && state.flows[*link_index] < 0.0 { state.statuses[*link_index] = LinkStatus::TempClosed; }
         }
         for link_index in &tank.links_from {
-          if fill_closed && flows[*link_index] < 0.0 { statuses[*link_index] = LinkStatus::TempClosed; }
-          if empty_closed && flows[*link_index] > 0.0 { statuses[*link_index] = LinkStatus::TempClosed; }
+          // subtract the flow from the demand of the tank (negative flow is out of the tank)
+          state.demands[tank_index] -= state.flows[*link_index];
+          if fill_closed && state.flows[*link_index] < 0.0 { state.statuses[*link_index] = LinkStatus::TempClosed; }
+          if empty_closed && state.flows[*link_index] > 0.0 { state.statuses[*link_index] = LinkStatus::TempClosed; }
         }
       }
     }
