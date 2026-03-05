@@ -4,12 +4,14 @@ use faer::linalg::cholesky::llt::factor::LltError::NonPositivePivot;
 use faer::sparse::linalg::solvers::{SymbolicLlt, Llt};
 use faer::{Mat, Side};
 use faer::prelude::*;
-use serde::Serialize;
+
 use rayon::prelude::*;
 
 use crate::solver::state::SolverState;
 use crate::solver::result::SolverResult;
 use crate::solver::matrix::{CSCIndex, ResistanceCoefficients, find_csc_index};
+
+use crate::model::units::{Ft, Cfs, Ft3};
 
 
 use simplelog::{warn, debug, error};
@@ -19,28 +21,24 @@ use crate::model::node::NodeType;
 use crate::model::link::{LinkType, LinkTrait, LinkStatus};
 use crate::model::network::Network;
 use crate::model::valve::ValveType;
-use crate::model::units::{FlowUnits, UnitSystem};
 use crate::model::control::ControlCondition;
 
-
 pub struct FlowBalance {
-  pub total_demand: f64,
-  pub total_supply: f64,
-  pub error: f64,
+  pub total_demand: Cfs,
+  pub total_supply: Cfs,
+  pub error: Cfs,
 }
 
 
 #[derive(Default)]
 pub struct IterationStatistics {
-  pub sum_dq: f64,
-  pub sum_q: f64,
-  pub max_dq: f64,
+  pub sum_dq: Cfs,
+  pub sum_q: Cfs,
+  pub max_dq: Cfs,
   pub max_dq_index: usize,
   pub status_changed: bool,
-  pub relative_change: f64,
+  pub relative_change: Cfs,
 }
-
-
 
 pub struct HydraulicSolver<'a> {
   network: &'a Network, 
@@ -254,7 +252,6 @@ impl<'a> HydraulicSolver<'a> {
     // where A is the Jacobian matrix, h is the vector of heads, and rhs is the vector of right-hand side values
     // A is a sparse matrix, so we use the Compressed Sparse Column (CSC) format to store it
     // h is the vector of heads, and rhs is the vector of right-hand side values
-
     let unknown_nodes = self.node_to_unknown.iter().filter(|&x| x.is_some()).count();
 
     // pre-allocate the Jacobian matrix values and the right-hand side values

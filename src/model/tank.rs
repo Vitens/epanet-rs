@@ -1,5 +1,5 @@
 use crate::model::units::UnitConversion;
-use crate::model::units::{FlowUnits, UnitSystem};
+use crate::model::units::{FlowUnits, UnitSystem, Cfs, Ft, Ft3};
 use crate::constants::*;
 use crate::model::curve::Curve;
 use std::sync::Arc;
@@ -7,12 +7,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Tank {
-  pub elevation: f64,        // elevation of the tank (ft)
-  pub initial_level: f64,    // initial level of the tank (ft)
-  pub min_level: f64,        // minimum level of the tank (ft)
-  pub max_level: f64,        // maximum level of the tank (ft)
-  pub diameter: f64,        // nominal diameter of the tank (ft)
-  pub min_volume: f64,      // minimum volume of the tank (ft^3)
+  pub elevation: Ft,        // elevation of the tank (ft)
+  pub initial_level: Ft,    // initial level of the tank (ft)
+  pub min_level: Ft,        // minimum level of the tank (ft)
+  pub max_level: Ft,        // maximum level of the tank (ft)
+  pub diameter: Ft,        // nominal diameter of the tank (ft)
+  pub min_volume: Ft3,      // minimum volume of the tank (ft^3)
   pub volume_curve_id: Option<Box<str>>, // id of the volume curve
   pub overflow: bool,                   // whether the tank has an overflow
   #[serde(skip)]
@@ -26,7 +26,7 @@ pub struct Tank {
 impl Tank {
 
   /// Calculate the time to reach a given level given the current level and flow
-  pub fn time_to_reach_level(&self, current_level: f64, target_level: f64, flow: f64) -> usize {
+  pub fn time_to_reach_level(&self, current_level: Ft, target_level: Ft, flow: Cfs) -> usize {
 
     // check if the target level is above the max level or below the min level
     if target_level > self.max_level {
@@ -54,7 +54,7 @@ impl Tank {
     return usize::MAX;
   }
   /// calculate the time to fill or drain the tank given the current level and flow
-  pub fn time_to_fill_or_drain(&self, current_level: f64, flow: f64) -> usize {
+  pub fn time_to_fill_or_drain(&self, current_level: Ft, flow: Cfs) -> usize {
 
     if flow == 0.0 {
       return usize::MAX;
@@ -65,7 +65,7 @@ impl Tank {
 
   }
 
-  pub fn volume_at_level(&self, level: f64) -> f64 {
+  pub fn volume_at_level(&self, level: Ft) -> Ft3 {
     // if the level is negative, return 0.0
     if level < 0.0 {
       return 0.0;
@@ -79,10 +79,10 @@ impl Tank {
     }
   }
 
-  pub fn volume_at_head(&self, head: f64) -> f64 {
+  pub fn volume_at_head(&self, head: Ft) -> Ft3 {
     self.volume_at_level(head - self.elevation)
   }
-  pub fn min_volume(&self) -> f64 {
+  pub fn min_volume(&self) -> Ft3 {
     if self.volume_curve.is_some() {
       panic!("Tank volume curves not supported yet!");
     }
@@ -90,7 +90,7 @@ impl Tank {
       return self.min_level * PI * self.diameter * self.diameter / 4.0;
     }
   }
-  pub fn max_volume(&self) -> f64 {
+  pub fn max_volume(&self) -> Ft3 {
     if self.volume_curve.is_some() {
       panic!("Tank volume curves not supported yet!");
     }
@@ -99,7 +99,7 @@ impl Tank {
     }
   }
 
-  pub fn new_head(&self, delta_volume: f64, current_head: f64) -> f64 {
+  pub fn new_head(&self, delta_volume: Ft3, current_head: Ft) -> Ft {
 
     let mut level = current_head - self.elevation;
 

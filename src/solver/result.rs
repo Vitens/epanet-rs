@@ -1,12 +1,12 @@
 use crate::solver::state::SolverState;
-use crate::model::units::{FlowUnits, UnitSystem};
+use crate::model::units::{Ft, Cfs, FlowUnits, UnitSystem};
 use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct SolverResult {
-  pub flows: Vec<Vec<f64>>,
-  pub heads: Vec<Vec<f64>>,
-  pub demands: Vec<Vec<f64>>,
+  pub flows: Vec<Vec<Cfs>>,
+  pub heads: Vec<Vec<Ft>>,
+  pub demands: Vec<Vec<Cfs>>,
 }
 
 impl SolverResult {

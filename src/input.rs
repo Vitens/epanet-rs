@@ -239,7 +239,6 @@ impl Network {
     for link in self.links.iter_mut() {
       link.convert_units(&self.options.flow_units, &self.options.unit_system, false);
     }
-
   }
 
   /// Read a junction from a parts iterator

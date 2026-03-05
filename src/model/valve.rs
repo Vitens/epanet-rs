@@ -1,6 +1,6 @@
 use crate::model::link::{LinkTrait, LinkStatus, LinkCoefficients, NodeModification};
 use crate::model::curve::Curve;
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::units::{FlowUnits, UnitSystem, UnitConversion, Ft};
 use crate::constants::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -18,7 +18,7 @@ pub enum ValveType {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Valve {
-  pub diameter: f64,
+  pub diameter: Ft,
   pub setting: f64,
   pub curve_id: Option<Box<str>>,
   pub valve_type: ValveType,

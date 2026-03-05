@@ -1,6 +1,6 @@
 use crate::model::link::{LinkTrait, LinkCoefficients};
 use crate::model::options::HeadlossFormula;
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::units::{Ft, Cfs, FlowUnits, UnitSystem, UnitConversion};
 use crate::model::link::LinkStatus;
 use crate::constants::*;
 
@@ -11,20 +11,17 @@ use serde::{Deserialize, Serialize};
 // Constants used for computing Darcy-Weisbach friction factor (src: hydcoefs.c from EPANET 2.3)
 const A1 : f64 =  3.14159265358979323850e+03;   // 1000*PI
 const A2 : f64 =  1.57079632679489661930e+03;   // 500*PI
-// const A3 : f64 =  5.02654824574366918160e+01;   // 16*PI
-// const A4 : f64 =  6.28318530717958647700e+00;   // 2*PI
 const A8 : f64 =  4.61841319859066668690e+00;   // 5.74*(PI/4)^.9
 const A9 : f64 = -8.68588963806503655300e-01;  // -2/ln(10)
-// const AA : f64 = -1.5634601348517065795e+00;   // -2*.9*2/ln(10)
 const AB : f64 =  3.28895476345399058690e-03;   // 5.74/(4000^.9)
 const AC : f64 = -5.14214965799093883760e-03;  // AA*AB
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Pipe {
-  pub diameter: f64,
-  pub length: f64,
-  pub roughness: f64,
-  pub minor_loss: f64,
+  pub diameter: Ft,
+  pub length: Ft,
+  pub roughness: f64,  // roughness is either in ft (Darcy-Weisbach) or unitless (Hazen-Williams, Chezy-Manning)
+  pub minor_loss: f64, 
   pub check_valve: bool,
   /// Headloss formula to use for the pipe
   pub headloss_formula: HeadlossFormula
@@ -34,7 +31,7 @@ const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
 
 impl LinkTrait for Pipe {
   #[inline]
-  fn coefficients(&self, q: f64, r: f64, _setting: f64, status: LinkStatus, _:f64, _:f64) -> LinkCoefficients {
+  fn coefficients(&self, q: Cfs, r: f64, _setting: f64, status: LinkStatus, _:f64, _:f64) -> LinkCoefficients {
 
     if self.check_valve && q < 0.0 {
       return LinkCoefficients::new_status(1.0 / BIG_VALUE, q, LinkStatus::TempClosed);
@@ -112,7 +109,7 @@ impl Pipe {
 
     let q_abs = q.abs();
     let ml = self.minor_loss;
-    let e = (self.roughness / 1000.0) / self.diameter; // relative roughness (use mf to ft)
+    let e = (self.roughness) / self.diameter; // relative roughness (use mf to ft)
     let s = VISCOSITY * self.diameter;      // kinematic viscosity * diameter
     // Laminar flow (Re <= 2000)
     // use Hagen-Poiseuille formula

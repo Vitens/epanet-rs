@@ -3,6 +3,15 @@ use std::str::FromStr;
 use crate::constants::*;
 use serde::{Deserialize, Serialize};
 
+
+// type aliases for internal units
+// no enforcement (for now), only for additional clarity
+pub type Ft = f64;
+pub type Cfs = f64;
+pub type Psi = f64;
+pub type Ft3 = f64;
+
+
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Deserialize, Serialize)]
 pub enum FlowUnits {
   // Imperial units

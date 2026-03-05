@@ -1,9 +1,9 @@
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::units::{Cfs, FlowUnits, UnitSystem, UnitConversion};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Junction {
-  pub basedemand: f64,
+  pub basedemand: Cfs,
   pub pattern: Option<Box<str>>,
 }
 

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use crate::constants::*;
-use crate::model::units::{FlowUnits, UnitSystem};
+use crate::model::units::{Ft, Cfs, FlowUnits, UnitSystem};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Curve {
@@ -26,8 +26,8 @@ impl Curve {
 
 #[derive(Debug, Clone)]
 pub struct HeadCurve {
-  pub flows: Vec<f64>,
-  pub heads: Vec<f64>,
+  pub flows: Vec<Cfs>,
+  pub heads: Vec<Ft>,
   pub curve_type: HeadCurveType,
   pub statistics: HeadCurveStatistics,
 }
@@ -41,10 +41,10 @@ pub enum HeadCurveType {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HeadCurveStatistics {
-  pub h_max: f64,           // maximum head
-  pub h_shutoff: f64,       // shutoff head
-  pub q_max: f64,           // maximum flow
-  pub q_initial: f64,       // design flow (= initial flow)
+  pub h_max: Ft,           // maximum head
+  pub h_shutoff: Ft,       // shutoff head
+  pub q_max: Cfs,           // maximum flow
+  pub q_initial: Cfs,       // design flow (= initial flow)
   pub r: f64,               // flow coefficient
   pub n: f64,               // pump exponent
 }
@@ -76,7 +76,7 @@ impl HeadCurve {
       statistics: statistics,
     }
   }
-  pub fn coefficients(&self, q: f64) -> (f64, f64) {
+  pub fn coefficients(&self, q: Cfs) -> (Ft, f64) {
     // find the index of the curve segment that contains the flow
     // clamp the index to the valid range
     let x2 = self.flows.partition_point(|&x| x < q).max(1).min(self.flows.len()-1);
@@ -89,7 +89,7 @@ impl HeadCurve {
   }
 
   // Calculate the maximum head, minimum head, and maximum flow from the curve
-  pub fn compute_curve_statistics(flows: &Vec<f64>, heads: &Vec<f64>) -> HeadCurveStatistics {
+  pub fn compute_curve_statistics(flows: &Vec<Cfs>, heads: &Vec<Ft>) -> HeadCurveStatistics {
 
     if flows.len() == 1 {
 
@@ -162,7 +162,7 @@ impl HeadCurve {
     }
   }
   /// Validate the curve to ensure the head is decreasing and the flow is increasing monotonically
-  pub fn validate_curve(flows: &Vec<f64>, heads: &Vec<f64>) -> bool {
+  pub fn validate_curve(flows: &Vec<Cfs>, heads: &Vec<Ft>) -> bool {
     for i in 1..heads.len() {
       if flows[i] <= flows[i-1] || heads[i] >= heads[i-1] {
         return false;
@@ -171,7 +171,7 @@ impl HeadCurve {
     true
   }
   /// Find intercept and slope of custom pump curve segment which contains speed adjusted flow 
-  pub fn custom_curve_coefficients(&self, q: f64, speed: f64) -> (f64, f64) {
+  pub fn custom_curve_coefficients(&self, q: Cfs, speed: f64) -> (f64, f64) {
     // speed adjust the flow
     let q_adjusted = q / speed;
     // compute the coefficients of the curve segment that contains the speed adjusted flow
@@ -195,7 +195,7 @@ impl HeadCurve {
   }
 
   // return hydraulic gradient and head loss
-  pub fn curve_coefficients(&self, q: f64, speed: f64) -> (f64, f64) {
+  pub fn curve_coefficients(&self, q: Cfs, speed: f64) -> (f64, f64) {
 
     // for a custom curve, find the slope and intercept of the curve segment that contains the speed adjusted flow
     if self.curve_type == HeadCurveType::Custom {
