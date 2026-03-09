@@ -22,6 +22,7 @@ use crate::model::link::{LinkType, LinkTrait, LinkStatus};
 use crate::model::network::Network;
 use crate::model::valve::ValveType;
 use crate::model::control::ControlCondition;
+use crate::model::options::SimulationOptions;
 
 pub struct FlowBalance {
   pub total_demand: Cfs,
@@ -37,7 +38,14 @@ pub struct IterationStatistics {
   pub max_dq: Cfs,
   pub max_dq_index: usize,
   pub status_changed: bool,
-  pub relative_change: Cfs,
+}
+impl IterationStatistics {
+  pub fn relative_change(&self) -> f64 {
+    self.sum_dq / (self.sum_q + Q_ZERO)
+  }
+  pub fn max_dq_converted(&self, options: &SimulationOptions) -> Cfs {
+    self.max_dq * options.flow_units.per_cfs()
+  }
 }
 
 pub struct HydraulicSolver<'a> {
@@ -329,21 +337,21 @@ impl<'a> HydraulicSolver<'a> {
       }
 
       // update flows and statuses and get the iteration statistics
-      let stats = self.update_links(state, &link_coefficients);
-      // update the emitter flows
-      self.update_emitter_flows(state);
+      let mut stats = self.update_links(state, &link_coefficients);
+      // update the emitter flows and iteration statistics
+      self.update_emitter_flows(state, &mut stats);
 
 
       // update links connected to tanks (close/open them based on tank level) and gather flow balance into/out of tanks
       self.update_tank_links(state);
 
 
-      debug!(">> Iteration {}: Relative change: {:.6}, Status changed: {}", iteration, stats.relative_change, stats.status_changed);
-      debug!(">>>> Max flow change: {:.6} for link {}", stats.max_dq, self.network.links[stats.max_dq_index].id);
+      debug!(">> Iteration {}: Relative change: {:.6}, Status changed: {}", iteration, stats.relative_change(), stats.status_changed);
+      debug!(">>>> Max flow change: {:.6} for link {}", stats.max_dq_converted(&self.network.options), self.network.links[stats.max_dq_index].id);
 
       let max_flow_change = self.network.options.max_flow_change.unwrap_or(BIG_VALUE);
 
-      if stats.relative_change < self.network.options.accuracy && !stats.status_changed && stats.max_dq < max_flow_change {
+      if stats.relative_change() < self.network.options.accuracy && !stats.status_changed && stats.max_dq_converted(&self.network.options) < max_flow_change {
 
           // apply pressure controls to the state, if any pressure controls are active, return the state
           if self.apply_pressure_controls(state) {
@@ -488,14 +496,10 @@ impl<'a> HydraulicSolver<'a> {
       stats.sum_dq += dq.abs();
       stats.sum_q  += state.flows[i].abs();
     }
-    // update the relative change
-    stats.relative_change = stats.sum_dq / (stats.sum_q + Q_ZERO);
-    // convert max_dq and max_dh to correct units
-    stats.max_dq *= self.network.options.flow_units.per_cfs();
     // return the iteration statistics
     stats
   }
-  fn update_emitter_flows(&self, state: &mut SolverState) {
+  fn update_emitter_flows(&self, state: &mut SolverState, stats: &mut IterationStatistics) {
     // iterate over all junctions
     for (i, node) in self.network.nodes.iter().enumerate() {
       if let NodeType::Junction(junction) = &node.node_type {
@@ -507,6 +511,12 @@ impl<'a> HydraulicSolver<'a> {
           let dq = (y - dh) * g_inv;
           // update the emitter flow
           state.emitter_flows[i] -= dq;
+          // update the iteration statistics
+          stats.sum_dq += dq.abs();
+          stats.sum_q += state.emitter_flows[i].abs();
+          if dq.abs() > stats.max_dq {
+            stats.max_dq = dq.abs();
+          }
         }
       }
     }
