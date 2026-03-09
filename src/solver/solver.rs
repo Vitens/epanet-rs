@@ -434,8 +434,11 @@ impl<'a> HydraulicSolver<'a> {
 
   fn calculate_excess_flows(&self, state: &SolverState, excess_flows: &mut Vec<Cfs>) {
       // calculate excess flows at each node (needed for PSV/PRV valves)
+      for (i, emitter_flow) in state.emitter_flows.iter().enumerate() {
+        excess_flows[i] = -emitter_flow;
+      }
       for (i, demand) in state.demands.iter().enumerate() {
-        excess_flows[i] = -demand;
+        excess_flows[i] -= demand;
       }
       for (i, link) in self.network.links.iter().enumerate() {
         let q = state.flows[i];
