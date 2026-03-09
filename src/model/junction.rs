@@ -13,9 +13,8 @@ pub struct Junction {
 }
 
 impl Junction {
-  pub fn emitter_coefficients(&self, q: Cfs) -> (f64, f64) {
+  pub fn emitter_coefficients(&self, q: Cfs, q_exp: f64) -> (f64, f64) {
 
-    let q_exp = 2.0;
     // get the emitter coefficient
     let ke = self.emitter_coefficient.max(SMALL_VALUE);
 

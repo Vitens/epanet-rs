@@ -112,7 +112,7 @@
  Unbalanced         	Continue 10
  Pattern            	1
  Demand Multiplier  	1.0
- Emitter Exponent   	0.5
+ Emitter Exponent   	0.7
  Quality            	None mg/L
  Diffusivity        	1
  Tolerance          	0.01

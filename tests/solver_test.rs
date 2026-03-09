@@ -178,10 +178,17 @@ fn test_solve_emitters_network() {
 
   let expected_heads: Vec<(&str, f64)> = vec![
     ("1", 10.00),
-    ("2", 9.75),
+    ("2", 6.41),
+    ("3", 4.85),
+    ("4", 3.13),
+    ("5", 2.84),
   ];
   let expected_flows: Vec<(&str, f64)> = vec![
-    ("1", 2.06),
+    ("1", 8.61),
+    ("2", 2.56),
+    ("3", 2.70),
+    ("4", 1.03),
+    ("5", -4.00),
   ];
 
   verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);

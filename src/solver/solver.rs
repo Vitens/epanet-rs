@@ -405,16 +405,21 @@ impl<'a> HydraulicSolver<'a> {
     for (i, node) in self.network.nodes.iter().enumerate() {
       if let NodeType::Junction(junction) = &node.node_type {
         if junction.emitter_coefficient > 0.0 {
-          // get the row index of the junction
-          let row = self.node_to_unknown[i].unwrap();
+          // get the index for the diagonal entry in the Jacobian matrix
+          // TODO: precompute indices for emitters
+          let row = find_csc_index(self.sparsity_pattern.as_ref(), i, i).unwrap();
+          // get the index for the unknown node in the RHS vector
+          let idx = self.node_to_unknown[i].unwrap();
 
-          let (g_inv, y) = junction.emitter_coefficients(state.emitter_flows[i]);
+          dbg!(junction.emitter_coefficient);
 
-          // update matrix diagnoal
-          rhs[row] += (y + node.elevation) * g_inv;
+          let (g_inv, y) = junction.emitter_coefficients(state.emitter_flows[i], self.network.options.emitter_exponent);
+
+          // update RHS
+          rhs[idx] += (y + node.elevation) * g_inv - state.emitter_flows[i];
+          // update matrix diagonal
           values[row] += g_inv;
 
-          rhs[row] -= state.emitter_flows[i];
         }
 
       }
@@ -484,12 +489,11 @@ impl<'a> HydraulicSolver<'a> {
         if junction.emitter_coefficient > 0.0 {
           // get the driving head difference
           let dh = state.heads[i] - node.elevation;
-          let (g_inv, y) = junction.emitter_coefficients(state.emitter_flows[i]);
+          let (g_inv, y) = junction.emitter_coefficients(state.emitter_flows[i], self.network.options.emitter_exponent);
           // update the emitter flow
           let dq = (y - dh) * g_inv;
           // update the emitter flow
           state.emitter_flows[i] -= dq;
-          dbg!(state.emitter_flows[i]);
         }
       }
     }
