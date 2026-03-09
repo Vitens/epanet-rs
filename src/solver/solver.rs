@@ -359,6 +359,9 @@ impl<'a> HydraulicSolver<'a> {
     Err(format!("Maximum number of iterations reached: {}", self.network.options.max_trials))
   }
 
+  // Assemble the Jacobian matrix and the right-hand side vector for the system of equations
+  // First assemble the contributions from the links
+  // Then assemble the contributions from the emitters (virtual links)
   fn assemble_jacobian(&self, state: &mut SolverState, values: &mut Vec<f64>, rhs: &mut Vec<f64>, link_coefficients: &mut ResistanceCoefficients, excess_flows: &Vec<f64>) {
     // iterate over the links
     for (i, link) in self.network.links.iter().enumerate() {
@@ -417,10 +420,7 @@ impl<'a> HydraulicSolver<'a> {
           // get the index for the unknown node in the RHS vector
           let idx = self.node_to_unknown[i].unwrap();
 
-          dbg!(junction.emitter_coefficient);
-
           let (g_inv, y) = junction.emitter_coefficients(state.emitter_flows[i], self.network.options.emitter_exponent);
-
           // update RHS
           rhs[idx] += (y + node.elevation) * g_inv - state.emitter_flows[i];
           // update matrix diagonal
