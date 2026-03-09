@@ -1,6 +1,7 @@
 use crate::model::link::{LinkTrait, LinkStatus, LinkCoefficients, NodeModification};
 use crate::model::curve::Curve;
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion, Ft};
+use crate::model::units::{UnitSystem, UnitConversion, Ft};
+use crate::model::options::SimulationOptions;
 use crate::constants::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -291,30 +292,47 @@ impl Valve {
 }
 
 impl UnitConversion for Valve {
-  fn convert_units(&mut self, flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
-    if system == &UnitSystem::SI {
-      if reverse {
-        self.diameter = self.diameter * MperFT * 1e3; // convert in to mm
-      }
-      else {
-        self.diameter = self.diameter / 1e3 / MperFT; // convert mm to in
-      }
-    } else {
 
+  fn convert_to_standard(&mut self, options: &SimulationOptions) {
+    if options.unit_system == UnitSystem::US {
       self.diameter = self.diameter / 12.0; // convert in to ft
-
+      // convert valve setting from PSI to feet
       if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV || self.valve_type == ValveType::PBV {
         self.setting = self.setting / PSIperFT; // convert PSI to feet
       }
+    } else {
+      self.diameter = self.diameter / 1000.0; // convert mm to m
     }
 
-    // for FCV, convert the setting to CFS
+    // convert the diameter from the given unit system to feet
+    self.diameter /= options.unit_system.per_feet();
+    // convert valve setting from the given unit system to cfs
     if self.valve_type == ValveType::FCV {
-      self.setting = self.setting / flow.per_cfs();
+      self.setting = self.setting / options.flow_units.per_cfs();
     }
-    // for PRV and PSV, convert the setting to feet
-    if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV {
-      self.setting = self.setting / system.per_feet();
+    // convert valve setting from the given unit system to feet
+    if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV || self.valve_type == ValveType::PBV {
+      self.setting = self.setting / options.unit_system.per_feet();
+    }
+  }
+  fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    if options.unit_system == UnitSystem::US {
+      self.diameter = self.diameter * 12.0; // convert ft to in
+      if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV || self.valve_type == ValveType::PBV {
+        self.setting = self.setting * PSIperFT; // convert feet to PSI
+      }
+    } else {
+      self.diameter = self.diameter * 1000.0; // convert m to mm
+    }
+    // convert the diameter from the given unit system to feet
+    self.diameter *= options.unit_system.per_feet();
+    // convert valve setting from the given unit system to cfs
+    if self.valve_type == ValveType::FCV {
+      self.setting = self.setting * options.flow_units.per_cfs();
+    }
+    // convert valve setting from the given unit system to feet
+    if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV || self.valve_type == ValveType::PBV {
+      self.setting = self.setting * options.unit_system.per_feet();
     }
   }
 }

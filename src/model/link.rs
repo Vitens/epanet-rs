@@ -1,7 +1,8 @@
 use crate::model::pipe::Pipe;
 use crate::model::pump::Pump;
 use crate::model::valve::Valve;
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::units::UnitConversion;
+use crate::model::options::SimulationOptions;
 use crate::constants::Q_ZERO;
 
 use serde::{Deserialize, Serialize};
@@ -140,11 +141,18 @@ impl LinkTrait for Link {
 
 
 impl UnitConversion for Link {
-  fn convert_units(&mut self, flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
+  fn convert_to_standard(&mut self, options: &SimulationOptions) {
     match &mut self.link_type {
-      LinkType::Pipe(pipe) => pipe.convert_units(flow, system, reverse),
-      LinkType::Pump(pump) => pump.convert_units(flow, system, reverse),
-      LinkType::Valve(valve) => valve.convert_units(flow, system, reverse),
+      LinkType::Pipe(pipe) => pipe.convert_to_standard(options),
+      LinkType::Pump(pump) => pump.convert_to_standard(options),
+      LinkType::Valve(valve) => valve.convert_to_standard(options),
+    }
+  }
+  fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    match &mut self.link_type {
+      LinkType::Pipe(pipe) => pipe.convert_from_standard(options),
+      LinkType::Pump(pump) => pump.convert_from_standard(options),
+      LinkType::Valve(valve) => valve.convert_from_standard(options),
     }
   }
 }

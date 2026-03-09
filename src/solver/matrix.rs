@@ -1,5 +1,3 @@
-use faer::sparse::SymbolicSparseColMatRef;
-
 pub struct ResistanceCoefficients {
   pub g_inv: Vec<f64>,
   pub y: Vec<f64>,

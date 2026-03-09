@@ -11,7 +11,7 @@ use crate::solver::state::SolverState;
 use crate::solver::result::SolverResult;
 use crate::solver::matrix::{CSCIndex, ResistanceCoefficients, find_csc_index};
 
-use crate::model::units::{Ft, Cfs, Ft3};
+use crate::model::units::{Cfs, Ft3};
 
 
 use simplelog::{warn, debug, error};
@@ -323,6 +323,9 @@ impl<'a> HydraulicSolver<'a> {
 
       // update flows and statuses and get the iteration statistics
       let stats = self.update_links(state, &link_coefficients);
+      // update the emitter flows
+      self.update_emitter_flows(state);
+
 
       // update links connected to tanks (close/open them based on tank level) and gather flow balance into/out of tanks
       self.update_tank_links(state);
@@ -348,7 +351,9 @@ impl<'a> HydraulicSolver<'a> {
     }
     Err(format!("Maximum number of iterations reached: {}", self.network.options.max_trials))
   }
+
   fn assemble_jacobian(&self, state: &mut SolverState, values: &mut Vec<f64>, rhs: &mut Vec<f64>, link_coefficients: &mut ResistanceCoefficients, excess_flows: &Vec<f64>) {
+    // iterate over the links
     for (i, link) in self.network.links.iter().enumerate() {
       let q = state.flows[i];
       let csc_index = &self.csc_indices[i];
@@ -395,9 +400,28 @@ impl<'a> HydraulicSolver<'a> {
         values[csc_index.diag_v.unwrap()] += downstream_modification.diagonal_add;
       }
     }
+
+    // iterate over emitters
+    for (i, node) in self.network.nodes.iter().enumerate() {
+      if let NodeType::Junction(junction) = &node.node_type {
+        if junction.emitter_coefficient > 0.0 {
+          // get the row index of the junction
+          let row = self.node_to_unknown[i].unwrap();
+
+          let (g_inv, y) = junction.emitter_coefficients(state.emitter_flows[i]);
+
+          // update matrix diagnoal
+          rhs[row] += (y + node.elevation) * g_inv;
+          values[row] += g_inv;
+
+          rhs[row] -= state.emitter_flows[i];
+        }
+
+      }
+    }
   }
 
-  fn calculate_excess_flows(&self, state: &SolverState, excess_flows: &mut Vec<f64>) {
+  fn calculate_excess_flows(&self, state: &SolverState, excess_flows: &mut Vec<Cfs>) {
       // calculate excess flows at each node (needed for PSV/PRV valves)
       for (i, demand) in state.demands.iter().enumerate() {
         excess_flows[i] = -demand;
@@ -453,6 +477,24 @@ impl<'a> HydraulicSolver<'a> {
     // return the iteration statistics
     stats
   }
+  fn update_emitter_flows(&self, state: &mut SolverState) {
+    // iterate over all junctions
+    for (i, node) in self.network.nodes.iter().enumerate() {
+      if let NodeType::Junction(junction) = &node.node_type {
+        if junction.emitter_coefficient > 0.0 {
+          // get the driving head difference
+          let dh = state.heads[i] - node.elevation;
+          let (g_inv, y) = junction.emitter_coefficients(state.emitter_flows[i]);
+          // update the emitter flow
+          let dq = (y - dh) * g_inv;
+          // update the emitter flow
+          state.emitter_flows[i] -= dq;
+          dbg!(state.emitter_flows[i]);
+        }
+      }
+    }
+
+  }
 
   fn apply_patterns(&self, state: &mut SolverState, time: usize) {
 
@@ -483,7 +525,7 @@ impl<'a> HydraulicSolver<'a> {
         // if no pattern, return the basedemand times the global demand multiplier
         return junction.basedemand * self.network.options.demand_multiplier;
 
-      }).collect::<Vec<f64>>()
+      }).collect::<Vec<Cfs>>()
 
   }
 
@@ -524,7 +566,7 @@ impl<'a> HydraulicSolver<'a> {
     for (tank_index, node) in self.network.nodes.iter().enumerate() {
       if let NodeType::Tank(tank) = &node.node_type {
         // calculate flow balance of the tank
-        let delta_volume = state.demands[tank_index] * timestep as f64; // in ft^3
+        let delta_volume = state.demands[tank_index] * timestep as Ft3; // in ft^3
         // update the head of the tank
         let new_head = tank.new_head(delta_volume, state.heads[tank_index]);
         // update the head of the tank
@@ -560,11 +602,11 @@ impl<'a> HydraulicSolver<'a> {
   }
 
   /// Calculate the flow balance error
-  fn flow_balance(&self, demands: &Vec<f64>, flows: &Vec<f64>) -> FlowBalance {
+  fn flow_balance(&self, demands: &Vec<Cfs>, flows: &Vec<Cfs>) -> FlowBalance {
 
-    let sum_demand: f64 = demands.iter().sum();
+    let sum_demand: Cfs = demands.iter().sum();
 
-    let mut sum_supply: f64 = 0.0;
+    let mut sum_supply: Cfs = 0.0;
     for (i, link) in self.network.links.iter().enumerate() {
       if !matches!(self.network.nodes[link.end_node].node_type, NodeType::Junction { .. }) {
         sum_supply -= flows[i];

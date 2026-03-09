@@ -21,10 +21,10 @@ impl SolverResult {
   }
 
   // convert the solver units back to the original units
-  pub fn convert_units(&mut self, flow_units: &FlowUnits, unit_system: &UnitSystem) {
+  pub fn convert_units(&mut self, to_flow_units: &FlowUnits, to_unit_system: &UnitSystem) {
 
-    let flow_scale = flow_units.per_cfs();
-    let head_scale = unit_system.per_feet();
+    let flow_scale = to_flow_units.per_cfs();
+    let head_scale = to_unit_system.per_feet();
 
     self.flows.iter_mut().flatten().for_each(|flow| *flow *= flow_scale);
     self.heads.iter_mut().flatten().for_each(|head| *head *= head_scale);

@@ -37,6 +37,7 @@ enum ReadState {
   Times,
   Rules,
   Controls,
+  Emitters,
   None,
 }
 
@@ -112,6 +113,7 @@ impl Network {
           "[STATUS]" => ReadState::Status,
           "[TIMES]" => ReadState::Times,
           "[RULES]" => ReadState::Rules,
+          "[EMITTERS]" => ReadState::Emitters,
           "[CONTROLS]" => ReadState::Controls,
           _ => ReadState::None,
         }
@@ -151,6 +153,9 @@ impl Network {
           ReadState::Patterns => { 
             self.read_pattern(line)
           }
+          ReadState::Emitters => { 
+            self.read_emitter(line)
+          }
           ReadState::None => {
             // skip unknown state
             Ok(())
@@ -181,6 +186,8 @@ impl Network {
     // convert units
     self.convert_units();
     self.update_links()?;
+    // update the emitter exponent
+
     Ok(())
   }
 
@@ -233,11 +240,11 @@ impl Network {
   fn convert_units(&mut self) {
     // convert the nodes to standard units (US standard) and CFS
     for node in self.nodes.iter_mut() {
-      node.convert_units(&self.options.flow_units, &self.options.unit_system, false);
+      node.convert_to_standard(&self.options);
     }
     // convert the links to standard units (US standard) and CFS
     for link in self.links.iter_mut() {
-      link.convert_units(&self.options.flow_units, &self.options.unit_system, false);
+      link.convert_to_standard(&self.options);
     }
   }
 
@@ -252,7 +259,7 @@ impl Network {
     Ok(Node {
       id,
       elevation,
-      node_type: NodeType::Junction(Junction { basedemand: demand, pattern }),
+      node_type: NodeType::Junction(Junction { basedemand: demand, pattern, emitter_coefficient: 0.0 }),
     })
   }
 
@@ -507,6 +514,24 @@ impl Network {
     }
     Ok(())
   }
+  fn read_emitter(&mut self, line: &str) -> Result<(), InputError> {
+    let mut parts = parse_line(line);
+    let id: Box<str> = parts.next().ok_or_missing("junction id")?.into();
+    let coefficient = parts.next().ok_or_missing("coefficient")?.parse_field::<f64>("coefficient")?;
+
+    let node_index = *self.node_map.get(&id)
+      .ok_or_else(|| InputError::new(format!("Node '{}' not found for EMITTER", id)))?;
+    let node = &mut self.nodes[node_index];
+
+    // set the emitter coefficient for the junction
+    match &mut node.node_type {
+      NodeType::Junction(junction) => {
+        junction.emitter_coefficient = coefficient;
+        Ok(())
+      }
+      _ => Err(InputError::new(format!("Emitter can only be set for junctions, but '{}' is not a junction", id))),
+    }
+  }
   
   /// Read a demand from a parts iterator and set the basedemand for the junction
   fn read_demand(&mut self, line: &str) -> Result<(), InputError> {
@@ -564,6 +589,17 @@ impl Network {
           }
         }
       },
+      "EMITTER" => {
+        let next_part = value.trim().to_uppercase();
+        if next_part == "EXPONENT" {
+          self.options.emitter_exponent = 1.0 / parts.next()
+            .ok_or_missing("emitter exponent value")?
+            .parse_field::<f64>("emitter exponent")?;
+        }
+        else {
+          return Err(InputError::new(format!("Invalid emitter option: {}", value)));
+        }
+      }
       "HEADLOSS" => {
         self.options.headloss_formula = match value.to_uppercase().as_str() {
           "H-W" => HeadlossFormula::HazenWilliams,
@@ -765,12 +801,12 @@ mod tests {
       network.add_node(Node {
         id: "N1".into(),
         elevation: 0.0,
-        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None }),
+        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, emitter_coefficient: 0.0 }),
       }).unwrap();
       network.add_node(Node {
         id: "N2".into(),
         elevation: 0.0,
-        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None }),
+        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, emitter_coefficient: 0.0 }),
       }).unwrap();
       network.add_link(Link {
         id: "L1".into(),
@@ -1087,7 +1123,6 @@ mod tests {
   }
 
   // ==================== Options Tests ====================
-
   #[test]
   fn test_read_options_units_lps() {
     let mut network = test_network(false);
@@ -1114,6 +1149,14 @@ mod tests {
     network.read_options("HEADLOSS  D-W").unwrap();
     
     assert_eq!(network.options.headloss_formula, HeadlossFormula::DarcyWeisbach);
+  }
+
+  #[test]
+  fn test_read_options_emitter_exponent() {
+    let mut network = test_network(false);
+    network.read_options("EMITTER EXPONENT  0.2").unwrap();
+    
+    assert_eq!(network.options.emitter_exponent, 1.0 / 0.2);
   }
 
   #[test]
@@ -1228,6 +1271,21 @@ mod tests {
     network.read_times("DURATION  1  DAY").unwrap();
     
     assert_eq!(network.options.time_options.duration, 86400);
+  }
+  // ==================== Emitter Tests ====================
+  #[test]
+  fn test_read_emitter_basic() {
+    let mut network = test_network(true);
+    network.read_emitter("N1  0.5").unwrap();
+    
+    // check if the emitter coefficient is set for the junction
+    let node_index = network.node_map.get("N1").unwrap();
+    let node = &network.nodes[*node_index];
+    let NodeType::Junction(junction) = &node.node_type else {
+      panic!("Expected Junction node type");
+    };
+    assert_eq!(junction.emitter_coefficient, 0.5);
+
   }
 
   // ==================== Control Tests ====================

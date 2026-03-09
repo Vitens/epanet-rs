@@ -167,4 +167,23 @@ fn test_solve_2tanks_controls_network() {
   ];
   verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);
 }
+
+#[test]
+fn test_solve_emitters_network() {
+  let mut network = Network::default();
+  network.read_inp("tests/emitter.inp").expect("Failed to load emitters.inp");
+
+  let solver = HydraulicSolver::new(&network);
+  let result = solver.run(false);
+
+  let expected_heads: Vec<(&str, f64)> = vec![
+    ("1", 10.00),
+    ("2", 9.75),
+  ];
+  let expected_flows: Vec<(&str, f64)> = vec![
+    ("1", 2.06),
+  ];
+
+  verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);
+}
   

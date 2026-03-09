@@ -48,6 +48,8 @@ pub struct SimulationOptions {
   pub check_frequency: usize,
   pub max_check: usize,
 
+  pub emitter_exponent: f64,
+
   pub pattern: Option<Box<str>>,
 
   pub time_options: TimeOptions,
@@ -66,6 +68,7 @@ impl Default for SimulationOptions {
       accuracy: 0.001,
       max_flow_change: None,
       check_frequency: 2,
+      emitter_exponent: 2.0,
       max_check: 10,
       pattern: None,
       time_options: TimeOptions::default(),

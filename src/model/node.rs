@@ -1,9 +1,9 @@
 use crate::model::reservoir::Reservoir;
 use crate::model::tank::Tank;
 use crate::model::junction::Junction;
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::units::UnitConversion;
+use crate::model::options::SimulationOptions;
 
-use crate::constants::*;
 use serde::{Deserialize, Serialize};
 
 /// Node struct
@@ -48,18 +48,27 @@ impl Node {
 }
 
 impl UnitConversion for Node {
-  fn convert_units(&mut self, flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
-
-    // only convert units to/from SI units
-    if system == &UnitSystem::SI {
-      let scale = if reverse { MperFT } else { 1.0 / MperFT };
-      self.elevation = self.elevation * scale;
-    }
+  fn convert_to_standard(&mut self, options: &SimulationOptions) {
+    // convert elevation to Feet
+    self.elevation = self.elevation / options.unit_system.per_feet();
 
     match &mut self.node_type {
       NodeType::Reservoir(_reservoir) => (),
-      NodeType::Tank(tank) => tank.convert_units(flow, system, reverse),
-      NodeType::Junction(junction) => junction.convert_units(flow, system, reverse),
+      NodeType::Tank(tank) => tank.convert_to_standard(options),
+      NodeType::Junction(junction) => junction.convert_to_standard(options),
+    }
+
+  }
+
+  fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    // convert elevation from Feet to the given unit system
+    self.elevation = self.elevation * options.unit_system.per_feet();
+
+    match &mut self.node_type {
+      NodeType::Reservoir(_reservoir) => (),
+      NodeType::Tank(tank) => tank.convert_from_standard(options),
+      NodeType::Junction(junction) => junction.convert_from_standard(options),
     }
   }
+
 }

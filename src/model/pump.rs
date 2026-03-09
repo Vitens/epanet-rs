@@ -1,6 +1,7 @@
 use crate::model::link::{LinkTrait, LinkStatus, LinkCoefficients};
 use crate::model::curve::{HeadCurve};
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::units::UnitConversion;
+use crate::model::options::SimulationOptions;
 use crate::constants::*;
 use serde::{Deserialize, Serialize};
 
@@ -96,15 +97,13 @@ impl LinkTrait for Pump {
 }
 
 impl UnitConversion for Pump {
-  fn convert_units(&mut self, _flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
-    // convert the pump units
-    if system == &UnitSystem::SI {
-      if reverse {
-        self.power = self.power * KWperHP;
-      }
-      else {
-        self.power = self.power / KWperHP;
-      }
-    }
+  fn convert_to_standard(&mut self, options: &SimulationOptions) {
+    // convert the power from the given unit system to horsepower
+    self.power = self.power / options.unit_system.per_horsepower();
+  }
+
+  fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    // convert the power from horsepower to the given unit system
+    self.power = self.power * options.unit_system.per_horsepower();
   }
 }

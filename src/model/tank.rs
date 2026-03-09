@@ -1,5 +1,6 @@
 use crate::model::units::UnitConversion;
-use crate::model::units::{FlowUnits, UnitSystem, Cfs, Ft, Ft3};
+use crate::model::units::{Cfs, Ft, Ft3};
+use crate::model::options::SimulationOptions;
 use crate::constants::*;
 use crate::model::curve::Curve;
 use std::sync::Arc;
@@ -119,15 +120,21 @@ impl Tank {
 }
 
 impl UnitConversion for Tank {
-  fn convert_units(&mut self, _flow: &FlowUnits, system: &UnitSystem, _reverse: bool) {
+  fn convert_to_standard(&mut self, options: &SimulationOptions) {
     // convert the initial level, min level, max level, diameter, min volume
-    if system == &UnitSystem::SI {
-      self.initial_level = self.initial_level * MperFT;
-      self.min_level = self.min_level * MperFT;
-      self.max_level = self.max_level * MperFT;
-      self.diameter = self.diameter * MperFT;
-      self.min_volume = self.min_volume * M3perFT3;
-    }
+    self.initial_level = self.initial_level / options.unit_system.per_feet();
+    self.min_level = self.min_level / options.unit_system.per_feet();
+    self.max_level = self.max_level / options.unit_system.per_feet();
+    self.diameter = self.diameter / options.unit_system.per_feet();
+    self.min_volume = self.min_volume / options.unit_system.per_cubic_feet();
+  }
+  fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    // convert the initial level, min level, max level, diameter, min volume
+    self.initial_level = self.initial_level * options.unit_system.per_feet();
+    self.min_level = self.min_level * options.unit_system.per_feet();
+    self.max_level = self.max_level * options.unit_system.per_feet();
+    self.diameter = self.diameter * options.unit_system.per_feet();
+    self.min_volume = self.min_volume * options.unit_system.per_cubic_feet();
   }
 }
 
