@@ -351,6 +351,10 @@ impl<'a> HydraulicSolver<'a> {
           }
 
           let flow_balance = self.flow_balance(&state.demands, &state.flows);
+          // update the demands of the junctions
+          for i in 0..state.emitter_flows.len() {
+            state.demands[i] += state.emitter_flows[i];
+          }
           debug!("Converged in {} iterations: Error = {:.4}, Supply = {:.4}, Demand = {:.4}", iteration, flow_balance.error, flow_balance.total_supply, flow_balance.total_demand);
 
         return Ok(state.clone());
