@@ -45,8 +45,13 @@ pub struct HydraulicSolver<'a> {
   node_to_unknown: Vec<Option<usize>>,
   sparsity_pattern: SymbolicSparseColMat<usize>,
   symbolic_llt: SymbolicLlt<usize>,
+  /// precomputed Jacobian matrix
   jac: SparseColMat<usize, f64>,
+  /// precomputed CSC indices for the links
   csc_indices: Vec<CSCIndex>,
+  /// precomputed indices for the rows of the Jacobian matrix for each node
+  node_rows: Vec<Option<usize>>,
+
   pub skip_timesteps: bool, // set to false to match epanet timestep behaviour
 }
 
@@ -59,6 +64,8 @@ impl<'a> HydraulicSolver<'a> {
     let sparsity_pattern = Self::build_sparsity_pattern(network, &node_to_unknown);
     // map each link to its CSC (Compressed Sparse Column) indices
     let csc_indices = Self::map_links_to_csc_indices(network, &sparsity_pattern, &node_to_unknown);
+    // precompute the indices for the rows of the Jacobian matrix for each node
+    let node_rows = Self::map_nodes_to_rows(network, &sparsity_pattern, &node_to_unknown);
 
     // compute the Jacobian matrix
     let values = vec![0.0; sparsity_pattern.as_ref().row_idx().len()]; // Jacobian matrix values
@@ -67,7 +74,7 @@ impl<'a> HydraulicSolver<'a> {
     // compute the symbolic Cholesky factorization
     let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).expect("Failed to compute symbolic Cholesky factorization");
 
-    Self { network, node_to_unknown, sparsity_pattern, symbolic_llt, jac, csc_indices, skip_timesteps: true }
+    Self { network, node_to_unknown, sparsity_pattern, symbolic_llt, jac, csc_indices, node_rows, skip_timesteps: true }
   }
 
   /// Run the hydraulic solver
@@ -406,8 +413,7 @@ impl<'a> HydraulicSolver<'a> {
       if let NodeType::Junction(junction) = &node.node_type {
         if junction.emitter_coefficient > 0.0 {
           // get the index for the diagonal entry in the Jacobian matrix
-          // TODO: precompute indices for emitters
-          let row = find_csc_index(self.sparsity_pattern.as_ref(), i, i).unwrap();
+          let row = self.node_rows[i].unwrap();
           // get the index for the unknown node in the RHS vector
           let idx = self.node_to_unknown[i].unwrap();
 
@@ -621,6 +627,20 @@ impl<'a> HydraulicSolver<'a> {
     }
     let error = sum_demand - sum_supply;
     return FlowBalance { total_demand: sum_demand, total_supply: sum_supply, error: error };
+  }
+  fn map_nodes_to_rows(network: &Network, sparsity_pattern: &SymbolicSparseColMat<usize>, node_to_unknown: &Vec<Option<usize>>) -> Vec<Option<usize>> {
+
+    let mut node_rows = Vec::with_capacity(network.nodes.len());
+
+    for (i, _) in network.nodes.iter().enumerate() {
+      if let Some(idx) = node_to_unknown[i] {
+        let row = find_csc_index(sparsity_pattern.as_ref(), idx, idx).unwrap();
+        node_rows.push(Some(row));
+      } else {
+        node_rows.push(None);
+      }
+    }
+    node_rows
   }
 
   /// Map each link to its CSC (Compressed Sparse Column) indices
