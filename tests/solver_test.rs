@@ -193,4 +193,36 @@ fn test_solve_emitters_network() {
 
   verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);
 }
-  
+
+#[test]
+fn test_solve_pda_network() {
+  let mut network = Network::default();
+  network.read_inp("tests/pda.inp").expect("Failed to load pda.inp");
+
+  let solver = HydraulicSolver::new(&network);
+  let result = solver.run(false);
+
+  let expected_flows: Vec<(&str, f64)> = vec![
+    ("A", 35.994202),
+    ("B", 15.244768),
+    ("C", 16.814336),
+    ("D", 9.042474),
+    ("E", 11.350634),
+    ("F", 3.866947),
+    ("G", 8.785734),
+    ("H", 1.075225),
+  ];
+
+  let expected_heads: Vec<(&str, f64)> = vec![
+    ("1", 1.548499),
+    ("2", 1.510046),
+    ("3", 1.516428),
+    ("4", 1.497855),
+    ("5", 1.495327),
+    ("6", 1.486298),
+    ("7", 0.028894),
+    ("FH", 100.000000)
+  ];
+
+  verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);
+}

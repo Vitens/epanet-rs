@@ -286,19 +286,12 @@ impl<'a> HydraulicSolver<'a> {
       values.fill(0.0);
       rhs.fill(0.0);
 
-      // set RHS to -demand (unknown nodes only)
-      // for (global, &head_id) in self.node_to_unknown.iter().enumerate() {
-      //   if let Some(i) = head_id {
-      //     rhs[i] = -state.demands[global];
-      //   }
-      // }
-
       // calculate excess flows at each node (needed for PSV/PRV valves)
       if self.network.contains_pressure_control_valve {
         self.calculate_excess_flows(state, &mut excess_flows);
       }
 
-      // assemble Jacobian and RHS contributions from links
+      // assemble Jacobian and RHS contributions from links, emitters and nodes
       self.assemble_jacobian(state, &mut values, &mut rhs, &mut link_coefficients, &excess_flows);
 
       // solve the system of equations: J * dh = rhs
@@ -364,6 +357,10 @@ impl<'a> HydraulicSolver<'a> {
           }
 
           let flow_balance = self.flow_balance(&state.demands, &state.flows);
+          // if PDA, the demands are the demand flows
+          if self.network.options.demand_model == DemandModel::PDA {
+            state.demands = state.demand_flows.clone();
+          }
           // update the demands of the junctions
           for i in 0..state.emitter_flows.len() {
             state.demands[i] += state.emitter_flows[i];
@@ -383,15 +380,28 @@ impl<'a> HydraulicSolver<'a> {
 
     // assemble the contributions from the links
     self.link_contributions(state, values, rhs, link_coefficients, excess_flows);
-    dbg!(&rhs[0]);
     // assemble the contributions from the emitters
     self.emitter_contributions(state, values, rhs);
-    dbg!(&rhs[0]);
     // if Pressure Dependent Analysis, assemble the contributions from the pressure dependent demand
     if self.network.options.demand_model == DemandModel::PDA {
       self.demand_contributions(state, values, rhs);
     }
-    dbg!(&rhs[0]);
+
+    // update the contributions from the nodes 
+    self.node_contributions(state, rhs);
+  }
+
+  fn node_contributions(&self, state: &mut SolverState, rhs: &mut Vec<f64>) {
+    for (i, node) in self.network.nodes.iter().enumerate() {
+      if let NodeType::Junction(_) = &node.node_type {
+        let idx = self.node_to_unknown[i].unwrap();
+        if self.network.options.demand_model == DemandModel::PDA {
+          rhs[idx] -= state.demand_flows[i];
+        } else {
+          rhs[idx] -= state.demands[i];
+        }
+      } 
+    }
   }
 
   fn link_contributions(&self, state: &mut SolverState, values: &mut Vec<f64>, rhs: &mut Vec<f64>, link_coefficients: &mut ResistanceCoefficients, excess_flows: &Vec<f64>) {
@@ -488,7 +498,7 @@ impl<'a> HydraulicSolver<'a> {
 
           if (1.0 / g_inv) > 0.0 {
             // update RHS
-            rhs[idx] += (y + node.elevation) * g_inv - state.demand_flows[i];
+            rhs[idx] += (y + node.elevation + options.minimum_pressure) * g_inv;
             // update matrix diagonal
             values[row] += g_inv;
           }
@@ -505,7 +515,11 @@ impl<'a> HydraulicSolver<'a> {
         excess_flows[i] = -emitter_flow;
       }
       for (i, demand) in state.demands.iter().enumerate() {
-        excess_flows[i] -= demand;
+        if self.network.options.demand_model == DemandModel::PDA {
+          excess_flows[i] -= state.demand_flows[i];
+        } else {
+          excess_flows[i] -= demand;
+        }
       }
       for (i, link) in self.network.links.iter().enumerate() {
         let q = state.flows[i];
@@ -535,8 +549,6 @@ impl<'a> HydraulicSolver<'a> {
 
       // update the flow of the link
       state.flows[i] -= dq;
-
-      dbg!(state.flows[i]);
 
       // update the link status and check for status changes
       let new_status = link.update_status(state.settings[i], state.statuses[i], state.flows[i], state.heads[link.start_node], state.heads[link.end_node]);
@@ -599,7 +611,6 @@ impl<'a> HydraulicSolver<'a> {
 
           // update the demand flow
           state.demand_flows[i] -= dq;
-          dbg!(state.demand_flows[i]);
           // update the iteration statistics
           stats.sum_dq += dq.abs();
           stats.sum_q += state.demand_flows[i].abs();

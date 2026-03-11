@@ -109,7 +109,7 @@ impl Pipe {
 
     let q_abs = q.abs();
     let ml = self.minor_loss;
-    let e = (self.roughness) / self.diameter; // relative roughness (use mf to ft)
+    let e = (self.roughness / 1000.0) / self.diameter; // relative roughness (use mf to ft)
     let s = VISCOSITY * self.diameter;      // kinematic viscosity * diameter
     // Laminar flow (Re <= 2000)
     // use Hagen-Poiseuille formula
@@ -188,6 +188,7 @@ impl UnitConversion for Pipe {
 
     // convert length from the given unit system to feet
     self.length /= options.unit_system.per_feet();
+
 
     // if the headloss formula is Darcy Weisbach, convert roughness from the given unit system to feet
     if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
