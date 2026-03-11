@@ -16,13 +16,13 @@ use crate::model::units::{Cfs, Ft3};
 
 use simplelog::{warn, debug, error};
 
-use crate::constants::{BIG_VALUE, Q_ZERO};
+use crate::constants::{BIG_VALUE, Q_ZERO, PDA_MIN_DIFF};
 use crate::model::node::NodeType;
 use crate::model::link::{LinkType, LinkTrait, LinkStatus};
 use crate::model::network::Network;
 use crate::model::valve::ValveType;
 use crate::model::control::ControlCondition;
-use crate::model::options::SimulationOptions;
+use crate::model::options::{SimulationOptions, DemandModel};
 
 pub struct FlowBalance {
   pub total_demand: Cfs,
@@ -287,11 +287,11 @@ impl<'a> HydraulicSolver<'a> {
       rhs.fill(0.0);
 
       // set RHS to -demand (unknown nodes only)
-      for (global, &head_id) in self.node_to_unknown.iter().enumerate() {
-        if let Some(i) = head_id {
-          rhs[i] = -state.demands[global];
-        }
-      }
+      // for (global, &head_id) in self.node_to_unknown.iter().enumerate() {
+      //   if let Some(i) = head_id {
+      //     rhs[i] = -state.demands[global];
+      //   }
+      // }
 
       // calculate excess flows at each node (needed for PSV/PRV valves)
       if self.network.contains_pressure_control_valve {
@@ -341,6 +341,11 @@ impl<'a> HydraulicSolver<'a> {
       // update the emitter flows and iteration statistics
       self.update_emitter_flows(state, &mut stats);
 
+      // if PDA, update the demand flows and get the iteration statistics
+      if self.network.options.demand_model == DemandModel::PDA {
+        self.update_demand_flows(state, &mut stats);
+      }
+
 
       // update links connected to tanks (close/open them based on tank level) and gather flow balance into/out of tanks
       self.update_tank_links(state);
@@ -375,6 +380,21 @@ impl<'a> HydraulicSolver<'a> {
   // First assemble the contributions from the links
   // Then assemble the contributions from the emitters (virtual links)
   fn assemble_jacobian(&self, state: &mut SolverState, values: &mut Vec<f64>, rhs: &mut Vec<f64>, link_coefficients: &mut ResistanceCoefficients, excess_flows: &Vec<f64>) {
+
+    // assemble the contributions from the links
+    self.link_contributions(state, values, rhs, link_coefficients, excess_flows);
+    dbg!(&rhs[0]);
+    // assemble the contributions from the emitters
+    self.emitter_contributions(state, values, rhs);
+    dbg!(&rhs[0]);
+    // if Pressure Dependent Analysis, assemble the contributions from the pressure dependent demand
+    if self.network.options.demand_model == DemandModel::PDA {
+      self.demand_contributions(state, values, rhs);
+    }
+    dbg!(&rhs[0]);
+  }
+
+  fn link_contributions(&self, state: &mut SolverState, values: &mut Vec<f64>, rhs: &mut Vec<f64>, link_coefficients: &mut ResistanceCoefficients, excess_flows: &Vec<f64>) {
     // iterate over the links
     for (i, link) in self.network.links.iter().enumerate() {
       let q = state.flows[i];
@@ -422,7 +442,9 @@ impl<'a> HydraulicSolver<'a> {
         values[csc_index.diag_v.unwrap()] += downstream_modification.diagonal_add;
       }
     }
+  }
 
+  fn emitter_contributions(&self, state: &mut SolverState, values: &mut Vec<f64>, rhs: &mut Vec<f64>) {
     // iterate over emitters
     for (i, node) in self.network.nodes.iter().enumerate() {
       if let NodeType::Junction(junction) = &node.node_type {
@@ -442,6 +464,39 @@ impl<'a> HydraulicSolver<'a> {
 
       }
     }
+  }
+
+  fn demand_contributions(&self, state: &mut SolverState, values: &mut Vec<f64>, rhs: &mut Vec<f64>) {
+
+    let options = &self.network.options;
+
+    // Get demand function parameters
+    let dp = (options.required_pressure - options.minimum_pressure).max(PDA_MIN_DIFF);
+    let n = 1.0 / options.pressure_exponent;
+
+    // Iterate over all junctions
+    for (i, node) in self.network.nodes.iter().enumerate() {
+      if let NodeType::Junction(junction) = &node.node_type {
+        // only consider junctions with a positive demand
+        if state.demands[i] > 0.0 {
+          // get the index for the diagonal entry in the Jacobian matrix
+          let row = self.node_rows[i].unwrap();
+          // get the index for the unknown node in the RHS vector
+          let idx = self.node_to_unknown[i].unwrap();
+          // get coefficients for the demand function
+          let (g_inv, y) = junction.demand_coefficients(state.demand_flows[i], state.demands[i], dp, n);
+
+          if (1.0 / g_inv) > 0.0 {
+            // update RHS
+            rhs[idx] += (y + node.elevation) * g_inv - state.demand_flows[i];
+            // update matrix diagonal
+            values[row] += g_inv;
+          }
+
+        }
+      }
+    }
+
   }
 
   fn calculate_excess_flows(&self, state: &SolverState, excess_flows: &mut Vec<Cfs>) {
@@ -480,6 +535,8 @@ impl<'a> HydraulicSolver<'a> {
 
       // update the flow of the link
       state.flows[i] -= dq;
+
+      dbg!(state.flows[i]);
 
       // update the link status and check for status changes
       let new_status = link.update_status(state.settings[i], state.statuses[i], state.flows[i], state.heads[link.start_node], state.heads[link.end_node]);
@@ -523,6 +580,40 @@ impl<'a> HydraulicSolver<'a> {
 
   }
 
+  fn update_demand_flows(&self, state: &mut SolverState, stats: &mut IterationStatistics) {
+
+    let options = &self.network.options;
+
+    let dp = (options.required_pressure - options.minimum_pressure).max(PDA_MIN_DIFF);
+    let n = 1.0 / options.pressure_exponent;
+
+    // iterate over all junctions
+    for (i, node) in self.network.nodes.iter().enumerate() {
+      if let NodeType::Junction(junction) = &node.node_type {
+        if state.demands[i] > 0.0 {
+
+          let (g_inv, y) = junction.demand_coefficients(state.demand_flows[i], state.demands[i], dp, n);
+
+          let dh = state.heads[i] - node.elevation - options.minimum_pressure;
+          let dq = (y - dh) * g_inv;
+
+          // update the demand flow
+          state.demand_flows[i] -= dq;
+          dbg!(state.demand_flows[i]);
+          // update the iteration statistics
+          stats.sum_dq += dq.abs();
+          stats.sum_q += state.demand_flows[i].abs();
+          if dq.abs() > stats.max_dq {
+            stats.max_dq = dq.abs();
+          }
+        }
+      }
+    }
+
+
+  }
+
+
   fn apply_patterns(&self, state: &mut SolverState, time: usize) {
 
     let time_options = &self.network.options.time_options;
@@ -552,7 +643,12 @@ impl<'a> HydraulicSolver<'a> {
         // if no pattern, return the basedemand times the global demand multiplier
         return junction.basedemand * self.network.options.demand_multiplier;
 
-      }).collect::<Vec<Cfs>>()
+      }).collect::<Vec<Cfs>>();
+
+    // if PDA, set the demand flows to the demands
+    if self.network.options.demand_model == DemandModel::PDA {
+      state.demand_flows = state.demands.clone();
+    }
 
   }
 

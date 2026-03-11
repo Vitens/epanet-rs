@@ -1,6 +1,6 @@
 use crate::model::units::{Cfs, UnitConversion, UnitSystem};
 use crate::model::options::SimulationOptions;
-use crate::constants::{SMALL_VALUE, RQ_TOL, PSIperFT, MperFT};
+use crate::constants::{SMALL_VALUE, RQ_TOL, PSIperFT, MperFT, BIG_VALUE};
 
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,38 @@ pub struct Junction {
 }
 
 impl Junction {
+  /// Compute the coefficients for the demand function
+  /// demand: current demand of junction
+  /// demand_full: full demand
+  /// dp: pressure range for demand function
+  /// n: 1 / pressure exponent
+  pub fn demand_coefficients(&self, demand: Cfs, demand_full: Cfs, dp: f64, n: f64) -> (f64, f64) {
+
+    // calculate factor 
+    let factor = demand / demand_full;
+
+    // use a large value for the gradient and headloss to prevent negative demand
+    if factor <= 0.0 {
+      return (1.0 / BIG_VALUE, BIG_VALUE * demand);
+    }
+    else if factor < 1.0 {
+      let hgrad = n * dp * factor.powf(n - 1.0) / demand_full;
+      // use a linear function for very small gradient
+      if hgrad < RQ_TOL {
+        return (1.0 / RQ_TOL, demand * RQ_TOL);
+      }
+
+      let y = hgrad * demand / n;
+      return (1.0 / hgrad, y);
+    }
+    else {
+      // use a large value for the gradient and headloss to prevent demand above full value
+      return (1.0 / BIG_VALUE, dp + BIG_VALUE * (demand - demand_full));
+    }
+  }
+  /// Compute the coefficients for the emitter function
+  /// q: flow through the emitter
+  /// q_exp: emitter exponent
   pub fn emitter_coefficients(&self, q: Cfs, q_exp: f64) -> (f64, f64) {
 
     // get the emitter coefficient

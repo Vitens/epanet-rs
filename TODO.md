@@ -22,6 +22,7 @@
 - [x] Fixed power pumps
 - [x] Implement CONTROLS
 - [x] Refactor how time steps are calculated to match EPANET
+- [x] Implement EMITTERS
 - [ ] Implement RULES
 - [ ] Tanks with volume curve
 - [ ] Unit conversion for GPV head curves

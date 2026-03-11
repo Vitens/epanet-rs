@@ -246,6 +246,8 @@ impl Network {
     for link in self.links.iter_mut() {
       link.convert_to_standard(&self.options);
     }
+    // convert the options to standard units
+    self.options.convert_to_standard();
   }
 
   /// Read a junction from a parts iterator
@@ -573,7 +575,7 @@ impl Network {
         };
         // set the default pressure units based on the unit system
         self.options.pressure_units = match self.options.unit_system {
-          UnitSystem::US => PressureUnits::FEET,
+          UnitSystem::US => PressureUnits::PSI,
           UnitSystem::SI => PressureUnits::METERS,
         }
       }
@@ -585,7 +587,13 @@ impl Network {
             .parse_field::<f64>("demand multiplier")?;
         } else if let Some(model) = parts.next() {
           if model.trim().to_uppercase() == "PDA" {
-            return Err(InputError::new("PDA demand model is not supported yet"));
+            self.options.demand_model = DemandModel::PDA;
+          }
+          else if model.trim().to_uppercase() == "DDA" {
+            self.options.demand_model = DemandModel::DDA;
+          }
+          else {
+            return Err(InputError::new(format!("Invalid demand model: {}", model)));
           }
         }
       },
@@ -618,6 +626,15 @@ impl Network {
         // Handle "Pressure Exponent" as a separate option (skip if not a valid pressure unit)
         if let Ok(units) = PressureUnits::from_str(value) {
           self.options.pressure_units = units;
+        } else {
+          if value.trim().to_uppercase() == "EXPONENT" {
+            self.options.pressure_exponent = parts.next()
+              .ok_or_missing("pressure exponent value")?
+              .parse_field::<f64>("pressure exponent")?;
+          }
+          else {
+            return Err(InputError::new(format!("Invalid pressure option: {}", value)));
+          }
         }
         // Otherwise it's likely "Pressure Exponent" or similar - ignore
       }
@@ -647,6 +664,28 @@ impl Network {
               }
             }
           }
+        }
+      },
+      "MINIMUM" => {
+        let next_part = value.trim().to_uppercase();
+        if next_part == "PRESSURE" {
+          self.options.minimum_pressure = parts.next()
+            .ok_or_missing("minimum pressure value")?
+            .parse_field::<f64>("minimum pressure")?;
+        }
+        else {
+          return Err(InputError::new(format!("Invalid minimum pressure option: {}", value)));
+        }
+      },
+      "REQUIRED" => {
+        let next_part = value.trim().to_uppercase();
+        if next_part == "PRESSURE" {
+          self.options.required_pressure = parts.next()
+            .ok_or_missing("required pressure value")?
+            .parse_field::<f64>("required pressure")?;
+        }
+        else {
+          return Err(InputError::new(format!("Invalid required pressure option: {}", value)));
         }
       }
       _ => ()
@@ -1140,7 +1179,7 @@ mod tests {
     
     assert_eq!(network.options.flow_units, FlowUnits::CFS);
     assert_eq!(network.options.unit_system, UnitSystem::US);
-    assert_eq!(network.options.pressure_units, PressureUnits::FEET);
+    assert_eq!(network.options.pressure_units, PressureUnits::PSI);
   }
 
   #[test]
@@ -1173,6 +1212,35 @@ mod tests {
     network.read_options("ACCURACY  0.0001").unwrap();
     
     assert!((network.options.accuracy - 0.0001).abs() < 1e-10);
+  }
+
+  #[test]
+  fn test_read_options_minimum_pressure() {
+    let mut network = test_network(false);
+    network.read_options("MINIMUM PRESSURE  20").unwrap();
+    
+    assert_eq!(network.options.minimum_pressure, 20.0);
+  }
+  #[test]
+  fn test_read_options_required_pressure() {
+    let mut network = test_network(false);
+    network.read_options("REQUIRED PRESSURE  30").unwrap();
+    
+    assert_eq!(network.options.required_pressure, 30.0);
+  }
+  #[test]
+  fn test_read_options_pressure_exponent() {
+    let mut network = test_network(false);
+    network.read_options("PRESSURE EXPONENT  0.6").unwrap();
+    
+    assert_eq!(network.options.pressure_exponent, 0.6);
+  }
+  #[test]
+  fn test_read_options_demand_model_pda() {
+    let mut network = test_network(false);
+    network.read_options("DEMAND MODEL  PDA").unwrap();
+    
+    assert_eq!(network.options.demand_model, DemandModel::PDA);
   }
 
   // ==================== Times Tests ====================
