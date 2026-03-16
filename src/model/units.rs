@@ -13,7 +13,7 @@ pub type Psi = f64;
 pub type Ft3 = f64;
 
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Deserialize, Serialize, strum::Display)]
 pub enum FlowUnits {
   // Imperial units
   CFS,  // Cubic feet per second
@@ -73,7 +73,7 @@ impl FromStr for PressureUnits {
   }
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize, Clone)]
 pub enum UnitSystem {
   US, // US Customary units
   SI, // International System of Units (metric)

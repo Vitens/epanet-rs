@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::constants::*;
 use crate::model::units::{Ft, Cfs, FlowUnits, UnitSystem};
+use crate::error::InputError;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Curve {
@@ -50,18 +51,19 @@ pub struct HeadCurveStatistics {
 }
 
 impl HeadCurve {
-  pub fn new(curve: &Curve, flow_units: &FlowUnits, system: &UnitSystem) -> Self {
+  pub fn new(curve: &Curve, flow_units: &FlowUnits, system: &UnitSystem) -> Result<Self, InputError> {
 
     // convert the flow and head values to the standard units (CFS and Feet)
     let flows = curve.x.iter().map(|x| x / flow_units.per_cfs()).collect();
     let heads = curve.y.iter().map(|y| y / system.per_feet()).collect();
 
-    // precompute the curve statistics
-    let statistics = Self::compute_curve_statistics(&flows, &heads);
-
+    // validate the curve to ensure the head is decreasing and the flow is increasing monotonically
     if !Self::validate_curve(&flows, &heads) {
-      panic!("Invalid head curve: Head is not decreasing or flow is not increasing monotonically");
+      return Err(InputError::new("Invalid head curve: Head is not decreasing or flow is not increasing monotonically"));
     }
+
+    // precompute the curve statistics
+    let statistics = Self::compute_curve_statistics(&flows, &heads)?;
 
     let curve_type = match (flows.len(), flows[0] == 0.0) {
       (1, _) => HeadCurveType::SinglePoint,
@@ -69,12 +71,12 @@ impl HeadCurve {
       _ => HeadCurveType::Custom,
     };
 
-    Self {
+    Ok(Self {
       flows: flows,
       heads: heads,
       curve_type: curve_type,
       statistics: statistics,
-    }
+    })
   }
   pub fn coefficients(&self, q: Cfs) -> (Ft, f64) {
     // find the index of the curve segment that contains the flow
@@ -89,7 +91,7 @@ impl HeadCurve {
   }
 
   // Calculate the maximum head, minimum head, and maximum flow from the curve
-  pub fn compute_curve_statistics(flows: &Vec<Cfs>, heads: &Vec<Ft>) -> HeadCurveStatistics {
+  pub fn compute_curve_statistics(flows: &Vec<Cfs>, heads: &Vec<Ft>) -> Result<HeadCurveStatistics, InputError> {
 
     if flows.len() == 1 {
 
@@ -100,14 +102,14 @@ impl HeadCurve {
       let a = h * 4.0 / 3.0; // maximum head / shutoff head
       let b = (a-h)/(q*q);  // flow coefficient 
 
-      return HeadCurveStatistics {
+      return Ok(HeadCurveStatistics {
         h_max: a,
         h_shutoff: a,
         q_max: q * 2.0,
         q_initial: q,
         r: b,
         n: 2.0,
-      }
+      })
     }
     // three point curve with shutoff head at zero
     else if flows.len() == 3 && flows[0] == 0.0 {
@@ -133,16 +135,16 @@ impl HeadCurve {
       valid &= b < 0.0;
 
       if valid {
-        return HeadCurveStatistics {
+        return Ok(HeadCurveStatistics {
           h_max: h0,
           h_shutoff: h0,
           q_max: q2,
           q_initial: q1,
           r: -b,
           n: c,
-        }
+        })
       } else {
-        panic!("Invalid head curve: Head curve statistics could not be calculated");
+        return Err(InputError::new("Invalid head curve: Head curve statistics could not be calculated"));
       }
     }
     else {
@@ -151,14 +153,14 @@ impl HeadCurve {
       let q_initial = (flows[0] + q_max) / 2.0;
       let h_max = heads[0];
 
-      return HeadCurveStatistics {
+      return Ok(HeadCurveStatistics {
         h_max: h_max,
         h_shutoff: h_max,
         q_max: q_max,
         q_initial: q_initial,
         r: 0.0,
         n: 1.0,
-      }
+      })
     }
   }
   /// Validate the curve to ensure the head is decreasing and the flow is increasing monotonically

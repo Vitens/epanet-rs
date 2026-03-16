@@ -35,9 +35,12 @@ enum ReadState {
   Patterns,
   Status,
   Times,
+  Title,
   Rules,
   Controls,
   Emitters,
+  Coordinates,
+  Vertices,
   None,
 }
 
@@ -100,6 +103,7 @@ impl Network {
       // if the line starts with [, it is a new section
       else if line.starts_with("[") {
         state = match line {
+          "[TITLE]" => ReadState::Title,
           "[JUNCTIONS]" => ReadState::Junctions,
           "[RESERVOIRS]" => ReadState::Reservoirs,
           "[PIPES]" => ReadState::Pipes,
@@ -115,11 +119,17 @@ impl Network {
           "[RULES]" => ReadState::Rules,
           "[EMITTERS]" => ReadState::Emitters,
           "[CONTROLS]" => ReadState::Controls,
+          "[COORDINATES]" => ReadState::Coordinates,
+          "[VERTICES]" => ReadState::Vertices,
           _ => ReadState::None,
         }
       }
       else {
         let result: Result<(), InputError> = match state {
+          ReadState::Title => {
+            self.title = Some(line.trim().into());
+            Ok(())
+          }
           ReadState::Junctions => { 
             let junction = self.read_junction(line)?;
             self.add_node(junction).map_err(|e| InputError::new(e))
@@ -175,6 +185,12 @@ impl Network {
           ReadState::Controls => {
             self.read_control(line)
           }
+          ReadState::Coordinates => {
+            self.read_coordinates(line)
+          }
+          ReadState::Vertices => {
+            self.read_vertices(line)
+          }
         };
         
         // Add line number context to any error
@@ -184,7 +200,7 @@ impl Network {
       line_buffer.clear();
     }
     // convert units
-    self.convert_units();
+    self.convert_to_standard(&self.options.clone());
     self.update_links()?;
     // update the emitter exponent
 
@@ -200,7 +216,7 @@ impl Network {
           let curve = self.curves.get(head_curve_id)
             .ok_or_else(|| InputError::new(format!("Head curve '{}' not found for pump", head_curve_id)))?;
           // assign the head curve to the pump and convert units to standard units (US standard) and CFS
-          pump.head_curve = Some(HeadCurve::new(curve, &self.options.flow_units, &self.options.unit_system));
+          pump.head_curve = Some(HeadCurve::new(curve, &self.options.flow_units, &self.options.unit_system)?);
         }
       }
       if let LinkType::Valve(valve) = &mut link.link_type {
@@ -236,20 +252,6 @@ impl Network {
     Ok(())
   }
 
-  /// convert units
-  fn convert_units(&mut self) {
-    // convert the nodes to standard units (US standard) and CFS
-    for node in self.nodes.iter_mut() {
-      node.convert_to_standard(&self.options);
-    }
-    // convert the links to standard units (US standard) and CFS
-    for link in self.links.iter_mut() {
-      link.convert_to_standard(&self.options);
-    }
-    // convert the options to standard units
-    self.options.convert_to_standard();
-  }
-
   /// Read a junction from a parts iterator
   fn read_junction(&mut self, line: &str) -> Result<Node, InputError> {
     let mut parts = parse_line(line);
@@ -262,6 +264,7 @@ impl Network {
       id,
       elevation,
       node_type: NodeType::Junction(Junction { basedemand: demand, pattern, emitter_coefficient: 0.0 }),
+      coordinates: None,
     })
   }
 
@@ -276,6 +279,7 @@ impl Network {
       id,
       elevation,
       node_type: NodeType::Reservoir(Reservoir { head_pattern: pattern }),
+      coordinates: None,
     })
   }
 
@@ -306,6 +310,7 @@ impl Network {
       id,
       elevation,
       node_type: NodeType::Tank(Tank { elevation, initial_level, min_level, max_level, diameter, min_volume, volume_curve_id, overflow, volume_curve: None, links_to: Vec::new(), links_from: Vec::new() }),
+      coordinates: None,
     })
   }
 
@@ -367,6 +372,7 @@ impl Network {
       end_node_id: end_node,
       link_type: LinkType::Valve(Valve { diameter, setting, curve_id, valve_type, minor_loss, valve_curve: None }),
       initial_status: LinkStatus::Active,
+      vertices: None,
     })
   }
 
@@ -417,6 +423,7 @@ impl Network {
       end_node_id: end_node,
       link_type: LinkType::Pipe(Pipe { diameter, length, roughness, minor_loss, check_valve, headloss_formula }),
       initial_status: status,
+      vertices: None,
     })
   }
 
@@ -465,6 +472,7 @@ impl Network {
       end_node: end_node_index,
       link_type: LinkType::Pump(Pump { speed, head_curve_id, power, head_curve: None }),
       initial_status: LinkStatus::Open,
+      vertices: None,
     })
   }
   /// Read a curve from a parts iterator
@@ -745,7 +753,7 @@ impl Network {
     let (status, setting) = if let Ok(value) = status_or_setting.parse::<f64>() {
       (None, Some(value))
     } else {
-      (Some(LinkStatus::from_str(status_or_setting, false)), None)
+      (Some(LinkStatus::from_str(status_or_setting, false)?), None)
     };
 
     // Skip "IF" keyword
@@ -816,10 +824,38 @@ impl Network {
     } else {
       // if the link is a valve, set the status as fixed open or fixed closed
       let is_valve = matches!(link.link_type, LinkType::Valve(_));
-      link.initial_status = LinkStatus::from_str(status, is_valve);
+      link.initial_status = LinkStatus::from_str(status, is_valve)?;
     }
     Ok(())
   }
+
+  fn read_coordinates(&mut self, line: &str) -> Result<(), InputError> {
+    let mut parts = parse_line(line);
+    let id: Box<str> = parts.next().ok_or_missing("node id")?.into();
+    let x = parts.next().ok_or_missing("x coordinate")?.parse_field::<f64>("x coordinate")?;
+    let y = parts.next().ok_or_missing("y coordinate")?.parse_field::<f64>("y coordinate")?;
+    let node_index = *self.node_map.get(&id).ok_or_else(|| InputError::new(format!("Node '{}' not found for coordinates", id)))?;
+    self.nodes[node_index].coordinates = Some((x, y));
+    Ok(())
+  }
+
+  fn read_vertices(&mut self, line: &str) -> Result<(), InputError> {
+    let mut parts = parse_line(line);
+    let id: Box<str> = parts.next().ok_or_missing("link id")?.into();
+    let x = parts.next().ok_or_missing("x coordinate")?.parse_field::<f64>("x coordinate")?;
+    let y = parts.next().ok_or_missing("y coordinate")?.parse_field::<f64>("y coordinate")?;
+    let link_index = *self.link_map.get(&id).ok_or_else(|| InputError::new(format!("Link '{}' not found for vertices", id)))?;
+
+    if let Some(vertices) = &mut self.links[link_index].vertices {
+      vertices.push((x, y));
+    }
+    else {
+      self.links[link_index].vertices = Some(vec![(x, y)]);
+    }
+
+    Ok(())
+  }
+
 }
 
 /// Strip comments (after ';') from a line and split into whitespace-separated parts
@@ -841,11 +877,13 @@ mod tests {
         id: "N1".into(),
         elevation: 0.0,
         node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, emitter_coefficient: 0.0 }),
+        coordinates: None,
       }).unwrap();
       network.add_node(Node {
         id: "N2".into(),
         elevation: 0.0,
         node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, emitter_coefficient: 0.0 }),
+        coordinates: None,
       }).unwrap();
       network.add_link(Link {
         id: "L1".into(),
@@ -855,6 +893,7 @@ mod tests {
         start_node_id: "N1".into(),
         end_node_id: "N2".into(),
         initial_status: LinkStatus::Open,
+        vertices: None,
       }).unwrap();
     }
     network
@@ -1419,4 +1458,3 @@ mod tests {
   }
 
 }
-

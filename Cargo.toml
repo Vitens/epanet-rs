@@ -17,6 +17,7 @@ fastapprox = "0.3.1"
 log = "0.4"
 simplelog = { version = "0.12.2", features = ["paris"] }
 time = { version = "0.3", features = ["macros"] }
+strum = { version = "0.28", features = ["derive"] }
 
 [profile.release]
 debug = "line-tables-only"

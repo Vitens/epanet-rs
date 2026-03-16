@@ -5,7 +5,7 @@ use crate::solver::state::SolverState;
 use crate::model::network::Network;
 use crate::model::node::NodeType;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum ControlCondition {
   HighPressure { node_index: usize, target: f64 },
   LowPressure { node_index: usize, target: f64 },
@@ -15,7 +15,7 @@ pub enum ControlCondition {
   ClockTime { seconds: usize },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Control {
   pub condition: ControlCondition,
   pub link_id: Box<str>,

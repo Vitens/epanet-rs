@@ -7,15 +7,16 @@ use crate::model::options::SimulationOptions;
 use serde::{Deserialize, Serialize};
 
 /// Node struct
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Node {
     pub id: Box<str>,
     pub node_type: NodeType,
     pub elevation: f64,
+    pub coordinates: Option<(f64, f64)>,
 }
 
 /// Node types
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum NodeType {
     Reservoir(Reservoir),
     Tank(Tank),

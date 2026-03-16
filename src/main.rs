@@ -53,9 +53,9 @@ enum Commands {
   },
   /// Convert a network file to a different format
   Convert {
-    /// Input file (EPANET .inp format)
+    /// Input file (.json, .msgpack or .inp format)
     input_file: String,
-    /// Output file (.json or .msgpack/.mpk)
+    /// Output file (.json, .msgpack or .mpk format)
     output_file: String,
   },
   /// Validate a network file against EPANET results

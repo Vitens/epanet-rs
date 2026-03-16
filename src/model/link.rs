@@ -4,10 +4,10 @@ use crate::model::valve::Valve;
 use crate::model::units::UnitConversion;
 use crate::model::options::SimulationOptions;
 use crate::constants::Q_ZERO;
-
+use crate::error::InputError;
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 /// Link struct
 pub struct Link {
   /// Link ID
@@ -21,6 +21,9 @@ pub struct Link {
   /// Initial status (open, closed, active)
   pub initial_status: LinkStatus,
 
+  /// Optional vertices for the link (only relevant for graphical display)
+  pub vertices: Option<Vec<(f64, f64)>>,
+
   /// Cached start and end node indices to avoid looking up the node map every time
   #[serde(skip)]
   pub start_node: usize,
@@ -28,7 +31,7 @@ pub struct Link {
   pub end_node: usize,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub enum LinkType {
     Pipe(Pipe),
     Pump(Pump),
@@ -50,13 +53,19 @@ pub enum LinkStatus {
   FixedClosed,   // fixed closed
 }
 
+impl std::fmt::Display for LinkStatus {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{:?}", self)
+  }
+}
+
 impl LinkStatus {
-  pub fn from_str(status: &str, is_valve: bool) -> LinkStatus {
+  pub fn from_str(status: &str, is_valve: bool) -> Result<LinkStatus, InputError> {
     match status.to_uppercase().as_str() {
-      "CLOSED" => if is_valve { LinkStatus::FixedClosed } else { LinkStatus::Closed },
-      "OPEN" => if is_valve { LinkStatus::FixedOpen } else { LinkStatus::Open },
-      "ACTIVE" => LinkStatus::Active,
-      _ => panic!("Invalid link status {}", status)
+      "CLOSED" => if is_valve { Ok(LinkStatus::FixedClosed) } else { Ok(LinkStatus::Closed) },
+      "OPEN" => if is_valve { Ok(LinkStatus::FixedOpen) } else { Ok(LinkStatus::Open) },
+      "ACTIVE" => Ok(LinkStatus::Active),
+      _ => return Err(InputError::new(format!("Invalid link status '{}'", status)))
     }
   }
 }

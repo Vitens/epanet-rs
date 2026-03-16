@@ -1,14 +1,14 @@
 use crate::model::units::{FlowUnits, PressureUnits, UnitSystem};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Deserialize, Serialize, strum::Display)]
 pub enum HeadlossFormula {
   HazenWilliams, // H-W
   DarcyWeisbach, // D-W
   ChezyManning,  // C-M
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Deserialize, Serialize, strum::Display)]
 pub enum DemandModel {
   // Pressure Driven Analysis
   PDA,
@@ -16,7 +16,7 @@ pub enum DemandModel {
   DDA,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TimeOptions {
   pub duration: usize,      // duration of the simulation in hours
   pub hydraulic_timestep: usize, // hydraulic timestep in hours
@@ -40,7 +40,7 @@ impl Default for TimeOptions {
 }
 
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SimulationOptions {
   //
   pub flow_units: FlowUnits,
@@ -55,6 +55,9 @@ pub struct SimulationOptions {
   pub max_flow_change: Option<f64>,
   pub check_frequency: usize,
   pub max_check: usize,
+
+  pub specific_gravity: f64,
+  pub viscosity: f64,
 
   pub emitter_exponent: f64,
 
@@ -83,6 +86,8 @@ impl Default for SimulationOptions {
       max_flow_change: None,
       check_frequency: 2,
       emitter_exponent: 2.0,
+      specific_gravity: 1.0,
+      viscosity: 1.0,
       max_check: 10,
       pattern: None,
       time_options: TimeOptions::default(),

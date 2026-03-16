@@ -314,8 +314,8 @@ impl<'a> HydraulicSolver<'a> {
 
         }
         Err(e) => {
-          // if other error, panic
-          panic!("{}", e);
+          // if other error, return the error
+          return Err(e.to_string());
         }
       };
 

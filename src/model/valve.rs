@@ -6,7 +6,7 @@ use crate::constants::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize, Clone, strum::Display)]
 pub enum ValveType {
   PRV, // Pressure Reducing Valve
   PSV, // Pressure Sensing Valve
@@ -17,7 +17,7 @@ pub enum ValveType {
   GPV, // General Purpose Valve
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Valve {
   pub diameter: Ft,
   pub setting: f64,

@@ -5,7 +5,7 @@ use crate::constants::{SMALL_VALUE, RQ_TOL, PSIperFT, MperFT, BIG_VALUE};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Junction {
   pub basedemand: Cfs,
   pub pattern: Option<Box<str>>,

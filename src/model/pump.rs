@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Pump {
   pub speed: f64,
   pub head_curve_id: Option<Box<str>>,

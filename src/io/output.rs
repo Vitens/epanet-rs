@@ -3,6 +3,10 @@ use std::io::BufWriter;
 
 use crate::model::network::Network;
 use crate::solver::result::SolverResult;
+use crate::model::units::UnitConversion;
+
+use crate::io::inp::write_inp;
+
 use serde::Serialize;
 use rmp_serde::{Serializer};
 
@@ -13,7 +17,6 @@ struct JsonOutput {
   heads: Vec<Vec<f64>>,
   flows: Vec<Vec<f64>>,
 }
-
 
 const DIGITS: usize = 3;
 
@@ -53,19 +56,37 @@ impl Network {
   }
 
   pub fn save_network(&self, file: &str) -> Result<(), String> {
+
+    // clone the network and convert the units to standard units
+    let mut network = self.clone();
+
+    // convert the units back to their original units
+    for node in network.nodes.iter_mut() {
+      node.convert_from_standard(&network.options);
+    }
+    for link in network.links.iter_mut() {
+      link.convert_from_standard(&network.options);
+    }
+    network.options.convert_from_standard();
+
     let file_extension = file.split('.').last().unwrap();
     let file = File::create(file).map_err(|e| format!("Failed to create network file: {}", e))?;
     let writer = BufWriter::new(file);
 
-    if file_extension == "json" {
-      serde_json::to_writer(writer, self).map_err(|e| format!("Failed to write network to file: {}", e))?;
+    if file_extension == "inp" {
+      write_inp(&network, writer).map_err(|e| format!("Failed to write network to file: {}", e))?;
+    } 
+    else if file_extension == "json" {
+      serde_json::to_writer(writer, &network).map_err(|e| format!("Failed to write network to file: {}", e))?;
     } else if file_extension == "mpk" || file_extension == "msgpack" {
       let mut serializer = Serializer::new(writer);
-      self.serialize(&mut serializer).map_err(|e| format!("Failed to write network to file: {}", e))?;
+      network.serialize(&mut serializer).map_err(|e| format!("Failed to write network to file: {}", e))?;
     } else {
       return Err(format!("Unsupported file extension: {}", file_extension));
     }
     Ok(())
   }
+
+
 }
 

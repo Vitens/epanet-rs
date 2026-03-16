@@ -7,11 +7,14 @@ use crate::model::valve::ValveType;
 use crate::model::pattern::Pattern;
 use crate::model::options::SimulationOptions;
 use crate::model::control::{Control, ControlCondition};
+use crate::model::units::UnitConversion;
 
 use serde::{Deserialize, Deserializer, Serialize};
 
-#[derive(Default, Serialize)]
+#[derive(Default, Serialize, Clone)]
 pub struct Network {
+    /// Title of the network
+    pub title: Option<Box<str>>,
     /// Simulation options
     pub options: SimulationOptions,
     /// Nodes in the network
@@ -59,6 +62,7 @@ impl<'de> Deserialize<'de> for Network {
     // Deserialize the network data
     #[derive(Deserialize)]
     struct NetworkData {
+      title: Option<Box<str>>,
       options: SimulationOptions,
       nodes: Vec<Node>,
       links: Vec<Link>,
@@ -95,7 +99,9 @@ impl<'de> Deserialize<'de> for Network {
       }
     }
 
-    Ok(Network {
+
+    let mut network = Network {
+      title: data.title,
       options: data.options,
       nodes: data.nodes,
       links: data.links,
@@ -105,7 +111,12 @@ impl<'de> Deserialize<'de> for Network {
       node_map,
       link_map,
       contains_pressure_control_valve,
-    })
+    };
+
+    // convert the network to standard units
+    network.convert_to_standard(&network.options.clone());
+
+    Ok(network)
   }
 }
 
@@ -126,5 +137,33 @@ impl Network {
     self.link_map.insert(link.id.clone(), self.links.len());
     self.links.push(link);
     Ok(())
+  }
+}
+
+impl UnitConversion for Network {
+  fn convert_to_standard(&mut self, options: &SimulationOptions) {
+    // convert the nodes to standard units
+    for node in self.nodes.iter_mut() {
+      node.convert_to_standard(options);
+    }
+    // convert the links to standard units
+    for link in self.links.iter_mut() {
+      link.convert_to_standard(options);
+    }
+
+    // convert the options to standard units
+    self.options.convert_to_standard();
+  }
+  fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    // convert the nodes from standard units
+    for node in self.nodes.iter_mut() {
+      node.convert_from_standard(options);
+    }
+    // convert the links from standard units
+    for link in self.links.iter_mut() {
+      link.convert_from_standard(options);
+    }
+    // convert the options from standard units
+    self.options.convert_from_standard();
   }
 }

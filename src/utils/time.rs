@@ -62,6 +62,12 @@ pub fn parse_time_str(time_str: &str, unit_or_suffix: Option<&str>) -> Result<us
     Ok(seconds)
 }
 
+pub fn seconds_to_hhmm(seconds: usize) -> String {
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    format!("{:02}:{:02}", hours, minutes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6,7 +6,7 @@ use crate::model::curve::Curve;
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Tank {
   pub elevation: Ft,        // elevation of the tank (ft)
   pub initial_level: Ft,    // initial level of the tank (ft)
