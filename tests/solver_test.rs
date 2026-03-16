@@ -1,13 +1,16 @@
 //! Integration test for the hydraulic solver using pump.inp
 
 use epanet_rs::model::network::Network;
-use epanet_rs::solver::{HydraulicSolver, SolverResult};
+use epanet_rs::solver::solver::HydraulicSolver;
+use epanet_rs::solver::result::SolverResult;
 
 fn verify_heads_and_flows(network: &Network, result: &SolverResult, expected_heads: &Vec<(&str, f64)>, expected_flows: &Vec<(&str, f64)>) {
+
+  let result_length = result.heads.len();
   // Verify heads
   for (node_id, expected_head) in expected_heads {
     let idx = *network.node_map.get(*node_id).expect(&format!("Node {} not found", node_id));
-    let actual_head = result.heads[0][idx];
+    let actual_head = result.heads[result_length-1][idx];
     assert!(
       (actual_head - expected_head).abs() < 0.01,
       "Head mismatch for node {}: expected {:.2}, got {:.2}",
@@ -18,7 +21,7 @@ fn verify_heads_and_flows(network: &Network, result: &SolverResult, expected_hea
   // Verify flows
   for (link_id, expected_flow) in expected_flows {
     let idx = *network.link_map.get(*link_id).expect(&format!("Link {} not found", link_id));
-    let actual_flow = result.flows[0][idx];
+    let actual_flow = result.flows[result_length-1][idx];
     assert!(
       (actual_flow - expected_flow).abs() < 0.01,
       "Flow mismatch for link {}: expected {:.2}, got {:.2}",
@@ -139,6 +142,86 @@ fn test_solve_tanks_network() {
     ("3", 8.58),
     ("4", 15.52),
     ("5", 29.73),
+  ];
+
+  verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);
+}
+
+/// Test solving 2tanks.inp and verify exact head and flow values
+#[test]
+fn test_solve_2tanks_controls_network() {
+  let mut network = Network::default();
+  network.read_inp("tests/2tanks-controls.inp").expect("Failed to load 2tanks-controls.inp");
+
+  let solver = HydraulicSolver::new(&network);
+  let result = solver.run(false);
+
+  let expected_heads: Vec<(&str, f64)> = vec![
+    ("1", 5.00),
+    ("3", 4.00),
+    ("2", 3.86)
+  ];
+  let expected_flows: Vec<(&str, f64)> = vec![
+    ("1", 0.00),
+    ("2", 1.00)
+  ];
+  verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);
+}
+
+#[test]
+fn test_solve_emitters_network() {
+  let mut network = Network::default();
+  network.read_inp("tests/emitter.inp").expect("Failed to load emitters.inp");
+
+  let solver = HydraulicSolver::new(&network);
+  let result = solver.run(false);
+
+  let expected_heads: Vec<(&str, f64)> = vec![
+    ("1", 10.00),
+    ("2", 6.41),
+    ("3", 4.85),
+    ("4", 3.13),
+    ("5", 2.84),
+  ];
+  let expected_flows: Vec<(&str, f64)> = vec![
+    ("1", 8.61),
+    ("2", 2.56),
+    ("3", 2.70),
+    ("4", 1.03),
+    ("5", -4.00),
+  ];
+
+  verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);
+}
+
+#[test]
+fn test_solve_pda_network() {
+  let mut network = Network::default();
+  network.read_inp("tests/pda.inp").expect("Failed to load pda.inp");
+
+  let solver = HydraulicSolver::new(&network);
+  let result = solver.run(false);
+
+  let expected_flows: Vec<(&str, f64)> = vec![
+    ("A", 35.994202),
+    ("B", 15.244768),
+    ("C", 16.814336),
+    ("D", 9.042474),
+    ("E", 11.350634),
+    ("F", 3.866947),
+    ("G", 8.785734),
+    ("H", 1.075225),
+  ];
+
+  let expected_heads: Vec<(&str, f64)> = vec![
+    ("1", 1.548499),
+    ("2", 1.510046),
+    ("3", 1.516428),
+    ("4", 1.497855),
+    ("5", 1.495327),
+    ("6", 1.486298),
+    ("7", 0.028894),
+    ("FH", 100.000000)
   ];
 
   verify_heads_and_flows(&network, &result, &expected_heads, &expected_flows);

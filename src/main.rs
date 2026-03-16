@@ -1,15 +1,13 @@
-use std::process::Command;
-use std::process::Stdio;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 
-use simplelog::{info, warn, error, debug, LevelFilter, TerminalMode, ColorChoice, TermLogger, ConfigBuilder};
+use simplelog::{info, error, debug, LevelFilter, TerminalMode, ColorChoice, TermLogger, ConfigBuilder};
 use simplelog::{format_description};
 
 
 use epanet_rs::model::network::Network;
-use epanet_rs::solver::HydraulicSolver;
+use epanet_rs::solver::solver::HydraulicSolver;
 use epanet_rs::utils::validate_epanet::validate_with_epanet;
 
 const BANNER: [&str; 6] = [
@@ -55,9 +53,9 @@ enum Commands {
   },
   /// Convert a network file to a different format
   Convert {
-    /// Input file (EPANET .inp format)
+    /// Input file (.json, .msgpack or .inp format)
     input_file: String,
-    /// Output file (.json or .msgpack/.mpk)
+    /// Output file (.json, .msgpack or .mpk format)
     output_file: String,
   },
   /// Validate a network file against EPANET results
@@ -160,11 +158,11 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, print
     println!("Results:");
     println!("=== Heads:");
     for (i, node) in network.nodes.iter().enumerate() {
-      println!("Node {}: {:.2}", node.id, result.heads[0][i]);
+      println!("Node {}: {:.2}", node.id, result.heads[result.heads.len()-1][i]);
     }
     println!("=== Flows:");
     for (i, link) in network.links.iter().enumerate() {
-      println!("Link {}: {:.2}", link.id, result.flows[0][i]);
+      println!("Link {}: {:.2}", link.id, result.flows[result.flows.len()-1][i]);
     }
   }
 }

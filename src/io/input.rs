@@ -17,6 +17,7 @@ use crate::model::valve::{Valve, ValveType};
 use crate::model::control::{Control, ControlCondition};
 use crate::model::units::{FlowUnits, UnitSystem, PressureUnits, UnitConversion};
 use crate::model::options::*;
+use crate::utils::time::parse_time_str;
 use crate::error::*;
 
 /// Error type for input parsing operations
@@ -34,8 +35,12 @@ enum ReadState {
   Patterns,
   Status,
   Times,
+  Title,
   Rules,
   Controls,
+  Emitters,
+  Coordinates,
+  Vertices,
   None,
 }
 
@@ -98,6 +103,7 @@ impl Network {
       // if the line starts with [, it is a new section
       else if line.starts_with("[") {
         state = match line {
+          "[TITLE]" => ReadState::Title,
           "[JUNCTIONS]" => ReadState::Junctions,
           "[RESERVOIRS]" => ReadState::Reservoirs,
           "[PIPES]" => ReadState::Pipes,
@@ -111,12 +117,19 @@ impl Network {
           "[STATUS]" => ReadState::Status,
           "[TIMES]" => ReadState::Times,
           "[RULES]" => ReadState::Rules,
+          "[EMITTERS]" => ReadState::Emitters,
           "[CONTROLS]" => ReadState::Controls,
+          "[COORDINATES]" => ReadState::Coordinates,
+          "[VERTICES]" => ReadState::Vertices,
           _ => ReadState::None,
         }
       }
       else {
         let result: Result<(), InputError> = match state {
+          ReadState::Title => {
+            self.title = Some(line.trim().into());
+            Ok(())
+          }
           ReadState::Junctions => { 
             let junction = self.read_junction(line)?;
             self.add_node(junction).map_err(|e| InputError::new(e))
@@ -150,6 +163,9 @@ impl Network {
           ReadState::Patterns => { 
             self.read_pattern(line)
           }
+          ReadState::Emitters => { 
+            self.read_emitter(line)
+          }
           ReadState::None => {
             // skip unknown state
             Ok(())
@@ -169,6 +185,12 @@ impl Network {
           ReadState::Controls => {
             self.read_control(line)
           }
+          ReadState::Coordinates => {
+            self.read_coordinates(line)
+          }
+          ReadState::Vertices => {
+            self.read_vertices(line)
+          }
         };
         
         // Add line number context to any error
@@ -178,8 +200,10 @@ impl Network {
       line_buffer.clear();
     }
     // convert units
-    self.convert_units();
+    self.convert_to_standard(&self.options.clone());
     self.update_links()?;
+    // update the emitter exponent
+
     Ok(())
   }
 
@@ -192,7 +216,7 @@ impl Network {
           let curve = self.curves.get(head_curve_id)
             .ok_or_else(|| InputError::new(format!("Head curve '{}' not found for pump", head_curve_id)))?;
           // assign the head curve to the pump and convert units to standard units (US standard) and CFS
-          pump.head_curve = Some(HeadCurve::new(curve, &self.options.flow_units, &self.options.unit_system));
+          pump.head_curve = Some(HeadCurve::new(curve, &self.options.flow_units, &self.options.unit_system)?);
         }
       }
       if let LinkType::Valve(valve) = &mut link.link_type {
@@ -228,19 +252,6 @@ impl Network {
     Ok(())
   }
 
-  /// convert units
-  fn convert_units(&mut self) {
-    // convert the nodes to standard units (US standard) and CFS
-    for node in self.nodes.iter_mut() {
-      node.convert_units(&self.options.flow_units, &self.options.unit_system, false);
-    }
-    // convert the links to standard units (US standard) and CFS
-    for link in self.links.iter_mut() {
-      link.convert_units(&self.options.flow_units, &self.options.unit_system, false);
-    }
-
-  }
-
   /// Read a junction from a parts iterator
   fn read_junction(&mut self, line: &str) -> Result<Node, InputError> {
     let mut parts = parse_line(line);
@@ -252,7 +263,8 @@ impl Network {
     Ok(Node {
       id,
       elevation,
-      node_type: NodeType::Junction(Junction { basedemand: demand, pattern }),
+      node_type: NodeType::Junction(Junction { basedemand: demand, pattern, emitter_coefficient: 0.0 }),
+      coordinates: None,
     })
   }
 
@@ -267,6 +279,7 @@ impl Network {
       id,
       elevation,
       node_type: NodeType::Reservoir(Reservoir { head_pattern: pattern }),
+      coordinates: None,
     })
   }
 
@@ -297,6 +310,7 @@ impl Network {
       id,
       elevation,
       node_type: NodeType::Tank(Tank { elevation, initial_level, min_level, max_level, diameter, min_volume, volume_curve_id, overflow, volume_curve: None, links_to: Vec::new(), links_from: Vec::new() }),
+      coordinates: None,
     })
   }
 
@@ -358,6 +372,7 @@ impl Network {
       end_node_id: end_node,
       link_type: LinkType::Valve(Valve { diameter, setting, curve_id, valve_type, minor_loss, valve_curve: None }),
       initial_status: LinkStatus::Active,
+      vertices: None,
     })
   }
 
@@ -408,6 +423,7 @@ impl Network {
       end_node_id: end_node,
       link_type: LinkType::Pipe(Pipe { diameter, length, roughness, minor_loss, check_valve, headloss_formula }),
       initial_status: status,
+      vertices: None,
     })
   }
 
@@ -456,6 +472,7 @@ impl Network {
       end_node: end_node_index,
       link_type: LinkType::Pump(Pump { speed, head_curve_id, power, head_curve: None }),
       initial_status: LinkStatus::Open,
+      vertices: None,
     })
   }
   /// Read a curve from a parts iterator
@@ -507,6 +524,24 @@ impl Network {
     }
     Ok(())
   }
+  fn read_emitter(&mut self, line: &str) -> Result<(), InputError> {
+    let mut parts = parse_line(line);
+    let id: Box<str> = parts.next().ok_or_missing("junction id")?.into();
+    let coefficient = parts.next().ok_or_missing("coefficient")?.parse_field::<f64>("coefficient")?;
+
+    let node_index = *self.node_map.get(&id)
+      .ok_or_else(|| InputError::new(format!("Node '{}' not found for EMITTER", id)))?;
+    let node = &mut self.nodes[node_index];
+
+    // set the emitter coefficient for the junction
+    match &mut node.node_type {
+      NodeType::Junction(junction) => {
+        junction.emitter_coefficient = coefficient;
+        Ok(())
+      }
+      _ => Err(InputError::new(format!("Emitter can only be set for junctions, but '{}' is not a junction", id))),
+    }
+  }
   
   /// Read a demand from a parts iterator and set the basedemand for the junction
   fn read_demand(&mut self, line: &str) -> Result<(), InputError> {
@@ -548,7 +583,7 @@ impl Network {
         };
         // set the default pressure units based on the unit system
         self.options.pressure_units = match self.options.unit_system {
-          UnitSystem::US => PressureUnits::FEET,
+          UnitSystem::US => PressureUnits::PSI,
           UnitSystem::SI => PressureUnits::METERS,
         }
       }
@@ -560,10 +595,27 @@ impl Network {
             .parse_field::<f64>("demand multiplier")?;
         } else if let Some(model) = parts.next() {
           if model.trim().to_uppercase() == "PDA" {
-            return Err(InputError::new("PDA demand model is not supported yet"));
+            self.options.demand_model = DemandModel::PDA;
+          }
+          else if model.trim().to_uppercase() == "DDA" {
+            self.options.demand_model = DemandModel::DDA;
+          }
+          else {
+            return Err(InputError::new(format!("Invalid demand model: {}", model)));
           }
         }
       },
+      "EMITTER" => {
+        let next_part = value.trim().to_uppercase();
+        if next_part == "EXPONENT" {
+          self.options.emitter_exponent = 1.0 / parts.next()
+            .ok_or_missing("emitter exponent value")?
+            .parse_field::<f64>("emitter exponent")?;
+        }
+        else {
+          return Err(InputError::new(format!("Invalid emitter option: {}", value)));
+        }
+      }
       "HEADLOSS" => {
         self.options.headloss_formula = match value.to_uppercase().as_str() {
           "H-W" => HeadlossFormula::HazenWilliams,
@@ -582,6 +634,15 @@ impl Network {
         // Handle "Pressure Exponent" as a separate option (skip if not a valid pressure unit)
         if let Ok(units) = PressureUnits::from_str(value) {
           self.options.pressure_units = units;
+        } else {
+          if value.trim().to_uppercase() == "EXPONENT" {
+            self.options.pressure_exponent = parts.next()
+              .ok_or_missing("pressure exponent value")?
+              .parse_field::<f64>("pressure exponent")?;
+          }
+          else {
+            return Err(InputError::new(format!("Invalid pressure option: {}", value)));
+          }
         }
         // Otherwise it's likely "Pressure Exponent" or similar - ignore
       }
@@ -612,6 +673,28 @@ impl Network {
             }
           }
         }
+      },
+      "MINIMUM" => {
+        let next_part = value.trim().to_uppercase();
+        if next_part == "PRESSURE" {
+          self.options.minimum_pressure = parts.next()
+            .ok_or_missing("minimum pressure value")?
+            .parse_field::<f64>("minimum pressure")?;
+        }
+        else {
+          return Err(InputError::new(format!("Invalid minimum pressure option: {}", value)));
+        }
+      },
+      "REQUIRED" => {
+        let next_part = value.trim().to_uppercase();
+        if next_part == "PRESSURE" {
+          self.options.required_pressure = parts.next()
+            .ok_or_missing("required pressure value")?
+            .parse_field::<f64>("required pressure")?;
+        }
+        else {
+          return Err(InputError::new(format!("Invalid required pressure option: {}", value)));
+        }
       }
       _ => ()
     }
@@ -638,7 +721,7 @@ impl Network {
     }
 
     let time_units = parts.next();
-    let seconds = parse_time(duration, time_units)?;
+    let seconds = parse_time_str(duration, time_units)?;
 
     // assign the duration to the time options
     match time_option.as_str() {
@@ -670,7 +753,7 @@ impl Network {
     let (status, setting) = if let Ok(value) = status_or_setting.parse::<f64>() {
       (None, Some(value))
     } else {
-      (Some(LinkStatus::from_str(status_or_setting, false)), None)
+      (Some(LinkStatus::from_str(status_or_setting, false)?), None)
     };
 
     // Skip "IF" keyword
@@ -685,16 +768,29 @@ impl Network {
         let above_below = parts.next().ok_or_missing("ABOVE or BELOW")?;
         let above = above_below.to_uppercase() == "ABOVE";
         let value = parts.next().ok_or_missing("pressure value")?.parse_field::<f64>("pressure value")?;
-        ControlCondition::Pressure { node_id, above, below: value }
+
+        // get node index
+        let node_index = *self.node_map.get(&node_id).ok_or_else(|| InputError::new(format!("Node '{}' not found for control", node_id)))?;
+        let node = &self.nodes[node_index];
+        let is_tank = matches!(node.node_type, NodeType::Tank(_));
+
+        let condition = match (is_tank, above) {
+          (true, true) => ControlCondition::HighLevel { tank_index: node_index, target: value },
+          (true, false) => ControlCondition::LowLevel { tank_index: node_index, target: value },
+          (false, true) => ControlCondition::HighPressure { node_index: node_index, target: value },
+          (false, false) => ControlCondition::LowPressure { node_index: node_index, target: value },
+        };
+
+        condition
       }
       "TIME" => {
         let time_str = parts.next().ok_or_missing("time value")?;
-        let seconds = parse_time(time_str, parts.next())?;
+        let seconds = parse_time_str(time_str, parts.next())?;
         ControlCondition::Time { seconds }
       }
       "CLOCKTIME" => {
         let time_str = parts.next().ok_or_missing("clock time value")?;
-        let seconds = parse_time(time_str, parts.next())?;
+        let seconds = parse_time_str(time_str, parts.next())?;
         ControlCondition::ClockTime { seconds }
       }
       _ => return Err(InputError::new(format!("Invalid control condition type: {}", condition_type))),
@@ -728,10 +824,38 @@ impl Network {
     } else {
       // if the link is a valve, set the status as fixed open or fixed closed
       let is_valve = matches!(link.link_type, LinkType::Valve(_));
-      link.initial_status = LinkStatus::from_str(status, is_valve);
+      link.initial_status = LinkStatus::from_str(status, is_valve)?;
     }
     Ok(())
   }
+
+  fn read_coordinates(&mut self, line: &str) -> Result<(), InputError> {
+    let mut parts = parse_line(line);
+    let id: Box<str> = parts.next().ok_or_missing("node id")?.into();
+    let x = parts.next().ok_or_missing("x coordinate")?.parse_field::<f64>("x coordinate")?;
+    let y = parts.next().ok_or_missing("y coordinate")?.parse_field::<f64>("y coordinate")?;
+    let node_index = *self.node_map.get(&id).ok_or_else(|| InputError::new(format!("Node '{}' not found for coordinates", id)))?;
+    self.nodes[node_index].coordinates = Some((x, y));
+    Ok(())
+  }
+
+  fn read_vertices(&mut self, line: &str) -> Result<(), InputError> {
+    let mut parts = parse_line(line);
+    let id: Box<str> = parts.next().ok_or_missing("link id")?.into();
+    let x = parts.next().ok_or_missing("x coordinate")?.parse_field::<f64>("x coordinate")?;
+    let y = parts.next().ok_or_missing("y coordinate")?.parse_field::<f64>("y coordinate")?;
+    let link_index = *self.link_map.get(&id).ok_or_else(|| InputError::new(format!("Link '{}' not found for vertices", id)))?;
+
+    if let Some(vertices) = &mut self.links[link_index].vertices {
+      vertices.push((x, y));
+    }
+    else {
+      self.links[link_index].vertices = Some(vec![(x, y)]);
+    }
+
+    Ok(())
+  }
+
 }
 
 /// Strip comments (after ';') from a line and split into whitespace-separated parts
@@ -739,71 +863,37 @@ fn parse_line(line: &str) -> std::str::SplitWhitespace<'_> {
   line.split(';').next().unwrap_or("").trim().split_whitespace()
 }
 
-/// Parse a time string with optional time unit suffix.
-/// Supports formats:
-/// - "HH:MM" with optional AM/PM suffix
-/// - Numeric value with unit (HOUR, MINUTE, MIN, SECOND, SEC, DAY, AM, PM)
-/// - If no unit is provided, defaults to HOURS
-fn parse_time(time_str: &str, unit_or_suffix: Option<&str>) -> Result<usize, InputError> {
-  let seconds: usize;
-
-  // If time contains ":", parse as HH:MM format
-  if time_str.contains(":") {
-    let mut time_parts = time_str.split(":");
-    let hours = time_parts.next()
-      .ok_or_else(|| InputError::new("Missing hours in time"))?
-      .parse::<usize>()
-      .map_err(|_| InputError::new(format!("Invalid hours value in time: {}", time_str)))?;
-    let minutes = time_parts.next()
-      .ok_or_else(|| InputError::new("Missing minutes in time"))?
-      .parse::<usize>()
-      .map_err(|_| InputError::new(format!("Invalid minutes value in time: {}", time_str)))?;
-    seconds = hours * 3600 + minutes * 60 + if let Some(suffix) = unit_or_suffix {
-      if suffix.to_uppercase() == "PM" { 12 * 3600 } else { 0 }
-    } else { 0 };
-  } else {
-    // Parse as numeric value with optional time unit
-    let value = time_str.parse::<usize>()
-      .map_err(|_| InputError::new(format!("Invalid time value: {}", time_str)))?;
-    let mut unit = unit_or_suffix.unwrap_or("HOURS").to_uppercase();
-    
-    // Remove trailing "S" for singular form
-    if unit.ends_with("S") && unit != "HOURS" {
-      unit.pop();
-    }
-
-    seconds = match unit.as_str() {
-      "HOUR" | "HOURS" => value * 3600,
-      "MINUTE" | "MIN" => value * 60,
-      "SECOND" | "SEC" => value,
-      "DAY" => value * 86400,
-      "AM" => value * 3600,
-      "PM" => value * 3600 + 12 * 3600,
-      _ => return Err(InputError::new(format!("Invalid time unit: {}", unit))),
-    };
-  }
-
-  Ok(seconds)
-}
 
 #[cfg(test)]
 mod tests {
   use super::*;
 
   /// Helper to create a network with default options for testing.
-  /// If `with_nodes` is true, adds two default nodes: "N1" (junction) and "N2" (junction).
+  /// If `with_nodes` is true, adds two default nodes: "N1" (junction) and "N2" (junction) and link L1 between them.
   fn test_network(with_nodes: bool) -> Network {
     let mut network = Network::default();
     if with_nodes {
       network.add_node(Node {
         id: "N1".into(),
         elevation: 0.0,
-        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None }),
+        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, emitter_coefficient: 0.0 }),
+        coordinates: None,
       }).unwrap();
       network.add_node(Node {
         id: "N2".into(),
         elevation: 0.0,
-        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None }),
+        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, emitter_coefficient: 0.0 }),
+        coordinates: None,
+      }).unwrap();
+      network.add_link(Link {
+        id: "L1".into(),
+        link_type: LinkType::Pipe(Pipe { length: 100.0, diameter: 12.0, roughness: 100.0, check_valve: false, headloss_formula: HeadlossFormula::HazenWilliams, minor_loss: 0.0 }),
+        start_node: 0,
+        end_node: 1,
+        start_node_id: "N1".into(),
+        end_node_id: "N2".into(),
+        initial_status: LinkStatus::Open,
+        vertices: None,
       }).unwrap();
     }
     network
@@ -1111,7 +1201,6 @@ mod tests {
   }
 
   // ==================== Options Tests ====================
-
   #[test]
   fn test_read_options_units_lps() {
     let mut network = test_network(false);
@@ -1129,7 +1218,7 @@ mod tests {
     
     assert_eq!(network.options.flow_units, FlowUnits::CFS);
     assert_eq!(network.options.unit_system, UnitSystem::US);
-    assert_eq!(network.options.pressure_units, PressureUnits::FEET);
+    assert_eq!(network.options.pressure_units, PressureUnits::PSI);
   }
 
   #[test]
@@ -1138,6 +1227,14 @@ mod tests {
     network.read_options("HEADLOSS  D-W").unwrap();
     
     assert_eq!(network.options.headloss_formula, HeadlossFormula::DarcyWeisbach);
+  }
+
+  #[test]
+  fn test_read_options_emitter_exponent() {
+    let mut network = test_network(false);
+    network.read_options("EMITTER EXPONENT  0.2").unwrap();
+    
+    assert_eq!(network.options.emitter_exponent, 1.0 / 0.2);
   }
 
   #[test]
@@ -1154,6 +1251,35 @@ mod tests {
     network.read_options("ACCURACY  0.0001").unwrap();
     
     assert!((network.options.accuracy - 0.0001).abs() < 1e-10);
+  }
+
+  #[test]
+  fn test_read_options_minimum_pressure() {
+    let mut network = test_network(false);
+    network.read_options("MINIMUM PRESSURE  20").unwrap();
+    
+    assert_eq!(network.options.minimum_pressure, 20.0);
+  }
+  #[test]
+  fn test_read_options_required_pressure() {
+    let mut network = test_network(false);
+    network.read_options("REQUIRED PRESSURE  30").unwrap();
+    
+    assert_eq!(network.options.required_pressure, 30.0);
+  }
+  #[test]
+  fn test_read_options_pressure_exponent() {
+    let mut network = test_network(false);
+    network.read_options("PRESSURE EXPONENT  0.6").unwrap();
+    
+    assert_eq!(network.options.pressure_exponent, 0.6);
+  }
+  #[test]
+  fn test_read_options_demand_model_pda() {
+    let mut network = test_network(false);
+    network.read_options("DEMAND MODEL  PDA").unwrap();
+    
+    assert_eq!(network.options.demand_model, DemandModel::PDA);
   }
 
   // ==================== Times Tests ====================
@@ -1253,57 +1379,78 @@ mod tests {
     
     assert_eq!(network.options.time_options.duration, 86400);
   }
+  // ==================== Emitter Tests ====================
+  #[test]
+  fn test_read_emitter_basic() {
+    let mut network = test_network(true);
+    network.read_emitter("N1  0.5").unwrap();
+    
+    // check if the emitter coefficient is set for the junction
+    let node_index = network.node_map.get("N1").unwrap();
+    let node = &network.nodes[*node_index];
+    let NodeType::Junction(junction) = &node.node_type else {
+      panic!("Expected Junction node type");
+    };
+    assert_eq!(junction.emitter_coefficient, 0.5);
+
+  }
 
   // ==================== Control Tests ====================
   #[test]
   fn test_pressure_control_above() {
-    let mut network = test_network(false);
-    network.read_control("LINK 12 CLOSED IF NODE 23 BELOW 20").unwrap();
+    let mut network = test_network(true);
+    network.read_control("LINK L1 CLOSED IF NODE N1 BELOW 20").unwrap();
 
     assert_eq!(network.controls.len(), 1);
     let control = network.controls.get(0).unwrap();
-    assert_eq!(control.link_id, "12".into());
+    assert_eq!(control.link_id, "L1".into());
     assert_eq!(control.setting, None);
     assert_eq!(control.status, Some(LinkStatus::Closed));
-    let ControlCondition::Pressure { node_id, above, below } = &control.condition else {
-      panic!("Expected Pressure control condition");
+    let ControlCondition::LowPressure { node_index, target } = &control.condition else {
+      panic!("Expected LowPressure control condition");
     };
-    assert_eq!(*node_id, "23".into());
-    assert!(!above);
-    assert_eq!(*below, 20.0);
+    assert_eq!(*node_index, *network.node_map.get("N1").unwrap());
+    assert_eq!(*target, 20.0);
   }
   #[test]
   fn test_pressure_control_setting() {
-    let mut network = test_network(false);
-    network.read_control("LINK 12 1.5 IF NODE 23 ABOVE 20").unwrap();
+    let mut network = test_network(true);
+    network.read_control("LINK L1 1.5 IF NODE N1 ABOVE 20").unwrap();
 
     assert_eq!(network.controls.len(), 1);
     let control = network.controls.get(0).unwrap();
-    assert_eq!(control.link_id, "12".into());
+    assert_eq!(control.link_id, "L1".into());
     assert_eq!(control.setting, Some(1.5));
+    assert_eq!(control.status, None);
+    let ControlCondition::HighPressure { node_index, target } = &control.condition else {
+      panic!("Expected HighPressure control condition");
+    };
+    assert_eq!(*node_index, *network.node_map.get("N1").unwrap());
+    assert_eq!(*target, 20.0);
   }
 
   #[test]
   fn test_time_control() {
-    let mut network = test_network(false);
-    network.read_control("LINK 12 CLOSED IF TIME 1:15").unwrap();
+    let mut network = test_network(true);
+    network.read_control("LINK L1 CLOSED IF TIME 1:15").unwrap();
 
     assert_eq!(network.controls.len(), 1);
     let control = network.controls.get(0).unwrap();
-    assert_eq!(control.link_id, "12".into());
+    assert_eq!(control.link_id, "L1".into());
     let ControlCondition::Time { seconds } = &control.condition else {
       panic!("Expected Time control condition");
     };
     assert_eq!(*seconds, 1 * 3600 + 15 * 60);
   }
+
   #[test]
   fn test_clock_time_control() {
     let mut network = test_network(false);
-    network.read_control("LINK 12 CLOSED IF CLOCKTIME 1:15 PM").unwrap();
+    network.read_control("LINK L1 CLOSED IF CLOCKTIME 1:15 PM").unwrap();
 
     assert_eq!(network.controls.len(), 1);
     let control = network.controls.get(0).unwrap();
-    assert_eq!(control.link_id, "12".into());
+    assert_eq!(control.link_id, "L1".into());
     let ControlCondition::ClockTime { seconds } = &control.condition else {
       panic!("Expected ClockTime control condition");
     };
@@ -1311,4 +1458,3 @@ mod tests {
   }
 
 }
-

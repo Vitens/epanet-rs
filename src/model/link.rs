@@ -1,12 +1,13 @@
 use crate::model::pipe::Pipe;
 use crate::model::pump::Pump;
 use crate::model::valve::Valve;
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::units::UnitConversion;
+use crate::model::options::SimulationOptions;
 use crate::constants::Q_ZERO;
-
+use crate::error::InputError;
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 /// Link struct
 pub struct Link {
   /// Link ID
@@ -20,6 +21,9 @@ pub struct Link {
   /// Initial status (open, closed, active)
   pub initial_status: LinkStatus,
 
+  /// Optional vertices for the link (only relevant for graphical display)
+  pub vertices: Option<Vec<(f64, f64)>>,
+
   /// Cached start and end node indices to avoid looking up the node map every time
   #[serde(skip)]
   pub start_node: usize,
@@ -27,7 +31,7 @@ pub struct Link {
   pub end_node: usize,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub enum LinkType {
     Pipe(Pipe),
     Pump(Pump),
@@ -49,13 +53,19 @@ pub enum LinkStatus {
   FixedClosed,   // fixed closed
 }
 
+impl std::fmt::Display for LinkStatus {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(f, "{:?}", self)
+  }
+}
+
 impl LinkStatus {
-  pub fn from_str(status: &str, is_valve: bool) -> LinkStatus {
+  pub fn from_str(status: &str, is_valve: bool) -> Result<LinkStatus, InputError> {
     match status.to_uppercase().as_str() {
-      "CLOSED" => if is_valve { LinkStatus::FixedClosed } else { LinkStatus::Closed },
-      "OPEN" => if is_valve { LinkStatus::FixedOpen } else { LinkStatus::Open },
-      "ACTIVE" => LinkStatus::Active,
-      _ => panic!("Invalid link status {}", status)
+      "CLOSED" => if is_valve { Ok(LinkStatus::FixedClosed) } else { Ok(LinkStatus::Closed) },
+      "OPEN" => if is_valve { Ok(LinkStatus::FixedOpen) } else { Ok(LinkStatus::Open) },
+      "ACTIVE" => Ok(LinkStatus::Active),
+      _ => return Err(InputError::new(format!("Invalid link status '{}'", status)))
     }
   }
 }
@@ -89,22 +99,22 @@ impl LinkCoefficients {
 
 pub trait LinkTrait {
   /// Calculate the 1/G_ij and Y_ij coefficients for the link
-  fn coefficients(&self, q: f64, resistance: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients;
+  fn coefficients(&self, q: f64, resistance: f64, setting: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients;
   /// Calculate the resistance of the link
   fn resistance(&self) -> f64;
   /// Update the status of the link
-  fn update_status(&self, status: LinkStatus, flow: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus>;
+  fn update_status(&self, setting: f64, status: LinkStatus, flow: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus>;
   /// Get the initial flow of the link
   fn initial_flow(&self) -> f64;
 }
 
 impl LinkTrait for Link {
   #[inline]
-  fn coefficients(&self, q: f64, resistance: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients {
+  fn coefficients(&self, q: f64, resistance: f64, setting: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients {
     match &self.link_type {
-      LinkType::Pipe(pipe) => pipe.coefficients(q, resistance, status, excess_flow_upstream, excess_flow_downstream),
-      LinkType::Pump(pump) => pump.coefficients(q, resistance, status, excess_flow_upstream, excess_flow_downstream),
-      LinkType::Valve(valve) => valve.coefficients(q, resistance, status, excess_flow_upstream, excess_flow_downstream),
+      LinkType::Pipe(pipe) => pipe.coefficients(q, resistance, setting, status, excess_flow_upstream, excess_flow_downstream),
+      LinkType::Pump(pump) => pump.coefficients(q, resistance, setting, status, excess_flow_upstream, excess_flow_downstream),
+      LinkType::Valve(valve) => valve.coefficients(q, resistance, setting, status, excess_flow_upstream, excess_flow_downstream),
     }
   }
   #[inline]
@@ -116,11 +126,11 @@ impl LinkTrait for Link {
     }
   }
   #[inline]
-  fn update_status(&self, status: LinkStatus, flow: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
+  fn update_status(&self, setting: f64, status: LinkStatus, flow: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
     match &self.link_type {
-      LinkType::Pipe(pipe) => pipe.update_status(status, flow, head_upstream, head_downstream),
-      LinkType::Pump(pump) => pump.update_status(status, flow, head_upstream, head_downstream),
-      LinkType::Valve(valve) => valve.update_status(status, flow, head_upstream, head_downstream),
+      LinkType::Pipe(pipe) => pipe.update_status(setting, status, flow, head_upstream, head_downstream),
+      LinkType::Pump(pump) => pump.update_status(setting, status, flow, head_upstream, head_downstream),
+      LinkType::Valve(valve) => valve.update_status(setting, status, flow, head_upstream, head_downstream),
     }
   }
   fn initial_flow(&self) -> f64 {
@@ -140,11 +150,29 @@ impl LinkTrait for Link {
 
 
 impl UnitConversion for Link {
-  fn convert_units(&mut self, flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
+  fn convert_to_standard(&mut self, options: &SimulationOptions) {
     match &mut self.link_type {
-      LinkType::Pipe(pipe) => pipe.convert_units(flow, system, reverse),
-      LinkType::Pump(pump) => pump.convert_units(flow, system, reverse),
-      LinkType::Valve(valve) => valve.convert_units(flow, system, reverse),
+      LinkType::Pipe(pipe) => pipe.convert_to_standard(options),
+      LinkType::Pump(pump) => pump.convert_to_standard(options),
+      LinkType::Valve(valve) => valve.convert_to_standard(options),
+    }
+  }
+  fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    match &mut self.link_type {
+      LinkType::Pipe(pipe) => pipe.convert_from_standard(options),
+      LinkType::Pump(pump) => pump.convert_from_standard(options),
+      LinkType::Valve(valve) => valve.convert_from_standard(options),
+    }
+  }
+}
+
+impl Link {
+  /// Get the initial setting of the link
+  pub fn initial_setting(&self) -> f64 {
+    match &self.link_type {
+      LinkType::Pipe(_) => 0.0,
+      LinkType::Pump(pump) => pump.speed,
+      LinkType::Valve(valve) => valve.setting,
     }
   }
 }

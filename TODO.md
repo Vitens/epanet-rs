@@ -20,17 +20,21 @@
 - [x] Implement GPV
 - [x] Implement tank logic
 - [x] Fixed power pumps
-- [ ] Implement CONTROLS
+- [x] Implement CONTROLS
+- [x] Refactor how time steps are calculated to match EPANET
+- [x] Implement EMITTERS
+- [x] Pressure Driven Analysis
+- [x] Get rid of all the Panics and Unwraps, use Result instead
+- [x] Network input file writing
+- [x] Fix Unit conversion when serializing using Serde
+- [-] Setup unit and integration testing, improve coverage
+- [ ] Update convergence criteria for PDA
 - [ ] Implement RULES
-- [ ] Refactor how time steps are calculated to match EPANET
 - [ ] Tanks with volume curve
 - [ ] Unit conversion for GPV head curves
-- [ ] Fix Unit conversion when serializing using Serde
 - [ ] Introduce more robust unit type system to handle conversions between different units and systems
 - [ ] Network validation (connectivity, presence of tanks)
-- [ ] Setup unit and integration testing, improve coverage
-- [ ] Get rid of all the Panics and Unwraps, use Result instead
+- [ ] Identify and remove unconnected zones from the solver
 - [ ] Try to get the solver working for f32 in addition to f64 (SIMD speedup?)
 - [ ] Setup automated benchmarks
-- [ ] Pressure Driven Analysis
 - [ ] Create EPANET2_3 API compatibility layer

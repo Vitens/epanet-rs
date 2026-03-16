@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::constants::*;
-use crate::model::units::{FlowUnits, UnitSystem};
+use crate::model::units::{Ft, Cfs, FlowUnits, UnitSystem};
+use crate::error::InputError;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Curve {
@@ -26,8 +27,8 @@ impl Curve {
 
 #[derive(Debug, Clone)]
 pub struct HeadCurve {
-  pub flows: Vec<f64>,
-  pub heads: Vec<f64>,
+  pub flows: Vec<Cfs>,
+  pub heads: Vec<Ft>,
   pub curve_type: HeadCurveType,
   pub statistics: HeadCurveStatistics,
 }
@@ -41,27 +42,28 @@ pub enum HeadCurveType {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HeadCurveStatistics {
-  pub h_max: f64,           // maximum head
-  pub h_shutoff: f64,       // shutoff head
-  pub q_max: f64,           // maximum flow
-  pub q_initial: f64,       // design flow (= initial flow)
+  pub h_max: Ft,           // maximum head
+  pub h_shutoff: Ft,       // shutoff head
+  pub q_max: Cfs,           // maximum flow
+  pub q_initial: Cfs,       // design flow (= initial flow)
   pub r: f64,               // flow coefficient
   pub n: f64,               // pump exponent
 }
 
 impl HeadCurve {
-  pub fn new(curve: &Curve, flow_units: &FlowUnits, system: &UnitSystem) -> Self {
+  pub fn new(curve: &Curve, flow_units: &FlowUnits, system: &UnitSystem) -> Result<Self, InputError> {
 
     // convert the flow and head values to the standard units (CFS and Feet)
     let flows = curve.x.iter().map(|x| x / flow_units.per_cfs()).collect();
     let heads = curve.y.iter().map(|y| y / system.per_feet()).collect();
 
-    // precompute the curve statistics
-    let statistics = Self::compute_curve_statistics(&flows, &heads);
-
+    // validate the curve to ensure the head is decreasing and the flow is increasing monotonically
     if !Self::validate_curve(&flows, &heads) {
-      panic!("Invalid head curve: Head is not decreasing or flow is not increasing monotonically");
+      return Err(InputError::new("Invalid head curve: Head is not decreasing or flow is not increasing monotonically"));
     }
+
+    // precompute the curve statistics
+    let statistics = Self::compute_curve_statistics(&flows, &heads)?;
 
     let curve_type = match (flows.len(), flows[0] == 0.0) {
       (1, _) => HeadCurveType::SinglePoint,
@@ -69,14 +71,14 @@ impl HeadCurve {
       _ => HeadCurveType::Custom,
     };
 
-    Self {
+    Ok(Self {
       flows: flows,
       heads: heads,
       curve_type: curve_type,
       statistics: statistics,
-    }
+    })
   }
-  pub fn coefficients(&self, q: f64) -> (f64, f64) {
+  pub fn coefficients(&self, q: Cfs) -> (Ft, f64) {
     // find the index of the curve segment that contains the flow
     // clamp the index to the valid range
     let x2 = self.flows.partition_point(|&x| x < q).max(1).min(self.flows.len()-1);
@@ -89,7 +91,7 @@ impl HeadCurve {
   }
 
   // Calculate the maximum head, minimum head, and maximum flow from the curve
-  pub fn compute_curve_statistics(flows: &Vec<f64>, heads: &Vec<f64>) -> HeadCurveStatistics {
+  pub fn compute_curve_statistics(flows: &Vec<Cfs>, heads: &Vec<Ft>) -> Result<HeadCurveStatistics, InputError> {
 
     if flows.len() == 1 {
 
@@ -100,14 +102,14 @@ impl HeadCurve {
       let a = h * 4.0 / 3.0; // maximum head / shutoff head
       let b = (a-h)/(q*q);  // flow coefficient 
 
-      return HeadCurveStatistics {
+      return Ok(HeadCurveStatistics {
         h_max: a,
         h_shutoff: a,
         q_max: q * 2.0,
         q_initial: q,
         r: b,
         n: 2.0,
-      }
+      })
     }
     // three point curve with shutoff head at zero
     else if flows.len() == 3 && flows[0] == 0.0 {
@@ -133,16 +135,16 @@ impl HeadCurve {
       valid &= b < 0.0;
 
       if valid {
-        return HeadCurveStatistics {
+        return Ok(HeadCurveStatistics {
           h_max: h0,
           h_shutoff: h0,
           q_max: q2,
           q_initial: q1,
           r: -b,
           n: c,
-        }
+        })
       } else {
-        panic!("Invalid head curve: Head curve statistics could not be calculated");
+        return Err(InputError::new("Invalid head curve: Head curve statistics could not be calculated"));
       }
     }
     else {
@@ -151,18 +153,18 @@ impl HeadCurve {
       let q_initial = (flows[0] + q_max) / 2.0;
       let h_max = heads[0];
 
-      return HeadCurveStatistics {
+      return Ok(HeadCurveStatistics {
         h_max: h_max,
         h_shutoff: h_max,
         q_max: q_max,
         q_initial: q_initial,
         r: 0.0,
         n: 1.0,
-      }
+      })
     }
   }
   /// Validate the curve to ensure the head is decreasing and the flow is increasing monotonically
-  pub fn validate_curve(flows: &Vec<f64>, heads: &Vec<f64>) -> bool {
+  pub fn validate_curve(flows: &Vec<Cfs>, heads: &Vec<Ft>) -> bool {
     for i in 1..heads.len() {
       if flows[i] <= flows[i-1] || heads[i] >= heads[i-1] {
         return false;
@@ -171,7 +173,7 @@ impl HeadCurve {
     true
   }
   /// Find intercept and slope of custom pump curve segment which contains speed adjusted flow 
-  pub fn custom_curve_coefficients(&self, q: f64, speed: f64) -> (f64, f64) {
+  pub fn custom_curve_coefficients(&self, q: Cfs, speed: f64) -> (f64, f64) {
     // speed adjust the flow
     let q_adjusted = q / speed;
     // compute the coefficients of the curve segment that contains the speed adjusted flow
@@ -195,7 +197,7 @@ impl HeadCurve {
   }
 
   // return hydraulic gradient and head loss
-  pub fn curve_coefficients(&self, q: f64, speed: f64) -> (f64, f64) {
+  pub fn curve_coefficients(&self, q: Cfs, speed: f64) -> (f64, f64) {
 
     // for a custom curve, find the slope and intercept of the curve segment that contains the speed adjusted flow
     if self.curve_type == HeadCurveType::Custom {
@@ -208,7 +210,7 @@ impl HeadCurve {
       let h0 = speed.powi(2) * -self.statistics.h_shutoff;
       let mut n = self.statistics.n;
       if (self.statistics.n-1.0) < TINY { n = 1.0; }
-      let r = self.statistics.r * speed.powf(n-1.0);
+      let r = self.statistics.r * speed.powf(2.0 - n);
 
       // curve is nonlinear
       let (mut hgrad, mut hloss) = if n != 1.0 {

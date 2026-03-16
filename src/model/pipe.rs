@@ -1,6 +1,6 @@
 use crate::model::link::{LinkTrait, LinkCoefficients};
-use crate::model::options::HeadlossFormula;
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::options::{HeadlossFormula, SimulationOptions};
+use crate::model::units::{Ft, Cfs, UnitSystem, UnitConversion};
 use crate::model::link::LinkStatus;
 use crate::constants::*;
 
@@ -11,20 +11,17 @@ use serde::{Deserialize, Serialize};
 // Constants used for computing Darcy-Weisbach friction factor (src: hydcoefs.c from EPANET 2.3)
 const A1 : f64 =  3.14159265358979323850e+03;   // 1000*PI
 const A2 : f64 =  1.57079632679489661930e+03;   // 500*PI
-// const A3 : f64 =  5.02654824574366918160e+01;   // 16*PI
-// const A4 : f64 =  6.28318530717958647700e+00;   // 2*PI
 const A8 : f64 =  4.61841319859066668690e+00;   // 5.74*(PI/4)^.9
 const A9 : f64 = -8.68588963806503655300e-01;  // -2/ln(10)
-// const AA : f64 = -1.5634601348517065795e+00;   // -2*.9*2/ln(10)
 const AB : f64 =  3.28895476345399058690e-03;   // 5.74/(4000^.9)
 const AC : f64 = -5.14214965799093883760e-03;  // AA*AB
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Pipe {
-  pub diameter: f64,
-  pub length: f64,
-  pub roughness: f64,
-  pub minor_loss: f64,
+  pub diameter: Ft,
+  pub length: Ft,
+  pub roughness: f64,  // roughness is either in ft (Darcy-Weisbach) or unitless (Hazen-Williams, Chezy-Manning)
+  pub minor_loss: f64, 
   pub check_valve: bool,
   /// Headloss formula to use for the pipe
   pub headloss_formula: HeadlossFormula
@@ -34,7 +31,7 @@ const H_EXPONENT: f64 = 1.852; // Hazen-Williams exponent
 
 impl LinkTrait for Pipe {
   #[inline]
-  fn coefficients(&self, q: f64, r: f64, status: LinkStatus, _:f64, _:f64) -> LinkCoefficients {
+  fn coefficients(&self, q: Cfs, r: f64, _setting: f64, status: LinkStatus, _:f64, _:f64) -> LinkCoefficients {
 
     if self.check_valve && q < 0.0 {
       return LinkCoefficients::new_status(1.0 / BIG_VALUE, q, LinkStatus::TempClosed);
@@ -93,7 +90,7 @@ impl LinkTrait for Pipe {
     }
   }
 
-  fn update_status(&self, status: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
+  fn update_status(&self, _: f64, status: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
     if status == LinkStatus::TempClosed {
       return Some(LinkStatus::Open); // reopen the pipe if it was temporarily closed
     }
@@ -178,26 +175,42 @@ impl Pipe {
 }
 
 impl UnitConversion for Pipe {
-  fn convert_units(&mut self, _flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
-    if system == &UnitSystem::SI {
+  fn convert_to_standard(&mut self, options: &SimulationOptions) {
 
-      if reverse {
-        self.diameter = self.diameter * MperFT * 1e3; // convert in to ft to mm
-        self.length = self.length * MperFT; // convert ft to m
-        if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
-          self.roughness = self.roughness * MperFT; // convert mmft to ft
-        }
-      }
-      else {
-        self.diameter = self.diameter / 1e3 / MperFT; // convert mm to in
-        self.length = self.length / MperFT;
-        if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
-          self.roughness = self.roughness / MperFT; // convert mm to mmft
-        }
-      }
+    if options.unit_system == UnitSystem::US {
+      self.diameter /= 12.0; // convert in to ft
+    } else {
+      self.diameter /= 1000.0; // convert mm to m
     }
-    else {
-      self.diameter = self.diameter / 12.0; // convert in to ft
+
+    // convert diameter from the given unit system to feet
+    self.diameter /= options.unit_system.per_feet();
+
+    // convert length from the given unit system to feet
+    self.length /= options.unit_system.per_feet();
+
+
+    // if the headloss formula is Darcy Weisbach, convert roughness from the given unit system to feet
+    if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
+      self.roughness /= options.unit_system.per_feet();
+    }
+
+  }
+
+  fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    if options.unit_system == UnitSystem::US {
+      self.diameter *= 12.0; // convert ft to in
+    } else {
+      self.diameter *= options.unit_system.per_feet() * 1000.0; // convert ft to mm
+    }
+
+    // convert length from feet to the given unit system
+    self.length *= options.unit_system.per_feet();
+
+    // if the headloss formula is Darcy Weisbach, convert roughness from feet to the given unit system
+    if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
+      self.roughness *= options.unit_system.per_feet();
     }
   }
+
 }

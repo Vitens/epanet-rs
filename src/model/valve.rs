@@ -1,11 +1,12 @@
 use crate::model::link::{LinkTrait, LinkStatus, LinkCoefficients, NodeModification};
 use crate::model::curve::Curve;
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::units::{UnitSystem, UnitConversion, Ft};
+use crate::model::options::SimulationOptions;
 use crate::constants::*;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize, Clone, strum::Display)]
 pub enum ValveType {
   PRV, // Pressure Reducing Valve
   PSV, // Pressure Sensing Valve
@@ -16,9 +17,9 @@ pub enum ValveType {
   GPV, // General Purpose Valve
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Valve {
-  pub diameter: f64,
+  pub diameter: Ft,
   pub setting: f64,
   pub curve_id: Option<Box<str>>,
   pub valve_type: ValveType,
@@ -30,7 +31,7 @@ pub struct Valve {
 
 impl LinkTrait for Valve {
   #[inline]
-  fn coefficients(&self, q: f64, _resistance: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients {
+  fn coefficients(&self, q: f64, _resistance: f64, setting: f64, status: LinkStatus, excess_flow_upstream: f64, excess_flow_downstream: f64) -> LinkCoefficients {
 
     // if the valve is closed, fixed closed, or XPressure, return a high resistance valve
     if status == LinkStatus::Closed || status == LinkStatus::TempClosed || status == LinkStatus::FixedClosed {
@@ -46,17 +47,17 @@ impl LinkTrait for Valve {
       // Throttle Control Valve (TCV)
       ValveType::TCV => {
         // Minor loss coefficient is the setting of the valve
-        let km = 0.02517 * self.setting / self.diameter.powi(4);
+        let km = 0.02517 * setting / self.diameter.powi(4);
         let (g_inv, y) = self.valve_coefficients(q, km);
         return LinkCoefficients::simple(g_inv, y);
       }
       // Pressure Breaking Valve (PBV)
       ValveType::PBV => {
-        return LinkCoefficients::simple(BIG_VALUE, self.setting * BIG_VALUE);
+        return LinkCoefficients::simple(BIG_VALUE, setting * BIG_VALUE);
       }
       // Positional Control Valve (PCV)
       ValveType::PCV => {
-        let km = self.pcv_minor_loss();
+        let km = self.pcv_minor_loss(setting);
         let (g_inv, y) = self.valve_coefficients(q, km);
         return LinkCoefficients::simple(g_inv, y);
       }
@@ -64,11 +65,11 @@ impl LinkTrait for Valve {
       ValveType::FCV => {
         let (g_inv, y) = self.valve_coefficients(q, SMALL_VALUE);
         // if flow is less than the setting, treat as a regular valve (no flow control/restrictions)
-        if q < self.setting {
+        if q < setting {
           return LinkCoefficients::simple(g_inv, y);
         }
         else {
-          let hloss = y / g_inv + BIG_VALUE * (q - self.setting);
+          let hloss = y / g_inv + BIG_VALUE * (q - setting);
           let hgrad = BIG_VALUE;
           return LinkCoefficients::simple(1.0 / hgrad, hloss / hgrad);
         }
@@ -76,7 +77,7 @@ impl LinkTrait for Valve {
       // Pressure Reducing Valve (PRV)
       ValveType::PRV => {
         if status == LinkStatus::Active {
-          return self.prv_coefficients(excess_flow_downstream);
+          return self.prv_coefficients(setting, excess_flow_downstream);
         }
         else {
           return LinkCoefficients::simple(1.0/SMALL_VALUE, q);
@@ -84,7 +85,7 @@ impl LinkTrait for Valve {
       }
       ValveType::PSV => {
         if status == LinkStatus::Active {
-          return self.psv_coefficients(excess_flow_upstream);
+          return self.psv_coefficients(setting, excess_flow_upstream);
         }
         else {
           return LinkCoefficients::simple(1.0/SMALL_VALUE, q);
@@ -100,13 +101,13 @@ impl LinkTrait for Valve {
     SMALL_VALUE
   }
 
-  fn update_status(&self, status: LinkStatus, q: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
+  fn update_status(&self, setting: f64, status: LinkStatus, q: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
     match self.valve_type {
       ValveType::PRV => {
-        self.prv_status(status, q, head_upstream, head_downstream)
+        self.prv_status(setting, status, q, head_upstream, head_downstream)
       }
       ValveType::PSV => {
-        self.psv_status(status, q, head_upstream, head_downstream)
+        self.psv_status(setting, status, q, head_upstream, head_downstream)
       }
       _ => None,
     }
@@ -120,22 +121,22 @@ impl LinkTrait for Valve {
 impl Valve {
 
   /// Compute the updated status of the pressure reducing valve
-  fn prv_status(&self, status: LinkStatus, q: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
+  fn prv_status(&self, setting: f64, status: LinkStatus, q: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
     match status {
       LinkStatus::Active => {
         if q < -Q_TOL { Some(LinkStatus::Closed) } // closed if flow is negative
-        else if head_upstream < self.setting - H_TOL { Some(LinkStatus::Open) } // open if head upstream is less than the setting
+        else if head_upstream < setting - H_TOL { Some(LinkStatus::Open) } // open if head upstream is less than the setting
         else { None } // no status change
       }
       LinkStatus::Open => {
         if q < -Q_TOL { Some(LinkStatus::Closed) } // closed if flow is negative
-        else if head_downstream > self.setting + H_TOL { Some (LinkStatus::Active)} // active if head downstream is greater than the setting
+        else if head_downstream > setting + H_TOL { Some (LinkStatus::Active)} // active if head downstream is greater than the setting
         else { None } // no status change
       }
       LinkStatus::Closed => {
-        if head_upstream >= self.setting + H_TOL && head_downstream < self.setting - H_TOL {
+        if head_upstream >= setting + H_TOL && head_downstream < setting - H_TOL {
           Some(LinkStatus::Active) // active if head upstream is greater than the setting and head downstream is less than the setting
-        } else if head_upstream < self.setting - H_TOL && head_upstream > head_downstream + H_TOL {
+        } else if head_upstream < setting - H_TOL && head_upstream > head_downstream + H_TOL {
           Some(LinkStatus::Open) // open if head upstream is less than the setting and head upstream is greater than head downstream plus the tolerance
         } else {
           None // no status change
@@ -150,21 +151,21 @@ impl Valve {
   }
 
   /// Compute the updated status of the pressure sustaining valve
-  fn psv_status(&self, status: LinkStatus, q: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
+  fn psv_status(&self, setting: f64, status: LinkStatus, q: f64, head_upstream: f64, head_downstream: f64) -> Option<LinkStatus> {
     match status {
       LinkStatus::Active => {
         if q < -Q_TOL { Some(LinkStatus::Closed)} // closed if flow is negative
-        else if head_downstream > self.setting + H_TOL { Some(LinkStatus::Open)} //  open if head downstream is less then the setting
+        else if head_downstream > setting + H_TOL { Some(LinkStatus::Open)} //  open if head downstream is less then the setting
         else { None } // no status change
       }
       LinkStatus::Open => {
         if q < -Q_TOL { Some(LinkStatus::Closed)} // closed if flow is negative
-        else if head_upstream < self.setting - H_TOL { Some(LinkStatus::Active) } // Active when upstream head is less than the setting
+        else if head_upstream < setting - H_TOL { Some(LinkStatus::Active) } // Active when upstream head is less than the setting
         else { None } // no status change
       }
       LinkStatus::Closed => {
-        if head_downstream > self.setting + H_TOL && head_upstream > head_downstream + H_TOL { Some(LinkStatus::Open) } 
-        else if head_upstream > self.setting + H_TOL && head_upstream > head_downstream + H_TOL { Some(LinkStatus::Active) }
+        if head_downstream > setting + H_TOL && head_upstream > head_downstream + H_TOL { Some(LinkStatus::Open) } 
+        else if head_upstream > setting + H_TOL && head_upstream > head_downstream + H_TOL { Some(LinkStatus::Active) }
         else { None } // no status change
       }
       LinkStatus::XPressure => {
@@ -189,9 +190,9 @@ impl Valve {
   }
 
   /// Compute the coefficients for pressure sustaining valve with a flow q and excess flow upstream
-  fn psv_coefficients(&self, excess_flow_upstream: f64) -> LinkCoefficients {
+  fn psv_coefficients(&self, setting: f64, excess_flow_upstream: f64) -> LinkCoefficients {
 
-    let mut rhs_add = self.setting * BIG_VALUE;
+    let mut rhs_add = setting * BIG_VALUE;
 
     if excess_flow_upstream > 0.0 {
       rhs_add += excess_flow_upstream;
@@ -210,9 +211,9 @@ impl Valve {
   }
 
   /// Compute the coefficients for pressure reducing valve with a flow q and excess flow downstream
-  fn prv_coefficients(&self, excess_flow_downstream: f64) -> LinkCoefficients {
+  fn prv_coefficients(&self, setting: f64, excess_flow_downstream: f64) -> LinkCoefficients {
 
-    let mut rhs_add = self.setting * BIG_VALUE;
+    let mut rhs_add = setting * BIG_VALUE;
     if excess_flow_downstream < 0.0 {
       rhs_add += excess_flow_downstream;
     }
@@ -230,16 +231,16 @@ impl Valve {
 
   }
 
-  fn pcv_minor_loss(&self) -> f64 {
+  fn pcv_minor_loss(&self, setting: f64) -> f64 {
     // Minor loss coefficient for a completely open valve
     let k_open = 0.02517 * self.minor_loss / self.diameter.powi(4);
 
     // Valve is completely closed
-    if self.setting <= 0.0 {
+    if setting <= 0.0 {
       return BIG_VALUE;
     }
     // Valve is completely open
-    if self.setting >= 100.0 {
+    if setting >= 100.0 {
       return k_open;
     }
 
@@ -249,12 +250,12 @@ impl Valve {
       // Use the valve curve to compute the ratio
       let curve = self.valve_curve.as_ref().unwrap();
       // get intercept and slope of the curve at the setting
-      let (h0, r) = curve.coefficients(self.setting);
-      let ratio = h0 + r * self.setting;
+      let (h0, r) = curve.coefficients(setting);
+      let ratio = h0 + r * setting;
       ratio / 100.0
     } else {
       // Assume a linear relationship between the setting and the minor loss coefficient
-      self.setting / 100.0
+      setting / 100.0
     };
 
     // clamp the ratio to SMALL_VALUE and 1.0 to avoid division by zero
@@ -291,33 +292,47 @@ impl Valve {
 }
 
 impl UnitConversion for Valve {
-  fn convert_units(&mut self, flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
-    if system == &UnitSystem::SI {
-      if reverse {
-        self.diameter = self.diameter * MperFT * 1e3; // convert in to mm
-      }
-      else {
-        self.diameter = self.diameter / 1e3 / MperFT; // convert mm to in
-      }
-    } else {
 
+  fn convert_to_standard(&mut self, options: &SimulationOptions) {
+    if options.unit_system == UnitSystem::US {
       self.diameter = self.diameter / 12.0; // convert in to ft
-
+      // convert valve setting from PSI to feet
       if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV || self.valve_type == ValveType::PBV {
         self.setting = self.setting / PSIperFT; // convert PSI to feet
       }
+    } else {
+      self.diameter = self.diameter / 1000.0; // convert mm to m
     }
 
-    // for FCV, convert the setting to CFS
+    // convert the diameter from the given unit system to feet
+    self.diameter /= options.unit_system.per_feet();
+    // convert valve setting from the given unit system to cfs
     if self.valve_type == ValveType::FCV {
-      self.setting = self.setting / flow.per_cfs();
+      self.setting = self.setting / options.flow_units.per_cfs();
     }
-    // for PRV and PSV, convert the setting to feet
-    if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV {
-      self.setting = self.setting / system.per_feet();
+    // convert valve setting from the given unit system to feet
+    if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV || self.valve_type == ValveType::PBV {
+      self.setting = self.setting / options.unit_system.per_feet();
     }
-
-
-
+  }
+  fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    if options.unit_system == UnitSystem::US {
+      self.diameter = self.diameter * 12.0; // convert ft to in
+      if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV || self.valve_type == ValveType::PBV {
+        self.setting = self.setting * PSIperFT; // convert feet to PSI
+      }
+    } else {
+      self.diameter = self.diameter * 1000.0; // convert m to mm
+    }
+    // convert the diameter from the given unit system to feet
+    self.diameter *= options.unit_system.per_feet();
+    // convert valve setting from the given unit system to cfs
+    if self.valve_type == ValveType::FCV {
+      self.setting = self.setting * options.flow_units.per_cfs();
+    }
+    // convert valve setting from the given unit system to feet
+    if self.valve_type == ValveType::PRV || self.valve_type == ValveType::PSV || self.valve_type == ValveType::PBV {
+      self.setting = self.setting * options.unit_system.per_feet();
+    }
   }
 }

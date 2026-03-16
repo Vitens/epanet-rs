@@ -1,12 +1,13 @@
 use crate::model::link::{LinkTrait, LinkStatus, LinkCoefficients};
 use crate::model::curve::{HeadCurve};
-use crate::model::units::{FlowUnits, UnitSystem, UnitConversion};
+use crate::model::units::UnitConversion;
+use crate::model::options::SimulationOptions;
 use crate::constants::*;
 use serde::{Deserialize, Serialize};
 
 
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Pump {
   pub speed: f64,
   pub head_curve_id: Option<Box<str>>,
@@ -19,10 +20,10 @@ pub struct Pump {
 
 impl LinkTrait for Pump {
   #[inline]
-  fn coefficients(&self, q: f64, _resistance: f64, status: LinkStatus, _:f64, _:f64) -> LinkCoefficients {
+  fn coefficients(&self, q: f64, _resistance: f64, setting: f64, status: LinkStatus, _:f64, _:f64) -> LinkCoefficients {
 
     // for closed pumps, stalled pumps, or pumps with speed, act as closed pipe
-    if status == LinkStatus::Closed || status == LinkStatus::Xhead || status == LinkStatus::TempClosed || self.speed == 0.0 {
+    if status == LinkStatus::Closed || status == LinkStatus::Xhead || status == LinkStatus::TempClosed || setting == 0.0 {
       return LinkCoefficients::simple(1.0 / BIG_VALUE, q);
     }
 
@@ -36,8 +37,8 @@ impl LinkTrait for Pump {
 
 
     // Prevent negative flow
-    if q < 0.0 {
-      let hloss = -(self.speed.powi(2) * h_max) + BIG_VALUE * q;
+    if q < -H_TOL {
+      let hloss = -(setting.powi(2) * h_max) + BIG_VALUE * q;
       let hgrad = BIG_VALUE;
       return LinkCoefficients::new_status(1.0/hgrad, hloss/hgrad, LinkStatus::Xhead);
     }
@@ -70,7 +71,7 @@ impl LinkTrait for Pump {
 
     let q_abs = q.abs();
     // get the curve coefficients
-    let (hgrad, hloss) = curve.curve_coefficients(q_abs, self.speed);
+    let (hgrad, hloss) = curve.curve_coefficients(q_abs, setting);
 
     LinkCoefficients::simple(1.0 / hgrad, hloss/hgrad)
   }
@@ -78,8 +79,7 @@ impl LinkTrait for Pump {
     BIG_VALUE
   }
 
-  fn update_status(&self, _: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
-    // Reopen the pump if it was temporarily closed
+  fn update_status(&self, _: f64, _: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
     None
   }
 
@@ -97,15 +97,13 @@ impl LinkTrait for Pump {
 }
 
 impl UnitConversion for Pump {
-  fn convert_units(&mut self, _flow: &FlowUnits, system: &UnitSystem, reverse: bool) {
-    // convert the pump units
-    if system == &UnitSystem::SI {
-      if reverse {
-        self.power = self.power * KWperHP;
-      }
-      else {
-        self.power = self.power / KWperHP;
-      }
-    }
+  fn convert_to_standard(&mut self, options: &SimulationOptions) {
+    // convert the power from the given unit system to horsepower
+    self.power = self.power / options.unit_system.per_horsepower();
+  }
+
+  fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    // convert the power from horsepower to the given unit system
+    self.power = self.power * options.unit_system.per_horsepower();
   }
 }
