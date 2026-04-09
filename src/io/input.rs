@@ -1,12 +1,11 @@
 use std::fs::File;
 use std::io::{BufReader, BufRead};
 use std::str::FromStr;
-use std::sync::Arc;
 
 use crate::model::network::Network;
 use crate::model::node::{Node, NodeType};
 use crate::model::link::{Link, LinkType, LinkStatus};
-use crate::model::curve::{Curve, HeadCurve};
+use crate::model::curve::{Curve, HeadCurve, ValveCurve};
 use crate::model::pattern::Pattern;
 use crate::model::junction::Junction;
 use crate::model::reservoir::Reservoir;
@@ -234,7 +233,7 @@ impl Network {
         if let Some(curve_id) = &valve.curve_id {
           let curve = self.curves.get(curve_id)
             .ok_or_else(|| InputError::new(format!("Curve '{}' not found for valve", curve_id)))?;
-          valve.valve_curve = Some(Arc::new(curve.clone()));
+          valve.valve_curve = Some(ValveCurve::new(curve, &self.options.flow_units, &self.options.unit_system)?);
         }
       }
       if let LinkType::Pipe(pipe) = &mut link.link_type {

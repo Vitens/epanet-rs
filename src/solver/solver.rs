@@ -389,6 +389,7 @@ impl<'a> HydraulicSolver<'a> {
 
     // update the contributions from the nodes 
     self.node_contributions(state, rhs);
+
   }
 
   fn node_contributions(&self, state: &mut SolverState, rhs: &mut Vec<f64>) {

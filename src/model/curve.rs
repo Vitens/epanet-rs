@@ -26,6 +26,33 @@ impl Curve {
 }
 
 #[derive(Debug, Clone)]
+pub struct ValveCurve {
+  pub curve: Curve,
+}
+
+impl ValveCurve {
+  pub fn new(curve: &Curve, flow_units: &FlowUnits, system: &UnitSystem) -> Result<Self, InputError> {
+    // clone the curve and convert the flow and head values to the standard units (CFS and Feet)
+    let flows = curve.x.iter().map(|x| x / flow_units.per_cfs()).collect::<Vec<f64>>();
+    let heads = curve.y.iter().map(|y| y / system.per_feet()).collect::<Vec<f64>>();
+
+    let converted_curve = Curve {
+      id: curve.id.clone(),
+      x: flows,
+      y: heads,
+    };
+
+    // validate the curve to ensure the head is decreasing and the flow is increasing monotonically
+    Ok(Self {
+      curve: converted_curve,
+    })
+  }
+  pub fn coefficients(&self, q: f64) -> (f64, f64) {
+    self.curve.coefficients(q)
+  }
+}
+
+#[derive(Debug, Clone)]
 pub struct HeadCurve {
   pub flows: Vec<Cfs>,
   pub heads: Vec<Ft>,
@@ -49,6 +76,7 @@ pub struct HeadCurveStatistics {
   pub r: f64,               // flow coefficient
   pub n: f64,               // pump exponent
 }
+
 
 impl HeadCurve {
   pub fn new(curve: &Curve, flow_units: &FlowUnits, system: &UnitSystem) -> Result<Self, InputError> {
