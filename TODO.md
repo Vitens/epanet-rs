@@ -27,11 +27,11 @@
 - [x] Get rid of all the Panics and Unwraps, use Result instead
 - [x] Network input file writing
 - [x] Fix Unit conversion when serializing using Serde
+- [x] Unit conversion for GPV head curves
 - [-] Setup unit and integration testing, improve coverage
 - [ ] Update convergence criteria for PDA
 - [ ] Implement RULES
 - [ ] Tanks with volume curve
-- [ ] Unit conversion for GPV head curves
 - [ ] Introduce more robust unit type system to handle conversions between different units and systems
 - [ ] Network validation (connectivity, presence of tanks)
 - [ ] Identify and remove unconnected zones from the solver
