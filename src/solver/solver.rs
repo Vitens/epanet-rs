@@ -2,6 +2,8 @@ use faer::sparse::{SparseColMat, Triplet, SymbolicSparseColMat};
 use faer::sparse::linalg::LltError;
 use faer::linalg::cholesky::llt::factor::LltError::NonPositivePivot;
 use faer::sparse::linalg::solvers::{SymbolicLlt, Llt};
+use faer::sparse::linalg::amd;
+use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::{Mat, Side};
 use faer::prelude::*;
 
@@ -40,8 +42,12 @@ pub struct IterationStatistics {
   pub status_changed: bool,
 }
 impl IterationStatistics {
-  pub fn relative_change(&self) -> f64 {
-    self.sum_dq / (self.sum_q + Q_ZERO)
+  pub fn relative_change(&self, options: &SimulationOptions) -> f64 {
+    if self.sum_q > options.accuracy {
+      self.sum_dq / (self.sum_q + Q_ZERO)
+    } else {
+      self.sum_dq
+    }
   }
   pub fn max_dq_converted(&self, options: &SimulationOptions) -> Cfs {
     self.max_dq * options.flow_units.per_cfs()
@@ -49,10 +55,16 @@ impl IterationStatistics {
 }
 
 pub struct HydraulicSolver<'a> {
+  /// network
   network: &'a Network, 
+  /// global unknown-numbering map: node_to_unknown[node_index] = unknown_index
   node_to_unknown: Vec<Option<usize>>,
+  /// symbolic sparsity pattern
   sparsity_pattern: SymbolicSparseColMat<usize>,
+  /// symbolic Cholesky factorization
   symbolic_llt: SymbolicLlt<usize>,
+  /// AMD fill-reducing permutation: perm_fwd[permuted] = original
+  perm_fwd: Vec<usize>,
   /// precomputed Jacobian matrix
   jac: SparseColMat<usize, f64>,
   /// precomputed CSC indices for the links
@@ -79,10 +91,37 @@ impl<'a> HydraulicSolver<'a> {
     let values = vec![0.0; sparsity_pattern.as_ref().row_idx().len()]; // Jacobian matrix values
     let jac = SparseColMat::new(sparsity_pattern.clone(), values.clone());
 
+
+    // compute the AMD fill-reducing permutation
+    // used to map the indices from the symbolic Cholesky factorization back to the original numbering
+    // this is necessary to map the error index from the solver back to the original matrix indices
+    let perm_fwd = Self::compute_amd_permutation(&sparsity_pattern, &node_to_unknown);
     // compute the symbolic Cholesky factorization
     let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).expect("Failed to compute symbolic Cholesky factorization");
 
-    Self { network, node_to_unknown, sparsity_pattern, symbolic_llt, jac, csc_indices, node_rows, skip_timesteps: true }
+    Self { network, node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows, skip_timesteps: true }
+  }
+
+  fn compute_amd_permutation(sparsity_pattern: &SymbolicSparseColMat<usize>, node_to_unknown: &Vec<Option<usize>>) -> Vec<usize> {
+
+    // compute the AMD fill-reducing permutation (replicates what SymbolicLlt does internally)
+    let n_unknowns = node_to_unknown.iter().filter(|x| x.is_some()).count();
+    let a_nnz = sparsity_pattern.as_ref().compute_nnz();
+    let mut perm_fwd = vec![0usize; n_unknowns];
+    let mut perm_inv = vec![0usize; n_unknowns];
+    {
+      let scratch_size = amd::order_maybe_unsorted_scratch::<usize>(n_unknowns, a_nnz);
+      let mut mem = MemBuffer::new(scratch_size);
+      amd::order_maybe_unsorted(
+        &mut perm_fwd,
+        &mut perm_inv,
+        sparsity_pattern.as_ref(),
+        amd::Control::default(),
+        MemStack::new(&mut mem),
+      ).expect("Failed to compute AMD ordering");
+    }
+
+    perm_fwd
   }
 
   /// Run the hydraulic solver
@@ -302,16 +341,15 @@ impl<'a> HydraulicSolver<'a> {
         Ok(llt) => llt,
         // if the pivot is non-positive, try to fix the bad valve
         Err(LltError::Numeric(NonPositivePivot { index })) => {
-          // fix the bad valve
-          if self.fix_bad_valve(index-1, &mut state.statuses) {
+          // un-permute: the index from faer is 1-based and in AMD-permuted space
+          let original_unknown = self.perm_fwd[index-1];
+          if self.fix_bad_valve(original_unknown, &mut state.statuses) {
             continue 'gga;
           }
-          // if no valves found, panic
-          let node_index = self.node_to_unknown.iter().position(|&x| x.is_some() && x.unwrap() == index-1).unwrap();
-          let error_message = format!("Singular matrix: check connectivity at node '{}'", self.network.nodes[node_index+1].id);
+          let node_index = self.node_to_unknown.iter().position(|&x| x.is_some() && x.unwrap() == original_unknown).unwrap();
+          let error_message = format!("Singular matrix: check connectivity at node '{}'", self.network.nodes[node_index].id);
           error!("{}", error_message);
           return Err(error_message);
-
         }
         Err(e) => {
           // if other error, return the error
@@ -344,12 +382,12 @@ impl<'a> HydraulicSolver<'a> {
       self.update_tank_links(state);
 
 
-      debug!(">> Iteration {}: Relative change: {:.6}, Status changed: {}", iteration, stats.relative_change(), stats.status_changed);
+      debug!(">> Iteration {}: Relative change: {:.6}, Status changed: {}", iteration, stats.relative_change(&self.network.options), stats.status_changed);
       debug!(">>>> Max flow change: {:.6} for link {}", stats.max_dq_converted(&self.network.options), self.network.links[stats.max_dq_index].id);
 
       let max_flow_change = self.network.options.max_flow_change.unwrap_or(BIG_VALUE);
 
-      if stats.relative_change() < self.network.options.accuracy && !stats.status_changed && stats.max_dq_converted(&self.network.options) < max_flow_change {
+      if stats.relative_change(&self.network.options) < self.network.options.accuracy && !stats.status_changed && stats.max_dq_converted(&self.network.options) < max_flow_change {
 
           // apply pressure controls to the state, if any pressure controls are active, return the state
           if self.apply_pressure_controls(state) {
@@ -726,6 +764,7 @@ impl<'a> HydraulicSolver<'a> {
         if valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV {
           if statuses[i] == LinkStatus::Active {
             // set the status to XPressure to indicate a bad valve
+            debug!("Fixing bad valve for node index: {}", node_index);
             statuses[i] = LinkStatus::XPressure;
             return true;
           }
