@@ -28,9 +28,11 @@
 - [x] Network input file writing
 - [x] Fix Unit conversion when serializing using Serde
 - [x] Unit conversion for GPV head curves
-- [-] Setup unit and integration testing, improve coverage
+- [x] Setup unit and integration testing, improve coverage
+- [ ] Implement headerror convergence criteria
 - [ ] Update convergence criteria for PDA
 - [ ] Implement RULES
+- [ ] Implement report start and statistic option
 - [ ] Tanks with volume curve
 - [ ] Introduce more robust unit type system to handle conversions between different units and systems
 - [ ] Network validation (connectivity, presence of tanks)

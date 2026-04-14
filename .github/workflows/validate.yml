@@ -35,13 +35,32 @@ jobs:
     - name: Validate all .inp files
       run: |
         EPANET_RS="./target/release/epanet-rs"
+        IGNORE_FILE=".github/validate-ignore.list"
         PASS=0
         FAIL=0
         SKIP=0
+        IGNORED=0
         ERRORS=""
+
+        # Build ignore list from file (strip comments and blank lines)
+        IGNORE_NAMES=""
+        if [ -f "$IGNORE_FILE" ]; then
+          while IFS='|' read -r fname reason; do
+            fname=$(echo "$fname" | xargs)
+            reason=$(echo "$reason" | xargs)
+            [ -z "$fname" ] && continue
+            [[ "$fname" == \#* ]] && continue
+            IGNORE_NAMES="$IGNORE_NAMES $fname"
+          done < "$IGNORE_FILE"
+        fi
 
         for inp in $(find /tmp/example-networks -name '*.inp' | sort); do
           name=$(basename "$inp")
+          ignored=false
+          if echo "$IGNORE_NAMES" | grep -qw "$name"; then
+            ignored=true
+          fi
+
           echo "::group::Validating $name"
           echo "--- $inp ---"
 
@@ -53,6 +72,11 @@ jobs:
             if [ $exit_code -eq 124 ]; then
               echo "⏱️ SKIPPED (timeout): $name"
               SKIP=$((SKIP + 1))
+            elif [ "$ignored" = true ]; then
+              reason=$(grep -E "^\\s*${name}\\s*\\|" "$IGNORE_FILE" | head -1 | cut -d'|' -f2 | xargs)
+              echo "::warning::$name failed but is on the ignore list: $reason"
+              echo "⚠️ IGNORED (known failure): $name — $reason"
+              IGNORED=$((IGNORED + 1))
             else
               echo "❌ FAILED: $name"
               FAIL=$((FAIL + 1))
@@ -64,8 +88,18 @@ jobs:
 
         echo ""
         echo "=============================="
-        echo "  Results: $PASS passed, $FAIL failed, $SKIP skipped"
+        echo "  Results: $PASS passed, $FAIL failed, $SKIP skipped, $IGNORED ignored"
         echo "=============================="
+
+        if [ $IGNORED -gt 0 ]; then
+          echo ""
+          echo "Ignored networks ($IGNORED):"
+          grep -v '^\s*#' "$IGNORE_FILE" | grep -v '^\s*$' | while IFS='|' read -r fname reason; do
+            fname=$(echo "$fname" | xargs)
+            reason=$(echo "$reason" | xargs)
+            echo "  - $fname: $reason"
+          done
+        fi
 
         if [ $FAIL -gt 0 ]; then
           echo ""

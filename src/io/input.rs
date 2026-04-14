@@ -728,6 +728,8 @@ impl Network {
       },
       "ACCURACY" => {
         self.options.accuracy = value.parse_field::<f64>("accuracy")?;
+        // clamp the accuracy between 1e-5 and 1e-1 (same as EPANET)
+        self.options.accuracy = self.options.accuracy.clamp(1e-5, 1e-1);
       },
       "CHECKFREQ" => {
         self.options.check_frequency = value.parse_field::<usize>("check frequency")?;

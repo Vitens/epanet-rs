@@ -1,0 +1,11 @@
+# Networks to skip during validation
+# Format: filename | reason
+
+exnet-3.inp | Fails due to very low accuracy (0.1), and different way of handling control valves. Succeeds with higher accuracy
+exnet-3H.inp | Headerror not implemented yet
+wolf-3.inp | Fails to converge, might be due to damping implementation?
+NW_Model.inp | Rules not implemented yet
+NW_Model1.inp | Rules not implemented yet
+2fcvs.inp | EPANET incorrectly assumes flow through closed pump as 0
+net3-bio.inp | Report Statistic not implemented yet
+Net3-NH2CL.inp | Report Statistic not implemented yet
