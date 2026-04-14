@@ -791,7 +791,7 @@ impl Network {
     let mut duration = parts.next().ok_or_missing("duration")?;
 
     // if the duration is not a number and does not contain ":", append it to the time option
-    if duration.parse::<usize>().is_err() && !duration.contains(":") {
+    if duration.parse::<f64>().is_err() && !duration.contains(":") {
       time_option += " ";
       time_option += &duration.to_uppercase();
       duration = parts.next().ok_or_missing("duration value")?;
@@ -1389,6 +1389,10 @@ mod tests {
     network.read_times("DURATION  24  HOURS").unwrap();
     
     assert_eq!(network.options.time_options.duration, 24 * 3600);
+
+    // edge case where duration is a float (net2-cl2.inp)
+    network.read_times("  Duration           55.00 hours").unwrap();
+    assert_eq!(network.options.time_options.duration, 55 * 3600);
   }
 
   #[test]
