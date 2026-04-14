@@ -341,7 +341,22 @@ impl Network {
     let mut parts = parse_line(line);
     let id = parts.next().ok_or_missing("tank id")?.into();
     let elevation = parts.next().ok_or_missing("elevation")?.parse_field::<f64>("elevation")?;
-    let initial_level = parts.next().ok_or_missing("initial level")?.parse_field::<f64>("initial level")?;
+
+    // Read as reservoir if no initial level is provided (EPANET edge case)
+
+    let next = parts.next();
+
+
+    if next.is_none() {
+      return Ok(Node {
+        id,
+        elevation,
+        node_type: NodeType::Reservoir(Reservoir { head_pattern: None }),
+        coordinates: None,
+      });
+    }
+
+    let initial_level = next.ok_or_missing("initial level")?.parse_field::<f64>("initial level")?;
     let min_level = parts.next().ok_or_missing("min level")?.parse_field::<f64>("min level")?;
     let max_level = parts.next().ok_or_missing("max level")?.parse_field::<f64>("max level")?;
     let diameter = parts.next().ok_or_missing("diameter")?.parse_field::<f64>("diameter")?;
@@ -1171,6 +1186,18 @@ mod tests {
     };
     assert_eq!(tank.volume_curve_id.as_deref(), Some("VOLCURVE"));
     assert!(!tank.overflow);
+  }
+
+  #[test]
+  fn test_read_tank_as_reservoir() {
+    let mut network = test_network(false);
+    let node = network.read_tank("T3  100").unwrap();
+
+    let NodeType::Reservoir(reservoir) = &node.node_type else {
+      panic!("Expected Reservoir node type");
+    };
+    assert_eq!(node.elevation, 100.0);
+
   }
 
   // ==================== Pump Tests ====================
