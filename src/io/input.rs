@@ -16,6 +16,7 @@ use crate::model::valve::{Valve, ValveType};
 use crate::model::control::{Control, ControlCondition};
 use crate::model::units::{FlowUnits, UnitSystem, PressureUnits, UnitConversion};
 use crate::model::options::*;
+use crate::constants::*;
 use crate::utils::time::parse_time_str;
 use crate::error::*;
 
@@ -200,8 +201,10 @@ impl Network {
     }
     // convert units
     self.convert_to_standard(&self.options.clone());
+    // update links
     self.update_links()?;
-    // update the emitter exponent
+    // convert control settings to internal units
+    self.convert_control_settings();
 
     Ok(())
   }
@@ -249,6 +252,58 @@ impl Network {
       }
     }
     Ok(())
+  }
+
+  /// Convert control settings from user units to internal units.
+  /// Must be called after convert_to_standard and update_links so that
+  /// node elevations and valve settings are already in internal units (feet/CFS).
+  fn convert_control_settings(&mut self) {
+    let unit_system = &self.options.unit_system;
+    let flow_units = &self.options.flow_units;
+
+    for control in &mut self.controls {
+      let Some(setting) = control.setting else { continue };
+      let Some(&link_index) = self.link_map.get(&control.link_id) else { continue };
+      let link = &self.links[link_index];
+
+      match &link.link_type {
+        LinkType::Valve(valve) => {
+          match valve.valve_type {
+            ValveType::PRV => {
+              let mut s = setting;
+              if *unit_system == UnitSystem::US {
+                s /= PSIperFT;
+              }
+              s /= unit_system.per_feet();
+              s += self.nodes[link.end_node].elevation;
+              control.setting = Some(s);
+            }
+            ValveType::PSV => {
+              let mut s = setting;
+              if *unit_system == UnitSystem::US {
+                s /= PSIperFT;
+              }
+              s /= unit_system.per_feet();
+              s += self.nodes[link.start_node].elevation;
+              control.setting = Some(s);
+            }
+            ValveType::PBV => {
+              let mut s = setting;
+              if *unit_system == UnitSystem::US {
+                s /= PSIperFT;
+              }
+              s /= unit_system.per_feet();
+              control.setting = Some(s);
+            }
+            ValveType::FCV => {
+              control.setting = Some(setting / flow_units.per_cfs());
+            }
+            _ => {}
+          }
+        }
+        _ => {}
+      }
+    }
   }
 
   /// Read a junction from a parts iterator

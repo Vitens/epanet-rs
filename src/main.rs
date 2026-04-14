@@ -7,7 +7,7 @@ use simplelog::{format_description};
 
 
 use epanet_rs::model::network::Network;
-use epanet_rs::solver::solver::HydraulicSolver;
+use epanet_rs::solver::simulation::Simulation;
 use epanet_rs::utils::validate_epanet::validate_with_epanet;
 
 const BANNER: [&str; 6] = [
@@ -142,8 +142,8 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, print
   debug!("Network loaded in {:?}", end_time.duration_since(start_time));
 
   let start_time = Instant::now();
-  let solver = HydraulicSolver::new(&network);
-  let result = solver.run(parallel);
+  let mut simulation = Simulation::new(&network);
+  let result = simulation.solve_hydraulics(parallel);
   let end_time = Instant::now();
   info!("Solver finished in {:?}", end_time.duration_since(start_time));
 
