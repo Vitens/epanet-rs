@@ -7,13 +7,10 @@ use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::{Mat, Side};
 use faer::prelude::*;
 
-use rayon::prelude::*;
-
 use crate::solver::state::SolverState;
-use crate::solver::result::SolverResult;
 use crate::solver::matrix::{CSCIndex, ResistanceCoefficients, find_csc_index};
 
-use crate::model::units::{Cfs, Ft3};
+use crate::model::units::Cfs;
 
 
 use simplelog::{warn, debug, error};
@@ -72,40 +69,26 @@ pub struct HydraulicSolver<'a> {
   pub csc_indices: Vec<CSCIndex>,
   /// precomputed indices for the rows of the Jacobian matrix for each node
   pub node_rows: Vec<Option<usize>>,
-
-  pub skip_timesteps: bool, // set to false to match epanet timestep behaviour
 }
 
 impl<'a> HydraulicSolver<'a> {
 
   pub fn new(network: &'a Network) -> Self {
-    // build global unknown-numbering map
     let node_to_unknown = Self::build_unknown_numbering_map(network);
-    // generate sparsity pattern
     let sparsity_pattern = Self::build_sparsity_pattern(network, &node_to_unknown);
-    // map each link to its CSC (Compressed Sparse Column) indices
     let csc_indices = Self::map_links_to_csc_indices(network, &sparsity_pattern, &node_to_unknown);
-    // precompute the indices for the rows of the Jacobian matrix for each node
     let node_rows = Self::map_nodes_to_rows(network, &sparsity_pattern, &node_to_unknown);
 
-    // compute the Jacobian matrix
-    let values = vec![0.0; sparsity_pattern.as_ref().row_idx().len()]; // Jacobian matrix values
+    let values = vec![0.0; sparsity_pattern.as_ref().row_idx().len()];
     let jac = SparseColMat::new(sparsity_pattern.clone(), values.clone());
 
-
-    // compute the AMD fill-reducing permutation
-    // used to map the indices from the symbolic Cholesky factorization back to the original numbering
-    // this is necessary to map the error index from the solver back to the original matrix indices
     let perm_fwd = Self::compute_amd_permutation(&sparsity_pattern, &node_to_unknown);
-    // compute the symbolic Cholesky factorization
     let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).expect("Failed to compute symbolic Cholesky factorization");
 
-    Self { network, node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows, skip_timesteps: true }
+    Self { network, node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows }
   }
 
   fn compute_amd_permutation(sparsity_pattern: &SymbolicSparseColMat<usize>, node_to_unknown: &Vec<Option<usize>>) -> Vec<usize> {
-
-    // compute the AMD fill-reducing permutation (replicates what SymbolicLlt does internally)
     let n_unknowns = node_to_unknown.iter().filter(|x| x.is_some()).count();
     let a_nnz = sparsity_pattern.as_ref().compute_nnz();
     let mut perm_fwd = vec![0usize; n_unknowns];
@@ -125,232 +108,44 @@ impl<'a> HydraulicSolver<'a> {
     perm_fwd
   }
 
-  /// Run the hydraulic solver
-  pub fn run(self, mut parallel: bool) -> SolverResult {
-    
-    // calculate number of report steps to run the solver for
-    let report_steps = (self.network.options.time_options.duration / self.network.options.time_options.report_timestep) + 1;
+  /// Solve the network for a single timestep using the Global Gradient Algorithm (Todini & Pilati, 1987).
+  /// Takes an immutable solver state and returns a new state after convergence.
+  pub fn solve(&self, state: &SolverState) -> Result<SolverState, String> {
 
-    // initialize the results struct
-    let mut results = SolverResult::new(self.network.links.len(), self.network.nodes.len(), report_steps);
+    let mut state = state.clone();
 
-    // calculate the initial state
-    let mut state = SolverState::new_with_initial_values(self.network);
-
-    // check network is elegible for parallel solving if requested
-    if (self.network.has_tanks() || self.network.has_pressure_controls()) && parallel {
-      warn!("Networks with tanks or pressure controls cannot be solved in parallel, running sequentially");
-      parallel = false;
-    }
-
-    // run the solver in parallel using Rayon if enabled
-    if parallel {
-      // solve the first step to use as initial values for the next, parallel computed steps
-      self.apply_patterns(&mut state, 0);
-      let step_result = self.solve(&mut state, 0).unwrap();
-
-      // store the results of step 0
-      results.append(&step_result, 0);
-
-      // do parallel solves using Rayon
-      let par_results: Vec<SolverState> = (1..report_steps).into_par_iter().map(|step| {
-        let mut state = state.clone();
-        // apply the head/demand patterns to the state
-        self.apply_patterns(&mut state, step * self.network.options.time_options.report_timestep);
-        self.solve(&mut state, step).unwrap()
-      }).collect();
-      for (step,step_result) in par_results.iter().enumerate() {
-        results.append(step_result, step+1);
-      }
-    } else {
-      // do sequential solves
-      let mut time = 0;
-      while time <= self.network.options.time_options.duration {
-        // apply the head pattern to reservoirs with a head pattern
-        self.apply_patterns(&mut state, time);
-        // apply controls to the state
-        self.apply_controls(&mut state, time);
-        // solve the step, update the state
-        state = self.solve(&mut state, time).unwrap();
-        // update the heads of the tanks (= elevation + level) before running the next step
-        if time % self.network.options.time_options.report_timestep == 0 {
-          results.append(&state, time / self.network.options.time_options.report_timestep);
-        }
-        let timestep = self.next_time_step(time, &mut state);
-        time += timestep;
-      }
-    }
-    // convert the units back to the original units
-    results.convert_units(&self.network.options.flow_units, &self.network.options.unit_system);
-
-    results
-  }
-
-  // apply pressure controls to the state
-  fn apply_pressure_controls(&self, state: &mut SolverState) -> bool {
-
-    let mut changed = false;
-
-    for control in &self.network.controls {
-      if matches!(control.condition, ControlCondition::LowPressure { .. } | ControlCondition::HighPressure { .. }) {
-        let active = control.is_active(state, self.network, 0, 0);
-        if active {
-          changed = changed || control.activate(state, self.network);
-        }
-      }
-    }
-    changed
-  }
-
-  // apply controls to the state
-  fn apply_controls(&self, state: &mut SolverState, time: usize) {
-    let clocktime = (time + self.network.options.time_options.start_clocktime) % (24 * 3600);
-
-    // evaluate the controls
-    for control in &self.network.controls {
-      // skip pressure controls
-      if matches!(control.condition, ControlCondition::LowPressure { .. } | ControlCondition::HighPressure { .. }) {
-        continue;
-      }
-      // skip level controls at time 0 (no levels computed yet)
-      if matches!(control.condition, ControlCondition::LowLevel { .. } | ControlCondition::HighLevel { .. }) && time == 0 {
-        continue;
-      }
-      // evaluate the control
-      if control.is_active(state, self.network, time, clocktime) {
-        // activate the control
-        control.activate(state, self.network);
-      }
-    }
-  }
-
-
-  // Calculate the next time step. The next time step is:
-  fn next_time_step(&self, current_time: usize, state: &mut SolverState) -> usize {
-
-    let times = &self.network.options.time_options;
-    let clocktime = (current_time + times.start_clocktime) % (24 * 3600); // get clocktime
-
-    // if no quality, tanks, rules and controls, simply return report time, but dont do this when skipping timesteps is set to false, 
-    // as skipping timesteps will result in slight mismatches in results due to different initial values
-
-    if self.network.controls.len() == 0 && !self.network.has_tanks() && !self.network.has_quality() && self.skip_timesteps {
-      return times.report_timestep;
-    }
-
-    // time to next report
-    let t_report = times.report_timestep - (current_time % times.report_timestep);
-    // time to next pattern
-    let t_pattern = times.pattern_timestep - (current_time % times.pattern_timestep);
-
-    // time for the next tank to fill or drain
-    let t_tanks = self.network.nodes.iter()
-        .zip(state.heads.iter())
-        .zip(state.demands.iter())
-        .map(|((node, head), demand)| {
-          let NodeType::Tank(tank) = &node.node_type else { return usize::MAX };
-          let level = head - node.elevation;
-          tank.time_to_fill_or_drain(level, *demand)
-        })
-        .min().unwrap_or(usize::MAX);
-    
-    // time for the next control to activate
-    let t_controls = self.network.controls.iter()
-        .map(|control| {
-          match &control.condition {
-            ControlCondition::Time { seconds } => {
-              if *seconds < current_time {
-                return usize::MAX;
-              }
-              seconds - current_time
-            }
-            ControlCondition::ClockTime { seconds } => {
-              if *seconds < clocktime {
-                // wrap around to the next day
-                return ((*seconds as i32 - clocktime as i32) + (24 * 3600)) as usize
-              }
-              seconds - clocktime
-            }
-            ControlCondition::LowLevel { tank_index, target } | ControlCondition::HighLevel { tank_index, target } => {
-              let node = &self.network.nodes[*tank_index];
-              if let NodeType::Tank(tank) = &node.node_type {
-                let level = state.heads[*tank_index] - node.elevation;
-                tank.time_to_reach_level(level, *target, state.demands[*tank_index])
-              } else {
-                usize::MAX
-              }
-            }
-            _ => usize::MAX,
-          }
-
-
-
-        })
-        .filter(|&x| x > 0)
-        .min().unwrap_or(usize::MAX);
-
-    let timestep = *[t_report, t_pattern, t_tanks, t_controls, times.hydraulic_timestep].iter().filter(|&x| *x > 0).min().unwrap();
-    // update the heads of the tanks
-    self.update_tanks(state, timestep);
-
-    return timestep;
-  }
-
-  // Solve the network using the Global Gradient Algorithm (Todini & Pilati, 1987) for a single step
-  // This methods takes a solver state and returns a new solver state after solving the network
-  fn solve(&self, state: &mut SolverState, step: usize) -> Result<SolverState, String> {
-
-    debug!("Solving step {}...", step);
-
-    // perform GGA iterations
-    // solve the system of equations: A * h = rhs
-    // where A is the Jacobian matrix, h is the vector of heads, and rhs is the vector of right-hand side values
-    // A is a sparse matrix, so we use the Compressed Sparse Column (CSC) format to store it
-    // h is the vector of heads, and rhs is the vector of right-hand side values
     let unknown_nodes = self.node_to_unknown.iter().filter(|&x| x.is_some()).count();
 
-    // pre-allocate the Jacobian matrix values and the right-hand side values
-    let mut values = vec![0.0; self.sparsity_pattern.as_ref().row_idx().len()]; // Jacobian matrix values
-    let mut rhs = vec![0.0; unknown_nodes]; // (unknown nodes only)
+    let mut values = vec![0.0; self.sparsity_pattern.as_ref().row_idx().len()];
+    let mut rhs = vec![0.0; unknown_nodes];
 
-    // pre-allocate the link coefficients and the Jacobian matrix
     let mut link_coefficients = ResistanceCoefficients::new(self.network.links.len());
     let mut jac = self.jac.clone();
 
-    // pre-allocate the excess flows vector
     let mut excess_flows = vec![0.0; self.network.nodes.len()];
 
-    // Track nodes grounded to a virtual reservoir (elevation 0 and small conductance) to fix singular matrix problems for disconnected nodes/segments
     let mut grounded_nodes = vec![false; self.network.nodes.len()];
 
     'gga: for iteration in 1..=self.network.options.max_trials {
 
-      // reset values and rhs
       values.fill(0.0);
       rhs.fill(0.0);
 
-      // calculate excess flows at each node (needed for PSV/PRV valves)
       if self.network.contains_pressure_control_valve {
-        self.calculate_excess_flows(state, &mut excess_flows);
+        self.calculate_excess_flows(&state, &mut excess_flows);
       }
 
-      // assemble Jacobian and RHS contributions from links, emitters and nodes
-      self.assemble_jacobian(state, &mut values, &mut rhs, &mut link_coefficients, &excess_flows, &grounded_nodes);
+      self.assemble_jacobian(&mut state, &mut values, &mut rhs, &mut link_coefficients, &excess_flows, &grounded_nodes);
 
-      // solve the system of equations: J * dh = rhs
       jac.val_mut().copy_from_slice(&values);
 
-      // Perform numerical factorization using pre-computed symbolic factorization
       let llt = match Llt::try_new_with_symbolic(self.symbolic_llt.clone(), jac.as_ref(), Side::Lower) {
         Ok(llt) => llt,
-        // if the pivot is non-positive, try to fix the bad valve
         Err(LltError::Numeric(NonPositivePivot { index })) => {
-          // un-permute: the index from faer is 1-based and in AMD-permuted space
           let original_unknown = self.perm_fwd[index-1];
           if self.fix_bad_valve(original_unknown, &mut state.statuses) {
             continue 'gga;
           }
-          // Ground the problematic node to a virtual reservoir at elevation 0
           let node_index = self.node_to_unknown.iter().position(|&x| x.is_some() && x.unwrap() == original_unknown).unwrap();
           if !grounded_nodes[node_index] {
             warn!("Grounding node '{}' with virtual reservoir (elevation 0) to fix singular matrix", self.network.nodes[node_index].id);
@@ -362,35 +157,26 @@ impl<'a> HydraulicSolver<'a> {
           return Err(error_message);
         }
         Err(e) => {
-          // if other error, return the error
           return Err(e.to_string());
         }
       };
 
-      // solve the system of equations: J * dh = rhs
       let dh = llt.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
 
-      // update the heads of the nodes (unknown nodes only)
       for (global, &head_id) in self.node_to_unknown.iter().enumerate() {
         if let Some(i) = head_id {
           state.heads[global] = dh[(i, 0)];
         }
       }
 
-      // update flows and statuses and get the iteration statistics
-      let mut stats = self.update_links(state, &link_coefficients);
-      // update the emitter flows and iteration statistics
-      self.update_emitter_flows(state, &mut stats);
+      let mut stats = self.update_links(&mut state, &link_coefficients);
+      self.update_emitter_flows(&mut state, &mut stats);
 
-      // if PDA, update the demand flows and get the iteration statistics
       if self.network.options.demand_model == DemandModel::PDA {
-        self.update_demand_flows(state, &mut stats);
+        self.update_demand_flows(&mut state, &mut stats);
       }
 
-
-      // update links connected to tanks (close/open them based on tank level) and gather flow balance into/out of tanks
-      self.update_tank_links(state);
-
+      self.update_tank_links(&mut state);
 
       debug!(">> Iteration {}: Relative change: {:.6}, Status changed: {}", iteration, stats.relative_change(&self.network.options), stats.status_changed);
       debug!(">>>> Max flow change: {:.6} for link {}", stats.max_dq_converted(&self.network.options), self.network.links[stats.max_dq_index].id);
@@ -399,23 +185,20 @@ impl<'a> HydraulicSolver<'a> {
 
       if stats.relative_change(&self.network.options) < self.network.options.accuracy && !stats.status_changed && stats.max_dq_converted(&self.network.options) < max_flow_change {
 
-          // apply pressure controls to the state, if any pressure controls are active, return the state
-          if self.apply_pressure_controls(state) {
+          if self.apply_pressure_controls(&mut state) {
             continue 'gga;
           }
 
           let flow_balance = self.flow_balance(&state.demands, &state.flows);
-          // if PDA, the demands are the demand flows
           if self.network.options.demand_model == DemandModel::PDA {
             state.demands = state.demand_flows.clone();
           }
-          // update the demands of the junctions
           for i in 0..state.emitter_flows.len() {
             state.demands[i] += state.emitter_flows[i];
           }
           debug!("Converged in {} iterations: Error = {:.4}, Supply = {:.4}, Demand = {:.4}", iteration, flow_balance.error, flow_balance.total_supply, flow_balance.total_demand);
 
-        return Ok(state.clone());
+        return Ok(state);
       }
     }
     Err(format!("Maximum number of iterations reached: {}", self.network.options.max_trials))
@@ -423,7 +206,6 @@ impl<'a> HydraulicSolver<'a> {
 
 
   fn calculate_excess_flows(&self, state: &SolverState, excess_flows: &mut Vec<Cfs>) {
-      // calculate excess flows at each node (needed for PSV/PRV valves)
       for (i, emitter_flow) in state.emitter_flows.iter().enumerate() {
         excess_flows[i] = -emitter_flow;
       }
@@ -446,13 +228,10 @@ impl<'a> HydraulicSolver<'a> {
     let mut stats = IterationStatistics::default();
 
     for (i, link) in self.network.links.iter().enumerate() {
-      // calculate the head difference between the start and end nodes
       let dh = state.heads[link.start_node] - state.heads[link.end_node];
-      // calculate the 1/G_ij and Y_ij coefficients
       let g_inv = coefficients.g_inv[i];
       let y = coefficients.y[i];
     
-      // Flow update: dq = y - g_inv * dh
       let dq = y - g_inv * dh;
 
       if dq.abs() > stats.max_dq {
@@ -460,13 +239,10 @@ impl<'a> HydraulicSolver<'a> {
         stats.max_dq_index = i;
       }
 
-      // update the flow of the link
       state.flows[i] -= dq;
 
-      // update the link status and check for status changes
       let new_status = link.update_status(state.settings[i], state.statuses[i], state.flows[i], state.heads[link.start_node], state.heads[link.end_node]);
       if let Some(status) = new_status {
-        // ignore temporary closed status changes (Check valve) and pump status changes
         if state.statuses[i] != LinkStatus::TempClosed && state.statuses[i] != LinkStatus::Xhead {
           stats.status_changed = true;
         }
@@ -474,26 +250,19 @@ impl<'a> HydraulicSolver<'a> {
         state.statuses[i] = status;
       }
 
-      // update the sum of the absolute changes in flow and the sum of the absolute flows
       stats.sum_dq += dq.abs();
       stats.sum_q  += state.flows[i].abs();
     }
-    // return the iteration statistics
     stats
   }
   fn update_emitter_flows(&self, state: &mut SolverState, stats: &mut IterationStatistics) {
-    // iterate over all junctions
     for (i, node) in self.network.nodes.iter().enumerate() {
       if let NodeType::Junction(junction) = &node.node_type {
         if junction.emitter_coefficient > 0.0 {
-          // get the driving head difference
           let dh = state.heads[i] - node.elevation;
           let (g_inv, y) = junction.emitter_coefficients(state.emitter_flows[i], self.network.options.emitter_exponent);
-          // update the emitter flow
           let dq = (y - dh) * g_inv;
-          // update the emitter flow
           state.emitter_flows[i] -= dq;
-          // update the iteration statistics
           stats.sum_dq += dq.abs();
           stats.sum_q += state.emitter_flows[i].abs();
           if dq.abs() > stats.max_dq {
@@ -512,7 +281,6 @@ impl<'a> HydraulicSolver<'a> {
     let dp = (options.required_pressure - options.minimum_pressure).max(PDA_MIN_DIFF);
     let n = 1.0 / options.pressure_exponent;
 
-    // iterate over all junctions
     for (i, node) in self.network.nodes.iter().enumerate() {
       if let NodeType::Junction(junction) = &node.node_type {
         if state.demands[i] > 0.0 {
@@ -522,9 +290,7 @@ impl<'a> HydraulicSolver<'a> {
           let dh = state.heads[i] - node.elevation - options.minimum_pressure;
           let dq = (y - dh) * g_inv;
 
-          // update the demand flow
           state.demand_flows[i] -= dq;
-          // update the iteration statistics
           stats.sum_dq += dq.abs();
           stats.sum_q += state.demand_flows[i].abs();
           if dq.abs() > stats.max_dq {
@@ -537,66 +303,36 @@ impl<'a> HydraulicSolver<'a> {
 
   }
 
+  fn apply_pressure_controls(&self, state: &mut SolverState) -> bool {
 
-  fn apply_patterns(&self, state: &mut SolverState, time: usize) {
+    let mut changed = false;
 
-    let time_options = &self.network.options.time_options;
-    // get the pattern time
-    let pattern_time = time_options.pattern_start + time;
-    // get pattern index
-    let pattern_index = pattern_time / time_options.pattern_timestep;
-
-    // apply the head pattern to reservoirs with a head pattern
-    for (i, node) in self.network.nodes.iter().enumerate() {
-      let Some(head_pattern) = node.head_pattern() else { continue };
-      let pattern = &self.network.patterns[head_pattern];
-      state.heads[i] = node.elevation * pattern.multipliers[pattern_index % pattern.multipliers.len()];
-    }
-
-    // apply the demand pattern to junctions
-    state.demands = self.network.nodes.iter().map(|n| {
-        let NodeType::Junction(junction) = &n.node_type else { return 0.0 };
-
-        if let Some(pattern_id) = &junction.pattern {
-          let pattern = &self.network.patterns[pattern_id];
-
-          // get the multiplier for the pattern index (wrap around if needed)
-          let multiplier = pattern.multipliers[pattern_index % pattern.multipliers.len()];
-          return junction.basedemand * multiplier * self.network.options.demand_multiplier;
+    for control in &self.network.controls {
+      if matches!(control.condition, ControlCondition::LowPressure { .. } | ControlCondition::HighPressure { .. }) {
+        let active = control.is_active(state, self.network, 0, 0);
+        if active {
+          changed = changed || control.activate(state, self.network);
         }
-        // if no pattern, return the basedemand times the global demand multiplier
-        return junction.basedemand * self.network.options.demand_multiplier;
-
-      }).collect::<Vec<Cfs>>();
-
-    // if PDA, set the demand flows to the demands
-    if self.network.options.demand_model == DemandModel::PDA {
-      state.demand_flows = state.demands.clone();
+      }
     }
-
+    changed
   }
 
   /// Update the links connected to tanks and gather flow balance into/out of tanks
   fn update_tank_links(&self, state: &mut SolverState) {
-    // iterate over the tanks
     for (tank_index, node) in self.network.nodes.iter().enumerate() {
 
       if let NodeType::Tank(tank) = &node.node_type {
-        // reset the demand of the tank
         state.demands[tank_index] = 0.0;
-        // check if the tank is closed for filling
         let fill_closed = state.heads[tank_index] >= tank.elevation + tank.max_level && !tank.overflow;
         let empty_closed = state.heads[tank_index] <= tank.elevation + tank.min_level;
 
-        // iterate over the links connected to the tank
         for link_index in &tank.links_to {
-          // add the flow to the demand of the tank (positive flow is into the tank)
           state.demands[tank_index] += state.flows[*link_index];
           if fill_closed && state.flows[*link_index] > 0.0 { state.statuses[*link_index] = LinkStatus::TempClosed; }
           if empty_closed && state.flows[*link_index] < 0.0 { state.statuses[*link_index] = LinkStatus::TempClosed; }
         }
         for link_index in &tank.links_from {
-          // subtract the flow from the demand of the tank (negative flow is out of the tank)
           state.demands[tank_index] -= state.flows[*link_index];
           if fill_closed && state.flows[*link_index] < 0.0 { state.statuses[*link_index] = LinkStatus::TempClosed; }
           if empty_closed && state.flows[*link_index] > 0.0 { state.statuses[*link_index] = LinkStatus::TempClosed; }
@@ -606,38 +342,17 @@ impl<'a> HydraulicSolver<'a> {
     
 
   }
-  
-  /// Update the heads of tanks, and the statuses of the links connected to tanks
-  fn update_tanks(&self, state: &mut SolverState, timestep: usize) {
-
-    for (tank_index, node) in self.network.nodes.iter().enumerate() {
-      if let NodeType::Tank(tank) = &node.node_type {
-        // calculate flow balance of the tank
-        let delta_volume = state.demands[tank_index] * timestep as Ft3; // in ft^3
-        // update the head of the tank
-        let new_head = tank.new_head(delta_volume, state.heads[tank_index]);
-        // update the head of the tank
-        state.heads[tank_index] = new_head;
-      }
-    }
-
-  }
 
   /// Fix a bad valve by setting its status to Closed
   fn fix_bad_valve(&self, unknown_node_index: usize, statuses: &mut Vec<LinkStatus>) -> bool {
-    // get the node index
     let node_index = self.node_to_unknown.iter().position(|&x| x.is_some() && x.unwrap() == unknown_node_index).unwrap();
-    // find links connected to the node
     for (i, link) in self.network.links.iter().enumerate() {
-      // skip if the link is not connected to the node
       if link.start_node != node_index && link.end_node != node_index {
         continue;
       }
-      // check if the link is a PSV or PRV valve
       if let LinkType::Valve(valve) = &link.link_type {
         if valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV {
           if statuses[i] == LinkStatus::Active {
-            // set the status to XPressure to indicate a bad valve
             debug!("Fixing bad valve for node index: {}", node_index);
             statuses[i] = LinkStatus::XPressure;
             return true;
@@ -645,7 +360,6 @@ impl<'a> HydraulicSolver<'a> {
         }
       }
     }
-    // if no valves found, return false
     false
   }
 
@@ -709,18 +423,15 @@ impl<'a> HydraulicSolver<'a> {
     let mut triplets = Vec::with_capacity(3 * network.links.len());
 
     for link in network.links.iter() {
-      let u = node_to_unknown[link.start_node]; // u is the index of the start node (None if unknown)
-      let v = node_to_unknown[link.end_node]; // v is the index of the end node (None if unknown)
-      // diagonal elements (self-connectivity)
-      if let Some(i) = u { triplets.push(Triplet::new(i, i, 0.0)); } // add diagonal element for u
-      if let Some(j) = v { triplets.push(Triplet::new(j, j, 0.0)); } // add diagonal element for v
-      // lower-triangular off diagonal element (connectivity)
+      let u = node_to_unknown[link.start_node];
+      let v = node_to_unknown[link.end_node];
+      if let Some(i) = u { triplets.push(Triplet::new(i, i, 0.0)); }
+      if let Some(j) = v { triplets.push(Triplet::new(j, j, 0.0)); }
       if let (Some(i), Some(j)) = (u, v) {
         let (row, col) = if i >= j { (i, j) } else { (j, i) };
         triplets.push(Triplet::new(row, col, 0.0));
       }
     }
-    // convert triplets to sparse matrix
     let sparsity_matrix = SparseColMat::try_new_from_triplets(n_unknowns, n_unknowns, &triplets).unwrap();
     let symbolic = sparsity_matrix.symbolic().to_owned().unwrap();
 
