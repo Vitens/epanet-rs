@@ -341,7 +341,22 @@ impl Network {
     let mut parts = parse_line(line);
     let id = parts.next().ok_or_missing("tank id")?.into();
     let elevation = parts.next().ok_or_missing("elevation")?.parse_field::<f64>("elevation")?;
-    let initial_level = parts.next().ok_or_missing("initial level")?.parse_field::<f64>("initial level")?;
+
+    // Read as reservoir if no initial level is provided (EPANET edge case)
+
+    let next = parts.next();
+
+
+    if next.is_none() {
+      return Ok(Node {
+        id,
+        elevation,
+        node_type: NodeType::Reservoir(Reservoir { head_pattern: None }),
+        coordinates: None,
+      });
+    }
+
+    let initial_level = next.ok_or_missing("initial level")?.parse_field::<f64>("initial level")?;
     let min_level = parts.next().ok_or_missing("min level")?.parse_field::<f64>("min level")?;
     let max_level = parts.next().ok_or_missing("max level")?.parse_field::<f64>("max level")?;
     let diameter = parts.next().ok_or_missing("diameter")?.parse_field::<f64>("diameter")?;
@@ -627,8 +642,16 @@ impl Network {
     match option.as_str() {
       "UNITS" => {
         // set the flow units
-        self.options.flow_units = FlowUnits::from_str(value)
+        if value.trim().to_uppercase() == "SI" {
+          self.options.flow_units = FlowUnits::LPS;
+        }
+        else if value.trim().to_uppercase() == "US" {
+          self.options.flow_units = FlowUnits::CFS;
+        }
+        else {
+          self.options.flow_units = FlowUnits::from_str(value)
           .map_err(|_| InputError::new(format!("Invalid flow units: {}", value)))?;
+        }
         
         // set the unit system based on the flow units
         self.options.unit_system = match self.options.flow_units {
@@ -716,17 +739,7 @@ impl Network {
         self.options.max_flow_change = Some(value.parse_field::<f64>("flow change")?);
       },
       "PATTERN" => {
-        let pattern: Box<str> = value.into();
-        if self.patterns.contains_key(&pattern) {
-          // set the default pattern to all junctions without a pattern
-          for node in self.nodes.iter_mut() {
-            if let NodeType::Junction(junction) = &mut node.node_type {
-              if junction.pattern.is_none() {
-                junction.pattern = Some(value.into());
-              }
-            }
-          }
-        }
+        self.options.pattern = Some(value.into());
       },
       "MINIMUM" => {
         let next_part = value.trim().to_uppercase();
@@ -768,7 +781,7 @@ impl Network {
     let mut duration = parts.next().ok_or_missing("duration")?;
 
     // if the duration is not a number and does not contain ":", append it to the time option
-    if duration.parse::<usize>().is_err() && !duration.contains(":") {
+    if duration.parse::<f64>().is_err() && !duration.contains(":") {
       time_option += " ";
       time_option += &duration.to_uppercase();
       duration = parts.next().ok_or_missing("duration value")?;
@@ -1165,6 +1178,18 @@ mod tests {
     assert!(!tank.overflow);
   }
 
+  #[test]
+  fn test_read_tank_as_reservoir() {
+    let mut network = test_network(false);
+    let node = network.read_tank("T3  100").unwrap();
+
+    let NodeType::Reservoir(reservoir) = &node.node_type else {
+      panic!("Expected Reservoir node type");
+    };
+    assert_eq!(node.elevation, 100.0);
+
+  }
+
   // ==================== Pump Tests ====================
 
   #[test]
@@ -1266,6 +1291,16 @@ mod tests {
   }
 
   #[test]
+  fn test_read_options_units_si() {
+    let mut network = test_network(false);
+    network.read_options("UNITS SI").unwrap();
+    assert_eq!(network.options.flow_units, FlowUnits::LPS);
+    assert_eq!(network.options.unit_system, UnitSystem::SI);
+    assert_eq!(network.options.pressure_units, PressureUnits::METERS);
+  }
+
+
+  #[test]
   fn test_read_options_units_cfs() {
     let mut network = test_network(false);
     network.read_options("UNITS  CFS").unwrap();
@@ -1344,6 +1379,10 @@ mod tests {
     network.read_times("DURATION  24  HOURS").unwrap();
     
     assert_eq!(network.options.time_options.duration, 24 * 3600);
+
+    // edge case where duration is a float (net2-cl2.inp)
+    network.read_times("  Duration           55.00 hours").unwrap();
+    assert_eq!(network.options.time_options.duration, 55 * 3600);
   }
 
   #[test]

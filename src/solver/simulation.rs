@@ -148,14 +148,21 @@ impl<'a> Simulation<'a> {
       state.heads[i] = node.elevation * pattern.multipliers[pattern_index % pattern.multipliers.len()];
     }
 
+    // Resolve the default demand pattern: explicit PATTERN option, or EPANET's default "1"
+    let default_pattern_id: Box<str> = network.options.pattern.clone()
+      .unwrap_or_else(|| "1".into());
+    let default_pattern = network.patterns.get(&default_pattern_id);
+
     state.demands = network.nodes.iter().map(|n| {
       let NodeType::Junction(junction) = &n.node_type else { return 0.0 };
-      if let Some(pattern_id) = &junction.pattern {
-        let pattern = &network.patterns[pattern_id];
-        let multiplier = pattern.multipliers[pattern_index % pattern.multipliers.len()];
-        return junction.basedemand * multiplier * network.options.demand_multiplier;
-      }
-      junction.basedemand * network.options.demand_multiplier
+      let pattern = junction.pattern.as_ref()
+        .and_then(|id| network.patterns.get(id))
+        .or(default_pattern);
+      let multiplier = match pattern {
+        Some(p) => p.multipliers[pattern_index % p.multipliers.len()],
+        None => 1.0,
+      };
+      junction.basedemand * multiplier * network.options.demand_multiplier
     }).collect::<Vec<Cfs>>();
 
     if network.options.demand_model == DemandModel::PDA {

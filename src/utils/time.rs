@@ -36,9 +36,9 @@ pub fn parse_time_str(time_str: &str, unit_or_suffix: Option<&str>) -> Result<us
 
         seconds = hour24 * 3600 + minutes * 60;
     } else {
-        // Parse as numeric value with optional time unit
+        // Parse as numeric value (integer or float) with optional time unit
         let value = time_str
-            .parse::<usize>()
+            .parse::<f64>()
             .map_err(|_| InputError::new(format!("Invalid time value: {}", time_str)))?;
 
         let mut unit = unit_or_suffix.unwrap_or("HOURS").to_uppercase();
@@ -49,12 +49,12 @@ pub fn parse_time_str(time_str: &str, unit_or_suffix: Option<&str>) -> Result<us
         }
 
         seconds = match unit.as_str() {
-            "HOUR" | "HOURS" => value * 3600,
-            "MINUTE" | "MIN" => value * 60,
-            "SECOND" | "SEC" => value,
-            "DAY" => value * 86_400,
-            "AM" => (value % 12) * 3600,              // 12 AM → 0
-            "PM" => ((value % 12) + 12) * 3600,       // 12 PM → 12
+            "HOUR" | "HOURS" => (value * 3600.0) as usize,
+            "MINUTE" | "MIN" => (value * 60.0) as usize,
+            "SECOND" | "SEC" => value as usize,
+            "DAY" => (value * 86_400.0) as usize,
+            "AM" => ((value as usize % 12)) * 3600,
+            "PM" => (((value as usize) % 12) + 12) * 3600,
             _ => return Err(InputError::new(format!("Invalid time unit: {}", unit))),
         };
     }
