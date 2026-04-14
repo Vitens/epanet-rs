@@ -1,0 +1,104 @@
+name: Benchmark EPANET-RS vs EPANET
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout epanet-rs
+      uses: actions/checkout@v4
+
+    - name: Build epanet-rs (release)
+      run: cargo build --release
+
+    - name: Build EPANET from source
+      run: |
+        git clone --depth 1 https://github.com/OpenWaterAnalytics/EPANET.git /tmp/epanet
+        cmake -S /tmp/epanet -B /tmp/epanet/build -DCMAKE_BUILD_TYPE=Release
+        cmake --build /tmp/epanet/build --config Release
+        sudo cp /tmp/epanet/build/bin/runepanet /usr/local/bin/
+
+    - name: Install hyperfine
+      run: |
+        wget -q https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
+        sudo dpkg -i hyperfine_1.18.0_amd64.deb
+
+    - name: Clone example networks
+      run: git clone --depth 1 https://github.com/OpenWaterAnalytics/epanet-example-networks.git /tmp/example-networks
+
+    - name: Run benchmarks
+      run: |
+        EPANET_RS="./target/release/epanet-rs"
+        RESULTS_DIR="/tmp/benchmark-results"
+        mkdir -p "$RESULTS_DIR"
+
+        echo "| Network | EPANET (ms) | EPANET-RS (ms) | EPANET-RS parallel (ms) | Speedup | Speedup (parallel) |" > "$RESULTS_DIR/summary.md"
+        echo "|---------|-------------|-----------------|-------------------------|---------|--------------------|" >> "$RESULTS_DIR/summary.md"
+
+        for inp in $(find /tmp/example-networks -name '*.inp' | sort); do
+          name=$(basename "$inp" .inp)
+          echo "::group::Benchmarking $name"
+
+          # Pre-flight: skip networks that fail or take too long
+          if ! timeout 60 runepanet "$inp" /dev/null /dev/null 2>/dev/null; then
+            echo "⏭️ SKIPPED (EPANET failed or timed out): $name"
+            echo "::endgroup::"
+            continue
+          fi
+          if ! timeout 60 "$EPANET_RS" run "$inp" --quiet 2>/dev/null; then
+            echo "⏭️ SKIPPED (EPANET-RS failed or timed out): $name"
+            echo "::endgroup::"
+            continue
+          fi
+
+          hyperfine \
+            --warmup 1 \
+            --min-runs 3 \
+            --export-json "$RESULTS_DIR/${name}.json" \
+            --command-name "EPANET" \
+              "runepanet '$inp' /dev/null /dev/null" \
+            --command-name "EPANET-RS" \
+              "$EPANET_RS run '$inp' --quiet" \
+            --command-name "EPANET-RS-parallel" \
+              "$EPANET_RS run '$inp' --quiet --parallel" \
+            || true
+
+          if [ -f "$RESULTS_DIR/${name}.json" ]; then
+            epanet_ms=$(jq '.results[] | select(.command == "EPANET") | .mean * 1000' "$RESULTS_DIR/${name}.json" 2>/dev/null || echo "N/A")
+            rs_ms=$(jq '.results[] | select(.command == "EPANET-RS") | .mean * 1000' "$RESULTS_DIR/${name}.json" 2>/dev/null || echo "N/A")
+            rs_par_ms=$(jq '.results[] | select(.command == "EPANET-RS-parallel") | .mean * 1000' "$RESULTS_DIR/${name}.json" 2>/dev/null || echo "N/A")
+
+            if [ "$epanet_ms" != "N/A" ] && [ "$rs_ms" != "N/A" ] && [ "$rs_par_ms" != "N/A" ]; then
+              speedup=$(echo "scale=2; $epanet_ms / $rs_ms" | bc 2>/dev/null || echo "N/A")
+              speedup_par=$(echo "scale=2; $epanet_ms / $rs_par_ms" | bc 2>/dev/null || echo "N/A")
+              epanet_fmt=$(printf "%.1f" "$epanet_ms")
+              rs_fmt=$(printf "%.1f" "$rs_ms")
+              rs_par_fmt=$(printf "%.1f" "$rs_par_ms")
+              echo "| $name | $epanet_fmt | $rs_fmt | $rs_par_fmt | ${speedup}x | ${speedup_par}x |" >> "$RESULTS_DIR/summary.md"
+            fi
+          fi
+
+          echo "::endgroup::"
+        done
+
+        echo ""
+        echo "## Benchmark Results"
+        echo ""
+        cat "$RESULTS_DIR/summary.md"
+
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: benchmark-results
+        path: /tmp/benchmark-results/
