@@ -50,7 +50,7 @@ jobs:
           echo "::group::Benchmarking $name"
 
           # Pre-flight: skip networks that fail or take too long
-          if ! timeout 60 runepanet "$inp" /dev/null /dev/null 2>/dev/null; then
+          if ! timeout 60 runepanet "$inp" /dev/null 2>/dev/null; then
             echo "⏭️ SKIPPED (EPANET failed or timed out): $name"
             echo "::endgroup::"
             continue
@@ -66,7 +66,7 @@ jobs:
             --min-runs 3 \
             --export-json "$RESULTS_DIR/${name}.json" \
             --command-name "EPANET" \
-              "runepanet '$inp' /dev/null /dev/null" \
+              "runepanet '$inp' /dev/null" \
             --command-name "EPANET-RS" \
               "$EPANET_RS run '$inp' --quiet" \
             --command-name "EPANET-RS-parallel" \
