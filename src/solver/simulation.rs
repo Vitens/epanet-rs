@@ -71,7 +71,7 @@ impl<'a> Simulation<'a> {
 
     if parallel && !self.network.has_tanks() && !self.network.has_pressure_controls() {
       return self.solve_parallel();
-    } else {
+    } else if parallel {
       warn!("Networks with tanks or pressure controls cannot be solved in parallel, running sequentially");
     }
 
