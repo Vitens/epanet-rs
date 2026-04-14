@@ -18,7 +18,7 @@ use crate::model::units::{Cfs, Ft3};
 
 use simplelog::{warn, debug, error};
 
-use crate::constants::{BIG_VALUE, Q_ZERO, PDA_MIN_DIFF};
+use crate::constants::{BIG_VALUE, Q_ZERO, PDA_MIN_DIFF, SMALL_VALUE};
 use crate::model::node::NodeType;
 use crate::model::link::{LinkType, LinkTrait, LinkStatus};
 use crate::model::network::Network;
@@ -319,6 +319,9 @@ impl<'a> HydraulicSolver<'a> {
     // pre-allocate the excess flows vector
     let mut excess_flows = vec![0.0; self.network.nodes.len()];
 
+    // Track nodes grounded to a virtual reservoir (elevation 0 and small conductance) to fix singular matrix problems for disconnected nodes
+    let mut grounded_nodes = vec![false; self.network.nodes.len()];
+
     'gga: for iteration in 1..=self.network.options.max_trials {
 
       // reset values and rhs
@@ -331,7 +334,7 @@ impl<'a> HydraulicSolver<'a> {
       }
 
       // assemble Jacobian and RHS contributions from links, emitters and nodes
-      self.assemble_jacobian(state, &mut values, &mut rhs, &mut link_coefficients, &excess_flows);
+      self.assemble_jacobian(state, &mut values, &mut rhs, &mut link_coefficients, &excess_flows, &grounded_nodes);
 
       // solve the system of equations: J * dh = rhs
       jac.val_mut().copy_from_slice(&values);
@@ -346,7 +349,13 @@ impl<'a> HydraulicSolver<'a> {
           if self.fix_bad_valve(original_unknown, &mut state.statuses) {
             continue 'gga;
           }
+          // Ground the problematic node to a virtual reservoir at elevation 0
           let node_index = self.node_to_unknown.iter().position(|&x| x.is_some() && x.unwrap() == original_unknown).unwrap();
+          if !grounded_nodes[node_index] {
+            warn!("Grounding node '{}' with virtual reservoir (elevation 0) to fix singular matrix", self.network.nodes[node_index].id);
+            grounded_nodes[node_index] = true;
+            continue 'gga;
+          }
           let error_message = format!("Singular matrix: check connectivity at node '{}'", self.network.nodes[node_index].id);
           error!("{}", error_message);
           return Err(error_message);
@@ -414,7 +423,7 @@ impl<'a> HydraulicSolver<'a> {
   // Assemble the Jacobian matrix and the right-hand side vector for the system of equations
   // First assemble the contributions from the links
   // Then assemble the contributions from the emitters (virtual links)
-  fn assemble_jacobian(&self, state: &mut SolverState, values: &mut Vec<f64>, rhs: &mut Vec<f64>, link_coefficients: &mut ResistanceCoefficients, excess_flows: &Vec<f64>) {
+  fn assemble_jacobian(&self, state: &mut SolverState, values: &mut Vec<f64>, rhs: &mut Vec<f64>, link_coefficients: &mut ResistanceCoefficients, excess_flows: &Vec<f64>, grounded_nodes: &[bool]) {
 
     // assemble the contributions from the links
     self.link_contributions(state, values, rhs, link_coefficients, excess_flows);
@@ -428,6 +437,22 @@ impl<'a> HydraulicSolver<'a> {
     // update the contributions from the nodes 
     self.node_contributions(state, rhs);
 
+    // add virtual reservoir connections for grounded nodes
+    self.grounded_node_contributions(values, grounded_nodes);
+  }
+
+  /// For nodes grounded to a virtual reservoir at elevation 0, add a small
+  /// conductance (SMALL_VALUE) to the diagonal. This effectively pins the head
+  /// at 0, equivalent to a direct connection to a reservoir, making the matrix
+  /// non-singular for disconnected or ill-conditioned sub-networks.
+  fn grounded_node_contributions(&self, values: &mut Vec<f64>, grounded_nodes: &[bool]) {
+    for (i, &grounded) in grounded_nodes.iter().enumerate() {
+      if grounded {
+        if let Some(row) = self.node_rows[i] {
+          values[row] += SMALL_VALUE;
+        }
+      }
+    }
   }
 
   fn node_contributions(&self, state: &mut SolverState, rhs: &mut Vec<f64>) {
@@ -832,8 +857,8 @@ impl<'a> HydraulicSolver<'a> {
   fn build_sparsity_pattern(network: &Network, node_to_unknown: &Vec<Option<usize>>) -> SymbolicSparseColMat<usize> {
     let n_unknowns = node_to_unknown.iter().filter(|&x| x.is_some()).count();
 
-    // Pre-allocate: at most 3 triplets per link (2 diagonal + 1 lower off-diagonal)
     let mut triplets = Vec::with_capacity(3 * network.links.len());
+
     for link in network.links.iter() {
       let u = node_to_unknown[link.start_node]; // u is the index of the start node (None if unknown)
       let v = node_to_unknown[link.end_node]; // v is the index of the end node (None if unknown)
