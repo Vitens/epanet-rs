@@ -64,60 +64,79 @@ impl<'a> Simulation<'a> {
 
   /// Runs a complete hydraulic simulation, collecting results at each report step.
   /// Equivalent to EN_solveH.
+  /// Simulations can be run in parallel or sequentially. Parallel mode is only supported for networks without tanks or pressure controls.
+  /// Returns a SolverResult containing the flows and heads at each report step.
   pub fn solve_hydraulics(&mut self, parallel: bool) -> SolverResult {
     self.initialize_hydraulics();
 
-    if parallel && (self.network.has_tanks() || self.network.has_pressure_controls()) {
-      warn!("Networks with tanks or pressure controls cannot be solved in parallel, running sequentially");
-    }
-
     if parallel && !self.network.has_tanks() && !self.network.has_pressure_controls() {
       return self.solve_parallel();
+    } else {
+      warn!("Networks with tanks or pressure controls cannot be solved in parallel, running sequentially");
     }
 
     let report_timestep = self.network.options.time_options.report_timestep;
     let report_steps = (self.network.options.time_options.duration / report_timestep) + 1;
+
+    // Initialize the results vector
     let mut results = SolverResult::new(self.network.links.len(), self.network.nodes.len(), report_steps);
 
+    // Run the simulation step by step
     let mut time = 0;
     loop {
       let t = self.run_hydraulics(time).unwrap();
+      // Append the results to the SolverResult if the time step is a report step
       if t % report_timestep == 0 {
         results.append(&self.state, t / report_timestep);
       }
+      // Advance the time step, returns 0 if the simulation is complete
       let dt = self.next_hydraulic_timestep();
       if dt == 0 { break; }
       time += dt;
     }
 
+    // Convert the units of the results to the original units
     results.convert_units(&self.network.options.flow_units, &self.network.options.unit_system);
     results
   }
 
+  /// Solves the hydraulics in parallel, only supported for networks without tanks or pressure controls.
   fn solve_parallel(&mut self) -> SolverResult {
+
+    // parallel solve is only supported for networks without tanks or pressure controls, so we only use the report timestep to determine the number of steps
     let report_timestep = self.network.options.time_options.report_timestep;
     let report_steps = (self.network.options.time_options.duration / report_timestep) + 1;
+
+    // Initialize the results vector
     let mut results = SolverResult::new(self.network.links.len(), self.network.nodes.len(), report_steps);
 
+    // First solve the first time step, and use that as the initial state for the parallel solve
+    // allowing for faster convergence.
     Self::apply_patterns(self.network, &mut self.state, 0);
     self.state = self.solver.solve(&self.state).unwrap();
     results.append(&self.state, 0);
 
     let initial_state = self.state.clone();
+
+    // Solve the remaining time steps in parallel
     let par_results: Vec<SolverState> = (1..report_steps).into_par_iter().map(|step| {
       let mut state = initial_state.clone();
       Self::apply_patterns(self.network, &mut state, step * report_timestep);
       self.solver.solve(&state).unwrap()
     }).collect();
 
+    // update the results vector with the parallel solve results
     for (step, step_result) in par_results.iter().enumerate() {
       results.append(step_result, step + 1);
     }
 
+    // Convert the units of the results to the original units
     results.convert_units(&self.network.options.flow_units, &self.network.options.unit_system);
     results
   }
 
+  /// Applies demand and head patterns to the state at the given time.
+  /// TODO: Add support for multiple patterns
   fn apply_patterns(network: &Network, state: &mut SolverState, time: usize) {
     let time_options = &network.options.time_options;
     let pattern_time = time_options.pattern_start + time;
@@ -144,10 +163,12 @@ impl<'a> Simulation<'a> {
     }
   }
 
+  /// Applies controls to the state at the given time.
   fn apply_controls(network: &Network, state: &mut SolverState, time: usize) {
     let clocktime = (time + network.options.time_options.start_clocktime) % (24 * 3600);
 
     for control in &network.controls {
+      // skip controls that are not pressure or level controls
       if matches!(control.condition, ControlCondition::LowPressure { .. } | ControlCondition::HighPressure { .. }) {
         continue;
       }
@@ -160,17 +181,23 @@ impl<'a> Simulation<'a> {
     }
   }
 
+  /// Calculates the time step for the next hydraulic time step.
+  /// Returns the time step length in seconds. Returns 0 when the simulation is complete.
   fn calculate_time_step(network: &Network, state: &SolverState, current_time: usize, skip_timesteps: bool) -> usize {
     let times = &network.options.time_options;
     let clocktime = (current_time + times.start_clocktime) % (24 * 3600);
 
+    // if there are no controls, tanks, or quality, and the skip_timesteps flag is set, return the report timestep
     if network.controls.is_empty() && !network.has_tanks() && !network.has_quality() && skip_timesteps {
       return times.report_timestep;
     }
 
+    // calculate the time to reach the next report step
     let t_report = times.report_timestep - (current_time % times.report_timestep);
+    // calculate the time to reach the next pattern step
     let t_pattern = times.pattern_timestep - (current_time % times.pattern_timestep);
 
+    // calculate the time to reach the next tank level
     let t_tanks = network.nodes.iter()
       .zip(state.heads.iter())
       .zip(state.demands.iter())
@@ -181,6 +208,7 @@ impl<'a> Simulation<'a> {
       })
       .min().unwrap_or(usize::MAX);
 
+    // calculate the time to reach the next control event
     let t_controls = network.controls.iter()
       .map(|control| {
         match &control.condition {
@@ -209,12 +237,15 @@ impl<'a> Simulation<'a> {
       .filter(|&x| x > 0)
       .min().unwrap_or(usize::MAX);
 
+    // return the minimum of the calculated time steps
     *[t_report, t_pattern, t_tanks, t_controls, times.hydraulic_timestep].iter().filter(|&x| *x > 0).min().unwrap()
   }
 
+  /// Updates the tank levels for the given time step.
   fn update_tanks(network: &Network, state: &mut SolverState, timestep: usize) {
     for (tank_index, node) in network.nodes.iter().enumerate() {
       if let NodeType::Tank(tank) = &node.node_type {
+        // calculate the delta volume and new head for the tank
         let delta_volume = state.demands[tank_index] * timestep as Ft3;
         let new_head = tank.new_head(delta_volume, state.heads[tank_index]);
         state.heads[tank_index] = new_head;

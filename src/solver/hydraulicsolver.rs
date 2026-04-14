@@ -1,14 +1,12 @@
-use faer::sparse::{SparseColMat, Triplet, SymbolicSparseColMat};
+use faer::sparse::{SparseColMat, SymbolicSparseColMat};
 use faer::sparse::linalg::LltError;
 use faer::linalg::cholesky::llt::factor::LltError::NonPositivePivot;
 use faer::sparse::linalg::solvers::{SymbolicLlt, Llt};
-use faer::sparse::linalg::amd;
-use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::{Mat, Side};
 use faer::prelude::*;
 
 use crate::solver::state::SolverState;
-use crate::solver::matrix::{CSCIndex, ResistanceCoefficients, find_csc_index};
+use crate::solver::matrix::*;
 
 use crate::model::units::Cfs;
 
@@ -74,44 +72,31 @@ pub struct HydraulicSolver<'a> {
 impl<'a> HydraulicSolver<'a> {
 
   pub fn new(network: &'a Network) -> Self {
-    let node_to_unknown = Self::build_unknown_numbering_map(network);
-    let sparsity_pattern = Self::build_sparsity_pattern(network, &node_to_unknown);
-    let csc_indices = Self::map_links_to_csc_indices(network, &sparsity_pattern, &node_to_unknown);
-    let node_rows = Self::map_nodes_to_rows(network, &sparsity_pattern, &node_to_unknown);
+    // build the sparsity pattern and the global unknown-numbering map
+    let node_to_unknown = build_unknown_numbering_map(network);
+    let sparsity_pattern = build_sparsity_pattern(network, &node_to_unknown);
+    // precompute the CSC indices for the links
+    let csc_indices = map_links_to_csc_indices(network, &sparsity_pattern, &node_to_unknown);
+    // precompute the indices for the rows of the Jacobian matrix for each node
+    let node_rows = map_nodes_to_rows(network, &sparsity_pattern, &node_to_unknown);
 
+    // generate the Jacobian matrix
     let values = vec![0.0; sparsity_pattern.as_ref().row_idx().len()];
     let jac = SparseColMat::new(sparsity_pattern.clone(), values.clone());
 
-    let perm_fwd = Self::compute_amd_permutation(&sparsity_pattern, &node_to_unknown);
+    // precompute the AMD fill-reducing permutation for error mapping
+    let perm_fwd = compute_amd_permutation(&sparsity_pattern, &node_to_unknown);
+    // precompute the symbolic Cholesky factorization
     let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).expect("Failed to compute symbolic Cholesky factorization");
 
     Self { network, node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows }
   }
 
-  fn compute_amd_permutation(sparsity_pattern: &SymbolicSparseColMat<usize>, node_to_unknown: &Vec<Option<usize>>) -> Vec<usize> {
-    let n_unknowns = node_to_unknown.iter().filter(|x| x.is_some()).count();
-    let a_nnz = sparsity_pattern.as_ref().compute_nnz();
-    let mut perm_fwd = vec![0usize; n_unknowns];
-    let mut perm_inv = vec![0usize; n_unknowns];
-    {
-      let scratch_size = amd::order_maybe_unsorted_scratch::<usize>(n_unknowns, a_nnz);
-      let mut mem = MemBuffer::new(scratch_size);
-      amd::order_maybe_unsorted(
-        &mut perm_fwd,
-        &mut perm_inv,
-        sparsity_pattern.as_ref(),
-        amd::Control::default(),
-        MemStack::new(&mut mem),
-      ).expect("Failed to compute AMD ordering");
-    }
-
-    perm_fwd
-  }
-
   /// Solve the network for a single timestep using the Global Gradient Algorithm (Todini & Pilati, 1987).
-  /// Takes an immutable solver state and returns a new state after convergence.
+  /// Takes a solver state and returns a new state after convergence.
   pub fn solve(&self, state: &SolverState) -> Result<SolverState, String> {
 
+    // clone the solver state to avoid modifying the original
     let mut state = state.clone();
 
     let unknown_nodes = self.node_to_unknown.iter().filter(|&x| x.is_some()).count();
@@ -135,18 +120,27 @@ impl<'a> HydraulicSolver<'a> {
         self.calculate_excess_flows(&state, &mut excess_flows);
       }
 
+      // assemble the Jacobian matrix
       self.assemble_jacobian(&mut state, &mut values, &mut rhs, &mut link_coefficients, &excess_flows, &grounded_nodes);
 
+      // copy the values to the Jacobian matrix
       jac.val_mut().copy_from_slice(&values);
 
+      // try to factorize the Jacobian matrix
       let llt = match Llt::try_new_with_symbolic(self.symbolic_llt.clone(), jac.as_ref(), Side::Lower) {
         Ok(llt) => llt,
         Err(LltError::Numeric(NonPositivePivot { index })) => {
+
+
+          // get the original unknown index from the AMD permutation and translate it to a node index in the network
           let original_unknown = self.perm_fwd[index-1];
-          if self.fix_bad_valve(original_unknown, &mut state.statuses) {
+          let node_index = self.node_to_unknown.iter().position(|&x| x.is_some() && x.unwrap() == original_unknown).unwrap();
+
+          // if the factorization failed, attempt to fix the problem by first fixing a possible bad valve
+          if self.fix_bad_valve(node_index, &mut state.statuses) {
             continue 'gga;
           }
-          let node_index = self.node_to_unknown.iter().position(|&x| x.is_some() && x.unwrap() == original_unknown).unwrap();
+          // otherwise, ground the node causing the disconnect with a virtual reservoir
           if !grounded_nodes[node_index] {
             warn!("Grounding node '{}' with virtual reservoir (elevation 0) to fix singular matrix", self.network.nodes[node_index].id);
             grounded_nodes[node_index] = true;
@@ -161,14 +155,17 @@ impl<'a> HydraulicSolver<'a> {
         }
       };
 
+      // solve the system of equations
       let dh = llt.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
 
+      // update the heads for the unknown nodes
       for (global, &head_id) in self.node_to_unknown.iter().enumerate() {
         if let Some(i) = head_id {
           state.heads[global] = dh[(i, 0)];
         }
       }
 
+      // update the links and emitters and gather iteration statistics 
       let mut stats = self.update_links(&mut state, &link_coefficients);
       self.update_emitter_flows(&mut state, &mut stats);
 
@@ -176,6 +173,7 @@ impl<'a> HydraulicSolver<'a> {
         self.update_demand_flows(&mut state, &mut stats);
       }
 
+      // close/open links connected to tanks based on tank level
       self.update_tank_links(&mut state);
 
       debug!(">> Iteration {}: Relative change: {:.6}, Status changed: {}", iteration, stats.relative_change(&self.network.options), stats.status_changed);
@@ -183,12 +181,18 @@ impl<'a> HydraulicSolver<'a> {
 
       let max_flow_change = self.network.options.max_flow_change.unwrap_or(BIG_VALUE);
 
+      // check for convergence:
+      // - relative change is less than the accuracy
+      // - no status changes
+      // - maximum flow change is less than the maximum flow change allowed
       if stats.relative_change(&self.network.options) < self.network.options.accuracy && !stats.status_changed && stats.max_dq_converted(&self.network.options) < max_flow_change {
 
+          // if pressure controls are active, apply them and continue the iteration
           if self.apply_pressure_controls(&mut state) {
             continue 'gga;
           }
 
+          // calculate the flow balance, update the node demands
           let flow_balance = self.flow_balance(&state.demands, &state.flows);
           if self.network.options.demand_model == DemandModel::PDA {
             state.demands = state.demand_flows.clone();
@@ -223,6 +227,7 @@ impl<'a> HydraulicSolver<'a> {
       }
   }
 
+  /// Update links and gather iteration statistics
   fn update_links(&self, state: &mut SolverState, coefficients: &ResistanceCoefficients) -> IterationStatistics {
 
     let mut stats = IterationStatistics::default();
@@ -232,15 +237,19 @@ impl<'a> HydraulicSolver<'a> {
       let g_inv = coefficients.g_inv[i];
       let y = coefficients.y[i];
     
+      // calculate the flow change
       let dq = y - g_inv * dh;
 
+      // update the maximum flow change
       if dq.abs() > stats.max_dq {
         stats.max_dq = dq.abs();
         stats.max_dq_index = i;
       }
 
+      // update the link flow
       state.flows[i] -= dq;
 
+      // check if the status of the link has changed
       let new_status = link.update_status(state.settings[i], state.statuses[i], state.flows[i], state.heads[link.start_node], state.heads[link.end_node]);
       if let Some(status) = new_status {
         if state.statuses[i] != LinkStatus::TempClosed && state.statuses[i] != LinkStatus::Xhead {
@@ -250,11 +259,14 @@ impl<'a> HydraulicSolver<'a> {
         state.statuses[i] = status;
       }
 
+      // update the sum of the flow changes and the sum of the flows
       stats.sum_dq += dq.abs();
       stats.sum_q  += state.flows[i].abs();
     }
     stats
   }
+
+  /// Update emitter flows and update iteration statistics
   fn update_emitter_flows(&self, state: &mut SolverState, stats: &mut IterationStatistics) {
     for (i, node) in self.network.nodes.iter().enumerate() {
       if let NodeType::Junction(junction) = &node.node_type {
@@ -274,6 +286,7 @@ impl<'a> HydraulicSolver<'a> {
 
   }
 
+  /// Update demand flows and update iteration statistics
   fn update_demand_flows(&self, state: &mut SolverState, stats: &mut IterationStatistics) {
 
     let options = &self.network.options;
@@ -303,6 +316,8 @@ impl<'a> HydraulicSolver<'a> {
 
   }
 
+  /// Apply pressure controls to the state
+  /// Returns true if any pressure controls were applie
   fn apply_pressure_controls(&self, state: &mut SolverState) -> bool {
 
     let mut changed = false;
@@ -343,9 +358,8 @@ impl<'a> HydraulicSolver<'a> {
 
   }
 
-  /// Fix a bad valve by setting its status to Closed
-  fn fix_bad_valve(&self, unknown_node_index: usize, statuses: &mut Vec<LinkStatus>) -> bool {
-    let node_index = self.node_to_unknown.iter().position(|&x| x.is_some() && x.unwrap() == unknown_node_index).unwrap();
+  /// Fix a bad control (PSV/PRV) valve by setting its status to Closed
+  fn fix_bad_valve(&self, node_index: usize, statuses: &mut Vec<LinkStatus>) -> bool {
     for (i, link) in self.network.links.iter().enumerate() {
       if link.start_node != node_index && link.end_node != node_index {
         continue;
@@ -379,73 +393,6 @@ impl<'a> HydraulicSolver<'a> {
     }
     let error = sum_demand - sum_supply;
     return FlowBalance { total_demand: sum_demand, total_supply: sum_supply, error: error };
-  }
-  fn map_nodes_to_rows(network: &Network, sparsity_pattern: &SymbolicSparseColMat<usize>, node_to_unknown: &Vec<Option<usize>>) -> Vec<Option<usize>> {
-
-    let mut node_rows = Vec::with_capacity(network.nodes.len());
-
-    for (i, _) in network.nodes.iter().enumerate() {
-      if let Some(idx) = node_to_unknown[i] {
-        let row = find_csc_index(sparsity_pattern.as_ref(), idx, idx).unwrap();
-        node_rows.push(Some(row));
-      } else {
-        node_rows.push(None);
-      }
-    }
-    node_rows
-  }
-
-  /// Map each link to its CSC (Compressed Sparse Column) indices
-  fn map_links_to_csc_indices(network: &Network, sparsity_pattern: &SymbolicSparseColMat<usize>, node_to_unknown: &Vec<Option<usize>>) -> Vec<CSCIndex> {
-
-    let mut csc_indices = Vec::with_capacity(network.links.len());
-    for link in network.links.iter() {
-      let mut csc_index = CSCIndex::default();
-      let u = node_to_unknown[link.start_node];
-      let v = node_to_unknown[link.end_node];
-
-      let sym = sparsity_pattern.as_ref();
-      if let Some(i) = u { csc_index.diag_u = find_csc_index(sym, i, i); }
-      if let Some(j) = v { csc_index.diag_v = find_csc_index(sym, j, j); }
-      if let (Some(i), Some(j)) = (u, v) {
-          let (row, col) = if i >= j { (i, j) } else { (j, i) };
-          csc_index.off_diag = find_csc_index(sym, row, col);
-      }
-      csc_indices.push(csc_index);
-    }
-    csc_indices
-  }
-
-  /// Build sparsity pattern
-  fn build_sparsity_pattern(network: &Network, node_to_unknown: &Vec<Option<usize>>) -> SymbolicSparseColMat<usize> {
-    let n_unknowns = node_to_unknown.iter().filter(|&x| x.is_some()).count();
-
-    let mut triplets = Vec::with_capacity(3 * network.links.len());
-
-    for link in network.links.iter() {
-      let u = node_to_unknown[link.start_node];
-      let v = node_to_unknown[link.end_node];
-      if let Some(i) = u { triplets.push(Triplet::new(i, i, 0.0)); }
-      if let Some(j) = v { triplets.push(Triplet::new(j, j, 0.0)); }
-      if let (Some(i), Some(j)) = (u, v) {
-        let (row, col) = if i >= j { (i, j) } else { (j, i) };
-        triplets.push(Triplet::new(row, col, 0.0));
-      }
-    }
-    let sparsity_matrix = SparseColMat::try_new_from_triplets(n_unknowns, n_unknowns, &triplets).unwrap();
-    let symbolic = sparsity_matrix.symbolic().to_owned().unwrap();
-
-    symbolic
-  }
-
-  /// Build global unknown-numbering map
-  fn build_unknown_numbering_map(network: &Network) -> Vec<Option<usize>> {
-    let mut unknown_id = 0;
-    let node_to_unknown: Vec<Option<usize>> = network.nodes
-        .iter()
-        .map(|n| if matches!(n.node_type, NodeType::Junction { .. }) { let id = unknown_id; unknown_id += 1; Some(id) } else { None })
-        .collect();
-    node_to_unknown
   }
 
 }
