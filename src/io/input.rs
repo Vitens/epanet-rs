@@ -739,17 +739,7 @@ impl Network {
         self.options.max_flow_change = Some(value.parse_field::<f64>("flow change")?);
       },
       "PATTERN" => {
-        let pattern: Box<str> = value.into();
-        if self.patterns.contains_key(&pattern) {
-          // set the default pattern to all junctions without a pattern
-          for node in self.nodes.iter_mut() {
-            if let NodeType::Junction(junction) = &mut node.node_type {
-              if junction.pattern.is_none() {
-                junction.pattern = Some(value.into());
-              }
-            }
-          }
-        }
+        self.options.pattern = Some(value.into());
       },
       "MINIMUM" => {
         let next_part = value.trim().to_uppercase();
