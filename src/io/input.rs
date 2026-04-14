@@ -627,8 +627,16 @@ impl Network {
     match option.as_str() {
       "UNITS" => {
         // set the flow units
-        self.options.flow_units = FlowUnits::from_str(value)
+        if value.trim().to_uppercase() == "SI" {
+          self.options.flow_units = FlowUnits::LPS;
+        }
+        else if value.trim().to_uppercase() == "US" {
+          self.options.flow_units = FlowUnits::CFS;
+        }
+        else {
+          self.options.flow_units = FlowUnits::from_str(value)
           .map_err(|_| InputError::new(format!("Invalid flow units: {}", value)))?;
+        }
         
         // set the unit system based on the flow units
         self.options.unit_system = match self.options.flow_units {
@@ -1264,6 +1272,16 @@ mod tests {
     assert_eq!(network.options.unit_system, UnitSystem::SI);
     assert_eq!(network.options.pressure_units, PressureUnits::METERS);
   }
+
+  #[test]
+  fn test_read_options_units_si() {
+    let mut network = test_network(false);
+    network.read_options("UNITS SI").unwrap();
+    assert_eq!(network.options.flow_units, FlowUnits::LPS);
+    assert_eq!(network.options.unit_system, UnitSystem::SI);
+    assert_eq!(network.options.pressure_units, PressureUnits::METERS);
+  }
+
 
   #[test]
   fn test_read_options_units_cfs() {
