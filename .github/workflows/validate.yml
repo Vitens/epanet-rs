@@ -42,22 +42,21 @@ jobs:
         IGNORED=0
         ERRORS=""
 
-        # Build ignore list from file (strip comments and blank lines)
+        # Build newline-separated ignore list from file
         IGNORE_NAMES=""
         if [ -f "$IGNORE_FILE" ]; then
           while IFS='|' read -r fname reason; do
             fname=$(echo "$fname" | xargs)
-            reason=$(echo "$reason" | xargs)
             [ -z "$fname" ] && continue
             [[ "$fname" == \#* ]] && continue
-            IGNORE_NAMES="$IGNORE_NAMES $fname"
+            IGNORE_NAMES="${IGNORE_NAMES}${fname}"$'\n'
           done < "$IGNORE_FILE"
         fi
 
         for inp in $(find /tmp/example-networks -name '*.inp' | sort); do
           name=$(basename "$inp")
           ignored=false
-          if echo "$IGNORE_NAMES" | grep -qw "$name"; then
+          if echo "$IGNORE_NAMES" | grep -qFx "$name"; then
             ignored=true
           fi
 
@@ -73,7 +72,7 @@ jobs:
               echo "⏱️ SKIPPED (timeout): $name"
               SKIP=$((SKIP + 1))
             elif [ "$ignored" = true ]; then
-              reason=$(grep -E "^\\s*${name}\\s*\\|" "$IGNORE_FILE" | head -1 | cut -d'|' -f2 | xargs)
+              reason=$(grep -F "$name" "$IGNORE_FILE" | head -1 | cut -d'|' -f2 | xargs)
               echo "::warning::$name failed but is on the ignore list: $reason"
               echo "⚠️ IGNORED (known failure): $name — $reason"
               IGNORED=$((IGNORED + 1))
