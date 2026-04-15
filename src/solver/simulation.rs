@@ -13,7 +13,7 @@ use crate::model::control::ControlCondition;
 
 pub struct Simulation<'a> {
   pub network: &'a Network,
-  pub solver: HydraulicSolver<'a>,
+  pub solver: HydraulicSolver,
   pub state: SolverState,
   pub time: usize,
   pub skip_timesteps: bool,
@@ -43,7 +43,7 @@ impl<'a> Simulation<'a> {
     self.time = time;
     Self::apply_patterns(self.network, &mut self.state, self.time);
     Self::apply_controls(self.network, &mut self.state, self.time);
-    self.state = self.solver.solve(&self.state)?;
+    self.state = self.solver.solve(self.network, &self.state)?;
     Ok(self.time)
   }
 
@@ -113,7 +113,7 @@ impl<'a> Simulation<'a> {
     // First solve the first time step, and use that as the initial state for the parallel solve
     // allowing for faster convergence.
     Self::apply_patterns(self.network, &mut self.state, 0);
-    self.state = self.solver.solve(&self.state).unwrap();
+    self.state = self.solver.solve(self.network, &self.state).unwrap();
     results.append(&self.state, 0);
 
     let initial_state = self.state.clone();
@@ -122,7 +122,7 @@ impl<'a> Simulation<'a> {
     let par_results: Vec<SolverState> = (1..report_steps).into_par_iter().map(|step| {
       let mut state = initial_state.clone();
       Self::apply_patterns(self.network, &mut state, step * report_timestep);
-      self.solver.solve(&state).unwrap()
+      self.solver.solve(self.network, &state).unwrap()
     }).collect();
 
     // update the results vector with the parallel solve results
