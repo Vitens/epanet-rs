@@ -2,7 +2,7 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 
 use crate::model::network::Network;
-use crate::solver::simulation::Simulation;
+use crate::simulation::Simulation;
 
 use super::ErrorCode;
 

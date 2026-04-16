@@ -5,5 +5,6 @@ pub mod model;
 pub mod solver;
 pub mod constants;
 pub mod utils;
+pub mod simulation;
 pub mod error;
 pub mod ffi;

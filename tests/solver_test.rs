@@ -1,7 +1,7 @@
 //! Integration test for the hydraulic solver using pump.inp
 
 use epanet_rs::model::network::Network;
-use epanet_rs::solver::simulation::Simulation;
+use epanet_rs::simulation::Simulation;
 use epanet_rs::solver::result::SolverResult;
 
 fn verify_heads_and_flows(network: &Network, result: &SolverResult, expected_heads: &Vec<(&str, f64)>, expected_flows: &Vec<(&str, f64)>) {

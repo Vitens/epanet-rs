@@ -7,7 +7,7 @@ use std::process::Stdio;
 use simplelog::{info, warn, error};
 
 use crate::model::network::Network;
-use crate::solver::simulation::Simulation;
+use crate::simulation::Simulation;
 use crate::utils::binfile::read_outfile;
 
 pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bool) -> bool {

@@ -7,7 +7,7 @@ use simplelog::{format_description};
 
 
 use epanet_rs::model::network::Network;
-use epanet_rs::solver::simulation::Simulation;
+use epanet_rs::simulation::Simulation;
 use epanet_rs::utils::validate_epanet::validate_with_epanet;
 
 const BANNER: [&str; 6] = [

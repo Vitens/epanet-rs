@@ -13,5 +13,5 @@ mod project;
 mod error_codes;
 
 pub use project::Project;
-pub use crate::solver::simulation::Simulation;
+pub use crate::simulation::Simulation;
 pub use error_codes::ErrorCode;
