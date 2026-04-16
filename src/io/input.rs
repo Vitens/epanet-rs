@@ -1185,7 +1185,7 @@ mod tests {
     let mut network = test_network(false);
     let node = network.read_tank("T3  100").unwrap();
 
-    let NodeType::Reservoir(reservoir) = &node.node_type else {
+    let NodeType::Reservoir(_reservoir) = &node.node_type else {
       panic!("Expected Reservoir node type");
     };
     assert_eq!(node.elevation, 100.0);

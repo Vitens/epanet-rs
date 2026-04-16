@@ -2,6 +2,7 @@ use rayon::prelude::*;
 
 use simplelog::warn;
 
+use crate::error::SolverError;
 use crate::solver::hydraulicsolver::HydraulicSolver;
 use crate::solver::state::SolverState;
 use crate::solver::result::SolverResult;
@@ -23,8 +24,8 @@ impl<'a> Simulation<'a> {
 
   /// Creates a new simulation, allocating the hydraulic solver and initializing state.
   /// Functionally equivalent to EN_openH followed by EN_initH.
-  pub fn new(network: &'a Network) -> Result<Self, String> {
-    let solver = HydraulicSolver::new(network).map_err(|e| format!("Failed to create hydraulic solver: {}", e))?;
+  pub fn new(network: &'a Network) -> Result<Self, SolverError> {
+    let solver = HydraulicSolver::new(network)?;
     let state = SolverState::new_with_initial_values(network);
     Ok(Self { network, solver, state, time: 0, skip_timesteps: true })
   }
@@ -39,7 +40,7 @@ impl<'a> Simulation<'a> {
   /// Applies patterns and controls, then solves hydraulics at the given time.
   /// Returns the solved state at the given time.
   /// Equivalent to EN_runH.
-  pub fn run_hydraulics(&mut self, time: usize) -> Result<usize, String> {
+  pub fn run_hydraulics(&mut self, time: usize) -> Result<usize, SolverError> {
     self.time = time;
     Self::apply_patterns(self.network, &mut self.state, self.time);
     Self::apply_controls(self.network, &mut self.state, self.time);
@@ -66,7 +67,7 @@ impl<'a> Simulation<'a> {
   /// Equivalent to EN_solveH.
   /// Simulations can be run in parallel or sequentially. Parallel mode is only supported for networks without tanks or pressure controls.
   /// Returns a SolverResult containing the flows and heads at each report step.
-  pub fn solve_hydraulics(&mut self, parallel: bool) -> Result<SolverResult, String> {
+  pub fn solve_hydraulics(&mut self, parallel: bool) -> Result<SolverResult, SolverError> {
     self.initialize_hydraulics();
 
     if parallel && !self.network.has_tanks() && !self.network.has_pressure_controls() {
@@ -101,7 +102,7 @@ impl<'a> Simulation<'a> {
   }
 
   /// Solves the hydraulics in parallel, only supported for networks without tanks or pressure controls.
-  fn solve_parallel(&mut self) -> Result<SolverResult, String> {
+  fn solve_parallel(&mut self) -> Result<SolverResult, SolverError> {
 
     // parallel solve is only supported for networks without tanks or pressure controls, so we only use the report timestep to determine the number of steps
     let report_timestep = self.network.options.time_options.report_timestep;
@@ -119,7 +120,7 @@ impl<'a> Simulation<'a> {
     let initial_state = self.state.clone();
 
     // Solve the remaining time steps in parallel
-    let par_results: Vec<Result<SolverState, String>> = (1..report_steps).into_par_iter().map(|step| {
+    let par_results: Vec<Result<SolverState, SolverError>> = (1..report_steps).into_par_iter().map(|step| {
       let mut state = initial_state.clone();
       Self::apply_patterns(self.network, &mut state, step * report_timestep);
       self.solver.solve(self.network, &state)

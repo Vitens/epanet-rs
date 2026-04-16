@@ -18,6 +18,7 @@ log = "0.4"
 simplelog = { version = "0.12.2", features = ["paris"] }
 time = { version = "0.3", features = ["macros"] }
 strum = { version = "0.28", features = ["derive"] }
+thiserror = "2.0.18"
 
 [profile.release]
 debug = "line-tables-only"
