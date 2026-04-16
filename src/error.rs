@@ -14,11 +14,22 @@ pub enum SolverError {
 }
 
 #[derive(Debug, Error)]
-#[error("{message}{}", format_suffix(.line, .context))]
-pub struct InputError {
-  pub message: String,
-  pub line: Option<usize>,
-  pub context: Option<String>,
+pub enum InputError {
+  #[error("Cannot open file '{path}': {source}")]
+  FileOpen {
+    path: String,
+    source: std::io::Error,
+  },
+
+  #[error("IO error: {0}")]
+  FileRead(#[from] std::io::Error),
+
+  #[error("{message}{}", format_suffix(.line, .context))]
+  Parse {
+    message: String,
+    line: Option<usize>,
+    context: Option<String>,
+  },
 }
 
 fn format_suffix(line: &Option<usize>, context: &Option<String>) -> String {
@@ -33,24 +44,31 @@ fn format_suffix(line: &Option<usize>, context: &Option<String>) -> String {
 }
 
 impl InputError {
+  /// Creates a parse error. This is the most common constructor.
   pub fn new(message: impl Into<String>) -> Self {
-    Self { message: message.into(), line: None, context: None }
+    Self::Parse { message: message.into(), line: None, context: None }
   }
 
-  pub fn with_line(mut self, line: usize) -> Self {
-    self.line = Some(line);
+  pub fn file_open(path: impl Into<String>, source: std::io::Error) -> Self {
+    Self::FileOpen { path: path.into(), source }
+  }
+
+  pub fn with_line(mut self, line_num: usize) -> Self {
+    if let Self::Parse { ref mut line, .. } = self {
+      *line = Some(line_num);
+    }
     self
   }
 
   pub fn with_context(mut self, context: impl Into<String>) -> Self {
-    self.context = Some(context.into());
+    if let Self::Parse { context: ref mut ctx, .. } = self {
+      *ctx = Some(context.into());
+    }
     self
   }
-}
 
-impl From<std::io::Error> for InputError {
-  fn from(err: std::io::Error) -> Self {
-    InputError::new(format!("IO error: {}", err))
+  pub fn is_file_error(&self) -> bool {
+    matches!(self, Self::FileOpen { .. } | Self::FileRead(_))
   }
 }
 

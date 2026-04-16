@@ -11,6 +11,7 @@
 
 mod project;
 mod error_codes;
+pub mod enums;
 
 pub use project::Project;
 pub use crate::simulation::Simulation;

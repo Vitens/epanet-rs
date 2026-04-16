@@ -60,7 +60,7 @@ impl Network {
 
   pub fn read_msgpack(&mut self, msgpack: &str) -> Result<(), InputError> {
     let file = File::open(msgpack)
-      .map_err(|e| InputError::new(format!("Failed to open file '{}': {}", msgpack, e)))?;
+      .map_err(|e| InputError::file_open(msgpack, e))?;
     let reader = BufReader::new(file);
     let network: Network = rmp_serde::from_read(reader)
       .map_err(|e| InputError::new(format!("Failed to parse msgpack file '{}': {}", msgpack, e)))?;
@@ -71,7 +71,7 @@ impl Network {
   /// Read a network from a JSON file using serde_json.
   pub fn read_json(&mut self, json: &str) -> Result<(), InputError> {
     let file = File::open(json)
-      .map_err(|e| InputError::new(format!("Failed to open file '{}': {}", json, e)))?;
+      .map_err(|e| InputError::file_open(json, e))?;
     let reader = BufReader::new(file);
     let network: Network = serde_json::from_reader(reader)
       .map_err(|e| InputError::new(format!("Failed to parse JSON file '{}': {}", json, e)))?;
@@ -86,7 +86,7 @@ impl Network {
 
     // open the INP file
     let file = File::open(inp)
-      .map_err(|e| InputError::new(format!("Failed to open file '{}': {}", inp, e)))?;
+      .map_err(|e| InputError::file_open(inp, e))?;
 
     // create a new reader
     let mut reader = BufReader::new(file);
