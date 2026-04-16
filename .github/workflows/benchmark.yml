@@ -12,7 +12,7 @@ jobs:
 
     steps:
     - name: Checkout epanet-rs
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Build epanet-rs (release)
       run: cargo build --release
