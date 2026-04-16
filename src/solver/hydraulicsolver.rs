@@ -14,6 +14,7 @@ use crate::model::units::Cfs;
 use simplelog::{warn, debug, error};
 
 use crate::constants::{BIG_VALUE, Q_ZERO, PDA_MIN_DIFF};
+use crate::error::SolverError;
 use crate::model::node::NodeType;
 use crate::model::link::{LinkType, LinkTrait, LinkStatus};
 use crate::model::network::Network;
@@ -71,7 +72,7 @@ pub struct HydraulicSolver {
 
 impl HydraulicSolver {
 
-  pub fn new(network: &Network) -> Result<Self, String> {
+  pub fn new(network: &Network) -> Result<Self, SolverError> {
     // build the sparsity pattern and the global unknown-numbering map
     let node_to_unknown = build_unknown_numbering_map(network);
     let sparsity_pattern = build_sparsity_pattern(network, &node_to_unknown);
@@ -87,18 +88,18 @@ impl HydraulicSolver {
     // precompute the AMD fill-reducing permutation for error mapping
     let perm_fwd = compute_amd_permutation(&sparsity_pattern, &node_to_unknown);
     // precompute the symbolic Cholesky factorization
-    let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).map_err(|e| format!("Failed to compute symbolic Cholesky factorization: {}", e))?;
+    let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).map_err(|e| SolverError::Factorization(e.to_string()))?;
 
     Ok(Self { node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows, network_version: network.network_version })
   }
 
   /// Solve the network for a single timestep using the Global Gradient Algorithm (Todini & Pilati, 1987).
   /// Takes a solver state and returns a new state after convergence.
-  pub fn solve(&self, network: &Network, state: &SolverState) -> Result<SolverState, String> {
+  pub fn solve(&self, network: &Network, state: &SolverState) -> Result<SolverState, SolverError> {
     
     // verify that the network version matches the solver version
     if self.network_version != network.network_version {
-      return Err(format!("Network topology has changed since the solver was created, please recreate the solver"));
+      return Err(SolverError::StaleTopology);
     }
 
     // clone the solver state to avoid modifying the original
@@ -151,12 +152,12 @@ impl HydraulicSolver {
             grounded_nodes[node_index] = true;
             continue 'gga;
           }
-          let error_message = format!("Singular matrix: check connectivity at node '{}'", network.nodes[node_index].id);
-          error!("{}", error_message);
-          return Err(error_message);
+          let err = SolverError::SingularMatrix { node_id: network.nodes[node_index].id.clone() };
+          error!("{}", err);
+          return Err(err);
         }
         Err(e) => {
-          return Err(e.to_string());
+          return Err(SolverError::Factorization(e.to_string()));
         }
       };
 
@@ -210,7 +211,7 @@ impl HydraulicSolver {
         return Ok(state);
       }
     }
-    Err(format!("Maximum number of iterations reached: {}", network.options.max_trials))
+    Err(SolverError::MaxIterations { max_trials: network.options.max_trials })
   }
 
 

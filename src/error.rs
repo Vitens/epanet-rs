@@ -1,10 +1,35 @@
 use std::str::FromStr;
+use thiserror::Error;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
+pub enum SolverError {
+  #[error("Singular matrix: check connectivity at node '{node_id}'")]
+  SingularMatrix { node_id: Box<str> },
+  #[error("Maximum number of iterations reached: {max_trials}")]
+  MaxIterations { max_trials: usize },
+  #[error("Network topology has changed since the solver was created, please recreate the solver")]
+  StaleTopology,
+  #[error("Failed to compute Cholesky factorization: {0}")]
+  Factorization(String),
+}
+
+#[derive(Debug, Error)]
+#[error("{message}{}", format_suffix(.line, .context))]
 pub struct InputError {
   pub message: String,
   pub line: Option<usize>,
   pub context: Option<String>,
+}
+
+fn format_suffix(line: &Option<usize>, context: &Option<String>) -> String {
+  let mut s = String::new();
+  if let Some(l) = line {
+    s.push_str(&format!(" (line {})", l));
+  }
+  if let Some(ctx) = context {
+    s.push_str(&format!(" [{}]", ctx));
+  }
+  s
 }
 
 impl InputError {
@@ -22,21 +47,6 @@ impl InputError {
     self
   }
 }
-
-impl std::fmt::Display for InputError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    write!(f, "{}", self.message)?;
-    if let Some(line) = self.line {
-      write!(f, " (line {})", line)?;
-    }
-    if let Some(ctx) = &self.context {
-      write!(f, " [{}]", ctx)?;
-    }
-    Ok(())
-  }
-}
-
-impl std::error::Error for InputError {}
 
 impl From<std::io::Error> for InputError {
   fn from(err: std::io::Error) -> Self {
