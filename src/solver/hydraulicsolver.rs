@@ -50,9 +50,7 @@ impl IterationStatistics {
   }
 }
 
-pub struct HydraulicSolver<'a> {
-  /// network
-  pub network: &'a Network, 
+pub struct HydraulicSolver {
   /// global unknown-numbering map: node_to_unknown[node_index] = unknown_index
   pub node_to_unknown: Vec<Option<usize>>,
   /// symbolic sparsity pattern
@@ -67,11 +65,13 @@ pub struct HydraulicSolver<'a> {
   pub csc_indices: Vec<CSCIndex>,
   /// precomputed indices for the rows of the Jacobian matrix for each node
   pub node_rows: Vec<Option<usize>>,
+  /// network version used to create matrices, should match the network version
+  pub network_version: i32,
 }
 
-impl<'a> HydraulicSolver<'a> {
+impl HydraulicSolver {
 
-  pub fn new(network: &'a Network) -> Self {
+  pub fn new(network: &Network) -> Result<Self, String> {
     // build the sparsity pattern and the global unknown-numbering map
     let node_to_unknown = build_unknown_numbering_map(network);
     let sparsity_pattern = build_sparsity_pattern(network, &node_to_unknown);
@@ -87,14 +87,19 @@ impl<'a> HydraulicSolver<'a> {
     // precompute the AMD fill-reducing permutation for error mapping
     let perm_fwd = compute_amd_permutation(&sparsity_pattern, &node_to_unknown);
     // precompute the symbolic Cholesky factorization
-    let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).expect("Failed to compute symbolic Cholesky factorization");
+    let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).map_err(|e| format!("Failed to compute symbolic Cholesky factorization: {}", e))?;
 
-    Self { network, node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows }
+    Ok(Self { node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows, network_version: network.network_version })
   }
 
   /// Solve the network for a single timestep using the Global Gradient Algorithm (Todini & Pilati, 1987).
   /// Takes a solver state and returns a new state after convergence.
-  pub fn solve(&self, state: &SolverState) -> Result<SolverState, String> {
+  pub fn solve(&self, network: &Network, state: &SolverState) -> Result<SolverState, String> {
+    
+    // verify that the network version matches the solver version
+    if self.network_version != network.network_version {
+      return Err(format!("Network topology has changed since the solver was created, please recreate the solver"));
+    }
 
     // clone the solver state to avoid modifying the original
     let mut state = state.clone();
@@ -104,24 +109,24 @@ impl<'a> HydraulicSolver<'a> {
     let mut values = vec![0.0; self.sparsity_pattern.as_ref().row_idx().len()];
     let mut rhs = vec![0.0; unknown_nodes];
 
-    let mut link_coefficients = ResistanceCoefficients::new(self.network.links.len());
+    let mut link_coefficients = ResistanceCoefficients::new(network.links.len());
     let mut jac = self.jac.clone();
 
-    let mut excess_flows = vec![0.0; self.network.nodes.len()];
+    let mut excess_flows = vec![0.0; network.nodes.len()];
 
-    let mut grounded_nodes = vec![false; self.network.nodes.len()];
+    let mut grounded_nodes = vec![false; network.nodes.len()];
 
-    'gga: for iteration in 1..=self.network.options.max_trials {
+    'gga: for iteration in 1..=network.options.max_trials {
 
       values.fill(0.0);
       rhs.fill(0.0);
 
-      if self.network.contains_pressure_control_valve {
-        self.calculate_excess_flows(&state, &mut excess_flows);
+      if network.contains_pressure_control_valve {
+        self.calculate_excess_flows(network, &state, &mut excess_flows);
       }
 
       // assemble the Jacobian matrix
-      self.assemble_jacobian(&mut state, &mut values, &mut rhs, &mut link_coefficients, &excess_flows, &grounded_nodes);
+      self.assemble_jacobian(network, &mut state, &mut values, &mut rhs, &mut link_coefficients, &excess_flows, &grounded_nodes);
 
       // copy the values to the Jacobian matrix
       jac.val_mut().copy_from_slice(&values);
@@ -137,16 +142,16 @@ impl<'a> HydraulicSolver<'a> {
           let node_index = self.node_to_unknown.iter().position(|&x| x.is_some() && x.unwrap() == original_unknown).unwrap();
 
           // if the factorization failed, attempt to fix the problem by first fixing a possible bad valve
-          if self.fix_bad_valve(node_index, &mut state.statuses) {
+          if self.fix_bad_valve(network, node_index, &mut state.statuses) {
             continue 'gga;
           }
           // otherwise, ground the node causing the disconnect with a virtual reservoir
           if !grounded_nodes[node_index] {
-            warn!("Grounding node '{}' with virtual reservoir (elevation 0) to fix singular matrix", self.network.nodes[node_index].id);
+            warn!("Grounding node '{}' with virtual reservoir (elevation 0) to fix singular matrix", network.nodes[node_index].id);
             grounded_nodes[node_index] = true;
             continue 'gga;
           }
-          let error_message = format!("Singular matrix: check connectivity at node '{}'", self.network.nodes[node_index].id);
+          let error_message = format!("Singular matrix: check connectivity at node '{}'", network.nodes[node_index].id);
           error!("{}", error_message);
           return Err(error_message);
         }
@@ -166,35 +171,35 @@ impl<'a> HydraulicSolver<'a> {
       }
 
       // update the links and emitters and gather iteration statistics 
-      let mut stats = self.update_links(&mut state, &link_coefficients);
-      self.update_emitter_flows(&mut state, &mut stats);
+      let mut stats = self.update_links(network, &mut state, &link_coefficients);
+      self.update_emitter_flows(network, &mut state, &mut stats);
 
-      if self.network.options.demand_model == DemandModel::PDA {
-        self.update_demand_flows(&mut state, &mut stats);
+      if network.options.demand_model == DemandModel::PDA {
+        self.update_demand_flows(network, &mut state, &mut stats);
       }
 
       // close/open links connected to tanks based on tank level
-      self.update_tank_links(&mut state);
+      self.update_tank_links(network, &mut state);
 
-      debug!(">> Iteration {}: Relative change: {:.6}, Status changed: {}", iteration, stats.relative_change(&self.network.options), stats.status_changed);
-      debug!(">>>> Max flow change: {:.6} for link {}", stats.max_dq_converted(&self.network.options), self.network.links[stats.max_dq_index].id);
+      debug!(">> Iteration {}: Relative change: {:.6}, Status changed: {}", iteration, stats.relative_change(&network.options), stats.status_changed);
+      debug!(">>>> Max flow change: {:.6} for link {}", stats.max_dq_converted(&network.options), network.links[stats.max_dq_index].id);
 
-      let max_flow_change = self.network.options.max_flow_change.unwrap_or(BIG_VALUE);
+      let max_flow_change = network.options.max_flow_change.unwrap_or(BIG_VALUE);
 
       // check for convergence:
       // - relative change is less than the accuracy
       // - no status changes
       // - maximum flow change is less than the maximum flow change allowed
-      if stats.relative_change(&self.network.options) < self.network.options.accuracy && !stats.status_changed && stats.max_dq_converted(&self.network.options) < max_flow_change {
+      if stats.relative_change(&network.options) < network.options.accuracy && !stats.status_changed && stats.max_dq_converted(&network.options) < max_flow_change {
 
           // if pressure controls are active, apply them and continue the iteration
-          if self.apply_pressure_controls(&mut state) {
+          if self.apply_pressure_controls(network, &mut state) {
             continue 'gga;
           }
 
           // calculate the flow balance, update the node demands
-          let flow_balance = self.flow_balance(&state.demands, &state.flows);
-          if self.network.options.demand_model == DemandModel::PDA {
+          let flow_balance = self.flow_balance(network, &state.demands, &state.flows);
+          if network.options.demand_model == DemandModel::PDA {
             state.demands = state.demand_flows.clone();
           }
           for i in 0..state.emitter_flows.len() {
@@ -205,22 +210,22 @@ impl<'a> HydraulicSolver<'a> {
         return Ok(state);
       }
     }
-    Err(format!("Maximum number of iterations reached: {}", self.network.options.max_trials))
+    Err(format!("Maximum number of iterations reached: {}", network.options.max_trials))
   }
 
 
-  fn calculate_excess_flows(&self, state: &SolverState, excess_flows: &mut Vec<Cfs>) {
+  fn calculate_excess_flows(&self, network: &Network, state: &SolverState, excess_flows: &mut Vec<Cfs>) {
       for (i, emitter_flow) in state.emitter_flows.iter().enumerate() {
         excess_flows[i] = -emitter_flow;
       }
       for (i, demand) in state.demands.iter().enumerate() {
-        if self.network.options.demand_model == DemandModel::PDA {
+        if network.options.demand_model == DemandModel::PDA {
           excess_flows[i] -= state.demand_flows[i];
         } else {
           excess_flows[i] -= demand;
         }
       }
-      for (i, link) in self.network.links.iter().enumerate() {
+      for (i, link) in network.links.iter().enumerate() {
         let q = state.flows[i];
         excess_flows[link.start_node] -= q;
         excess_flows[link.end_node] += q;
@@ -228,11 +233,11 @@ impl<'a> HydraulicSolver<'a> {
   }
 
   /// Update links and gather iteration statistics
-  fn update_links(&self, state: &mut SolverState, coefficients: &ResistanceCoefficients) -> IterationStatistics {
+  fn update_links(&self, network: &Network, state: &mut SolverState, coefficients: &ResistanceCoefficients) -> IterationStatistics {
 
     let mut stats = IterationStatistics::default();
 
-    for (i, link) in self.network.links.iter().enumerate() {
+    for (i, link) in network.links.iter().enumerate() {
       let dh = state.heads[link.start_node] - state.heads[link.end_node];
       let g_inv = coefficients.g_inv[i];
       let y = coefficients.y[i];
@@ -267,12 +272,12 @@ impl<'a> HydraulicSolver<'a> {
   }
 
   /// Update emitter flows and update iteration statistics
-  fn update_emitter_flows(&self, state: &mut SolverState, stats: &mut IterationStatistics) {
-    for (i, node) in self.network.nodes.iter().enumerate() {
+  fn update_emitter_flows(&self, network: &Network, state: &mut SolverState, stats: &mut IterationStatistics) {
+    for (i, node) in network.nodes.iter().enumerate() {
       if let NodeType::Junction(junction) = &node.node_type {
         if junction.emitter_coefficient > 0.0 {
           let dh = state.heads[i] - node.elevation;
-          let (g_inv, y) = junction.emitter_coefficients(state.emitter_flows[i], self.network.options.emitter_exponent);
+          let (g_inv, y) = junction.emitter_coefficients(state.emitter_flows[i], network.options.emitter_exponent);
           let dq = (y - dh) * g_inv;
           state.emitter_flows[i] -= dq;
           stats.sum_dq += dq.abs();
@@ -287,14 +292,14 @@ impl<'a> HydraulicSolver<'a> {
   }
 
   /// Update demand flows and update iteration statistics
-  fn update_demand_flows(&self, state: &mut SolverState, stats: &mut IterationStatistics) {
+  fn update_demand_flows(&self, network: &Network, state: &mut SolverState, stats: &mut IterationStatistics) {
 
-    let options = &self.network.options;
+    let options = &network.options;
 
     let dp = (options.required_pressure - options.minimum_pressure).max(PDA_MIN_DIFF);
     let n = 1.0 / options.pressure_exponent;
 
-    for (i, node) in self.network.nodes.iter().enumerate() {
+    for (i, node) in network.nodes.iter().enumerate() {
       if let NodeType::Junction(junction) = &node.node_type {
         if state.demands[i] > 0.0 {
 
@@ -317,16 +322,16 @@ impl<'a> HydraulicSolver<'a> {
   }
 
   /// Apply pressure controls to the state
-  /// Returns true if any pressure controls were applie
-  fn apply_pressure_controls(&self, state: &mut SolverState) -> bool {
+  /// Returns true if any pressure controls were applied
+  fn apply_pressure_controls(&self, network: &Network, state: &mut SolverState) -> bool {
 
     let mut changed = false;
 
-    for control in &self.network.controls {
+    for control in &network.controls {
       if matches!(control.condition, ControlCondition::LowPressure { .. } | ControlCondition::HighPressure { .. }) {
-        let active = control.is_active(state, self.network, 0, 0);
+        let active = control.is_active(state, network, 0, 0);
         if active {
-          changed = changed || control.activate(state, self.network);
+          changed = changed || control.activate(state, network);
         }
       }
     }
@@ -334,8 +339,8 @@ impl<'a> HydraulicSolver<'a> {
   }
 
   /// Update the links connected to tanks and gather flow balance into/out of tanks
-  fn update_tank_links(&self, state: &mut SolverState) {
-    for (tank_index, node) in self.network.nodes.iter().enumerate() {
+  fn update_tank_links(&self, network: &Network, state: &mut SolverState) {
+    for (tank_index, node) in network.nodes.iter().enumerate() {
 
       if let NodeType::Tank(tank) = &node.node_type {
         state.demands[tank_index] = 0.0;
@@ -359,8 +364,8 @@ impl<'a> HydraulicSolver<'a> {
   }
 
   /// Fix a bad control (PSV/PRV) valve by setting its status to Closed
-  fn fix_bad_valve(&self, node_index: usize, statuses: &mut Vec<LinkStatus>) -> bool {
-    for (i, link) in self.network.links.iter().enumerate() {
+  fn fix_bad_valve(&self, network: &Network, node_index: usize, statuses: &mut Vec<LinkStatus>) -> bool {
+    for (i, link) in network.links.iter().enumerate() {
       if link.start_node != node_index && link.end_node != node_index {
         continue;
       }
@@ -378,16 +383,16 @@ impl<'a> HydraulicSolver<'a> {
   }
 
   /// Calculate the flow balance error
-  fn flow_balance(&self, demands: &Vec<Cfs>, flows: &Vec<Cfs>) -> FlowBalance {
+  fn flow_balance(&self, network: &Network, demands: &Vec<Cfs>, flows: &Vec<Cfs>) -> FlowBalance {
 
     let sum_demand: Cfs = demands.iter().sum();
 
     let mut sum_supply: Cfs = 0.0;
-    for (i, link) in self.network.links.iter().enumerate() {
-      if !matches!(self.network.nodes[link.end_node].node_type, NodeType::Junction { .. }) {
+    for (i, link) in network.links.iter().enumerate() {
+      if !matches!(network.nodes[link.end_node].node_type, NodeType::Junction { .. }) {
         sum_supply -= flows[i];
       }
-      if !matches!(self.network.nodes[link.start_node].node_type, NodeType::Junction { .. }) {
+      if !matches!(network.nodes[link.start_node].node_type, NodeType::Junction { .. }) {
         sum_supply += flows[i];
       }
     }

@@ -142,8 +142,14 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, print
   debug!("Network loaded in {:?}", end_time.duration_since(start_time));
 
   let start_time = Instant::now();
-  let mut simulation = Simulation::new(&network);
-  let result = simulation.solve_hydraulics(parallel);
+  let mut simulation = Simulation::new(&network).unwrap_or_else(|e| {
+    error!("Failed to create simulation: {}", e);
+    std::process::exit(1);
+  });
+  let result = simulation.solve_hydraulics(parallel).unwrap_or_else(|e| {
+    error!("Solver failed: {}", e);
+    std::process::exit(1);
+  });
   let end_time = Instant::now();
   info!("Solver finished in {:?}", end_time.duration_since(start_time));
 

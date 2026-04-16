@@ -13,7 +13,7 @@ use crate::model::control::ControlCondition;
 
 pub struct Simulation<'a> {
   pub network: &'a Network,
-  pub solver: HydraulicSolver<'a>,
+  pub solver: HydraulicSolver,
   pub state: SolverState,
   pub time: usize,
   pub skip_timesteps: bool,
@@ -23,10 +23,10 @@ impl<'a> Simulation<'a> {
 
   /// Creates a new simulation, allocating the hydraulic solver and initializing state.
   /// Functionally equivalent to EN_openH followed by EN_initH.
-  pub fn new(network: &'a Network) -> Self {
-    let solver = HydraulicSolver::new(network);
+  pub fn new(network: &'a Network) -> Result<Self, String> {
+    let solver = HydraulicSolver::new(network).map_err(|e| format!("Failed to create hydraulic solver: {}", e))?;
     let state = SolverState::new_with_initial_values(network);
-    Self { network, solver, state, time: 0, skip_timesteps: true }
+    Ok(Self { network, solver, state, time: 0, skip_timesteps: true })
   }
 
   /// Resets the simulation to initial conditions (time = 0, fresh state).
@@ -43,7 +43,7 @@ impl<'a> Simulation<'a> {
     self.time = time;
     Self::apply_patterns(self.network, &mut self.state, self.time);
     Self::apply_controls(self.network, &mut self.state, self.time);
-    self.state = self.solver.solve(&self.state)?;
+    self.state = self.solver.solve(self.network, &self.state)?;
     Ok(self.time)
   }
 
@@ -66,7 +66,7 @@ impl<'a> Simulation<'a> {
   /// Equivalent to EN_solveH.
   /// Simulations can be run in parallel or sequentially. Parallel mode is only supported for networks without tanks or pressure controls.
   /// Returns a SolverResult containing the flows and heads at each report step.
-  pub fn solve_hydraulics(&mut self, parallel: bool) -> SolverResult {
+  pub fn solve_hydraulics(&mut self, parallel: bool) -> Result<SolverResult, String> {
     self.initialize_hydraulics();
 
     if parallel && !self.network.has_tanks() && !self.network.has_pressure_controls() {
@@ -84,7 +84,7 @@ impl<'a> Simulation<'a> {
     // Run the simulation step by step
     let mut time = 0;
     loop {
-      let t = self.run_hydraulics(time).unwrap();
+      let t = self.run_hydraulics(time)?;
       // Append the results to the SolverResult if the time step is a report step
       if t % report_timestep == 0 {
         results.append(&self.state, t / report_timestep);
@@ -97,11 +97,11 @@ impl<'a> Simulation<'a> {
 
     // Convert the units of the results to the original units
     results.convert_units(&self.network.options.flow_units, &self.network.options.unit_system);
-    results
+    Ok(results)
   }
 
   /// Solves the hydraulics in parallel, only supported for networks without tanks or pressure controls.
-  fn solve_parallel(&mut self) -> SolverResult {
+  fn solve_parallel(&mut self) -> Result<SolverResult, String> {
 
     // parallel solve is only supported for networks without tanks or pressure controls, so we only use the report timestep to determine the number of steps
     let report_timestep = self.network.options.time_options.report_timestep;
@@ -113,26 +113,26 @@ impl<'a> Simulation<'a> {
     // First solve the first time step, and use that as the initial state for the parallel solve
     // allowing for faster convergence.
     Self::apply_patterns(self.network, &mut self.state, 0);
-    self.state = self.solver.solve(&self.state).unwrap();
+    self.state = self.solver.solve(self.network, &self.state)?;
     results.append(&self.state, 0);
 
     let initial_state = self.state.clone();
 
     // Solve the remaining time steps in parallel
-    let par_results: Vec<SolverState> = (1..report_steps).into_par_iter().map(|step| {
+    let par_results: Vec<Result<SolverState, String>> = (1..report_steps).into_par_iter().map(|step| {
       let mut state = initial_state.clone();
       Self::apply_patterns(self.network, &mut state, step * report_timestep);
-      self.solver.solve(&state).unwrap()
+      self.solver.solve(self.network, &state)
     }).collect();
 
     // update the results vector with the parallel solve results
-    for (step, step_result) in par_results.iter().enumerate() {
-      results.append(step_result, step + 1);
+    for (step, step_result) in par_results.into_iter().enumerate() {
+      results.append(&step_result?, step + 1);
     }
 
     // Convert the units of the results to the original units
     results.convert_units(&self.network.options.flow_units, &self.network.options.unit_system);
-    results
+    Ok(results)
   }
 
   /// Applies demand and head patterns to the state at the given time.
