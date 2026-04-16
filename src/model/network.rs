@@ -38,6 +38,9 @@ pub struct Network {
     pub link_map: HashMap<Box<str>, usize>,
     #[serde(skip)]
     pub contains_pressure_control_valve: bool,
+    #[serde(skip)]
+    // Network version, incremented when the network topology is modified
+    pub network_version: i32,
 }
 impl Network {
   /// Check if the network has any tanks
@@ -111,6 +114,7 @@ impl<'de> Deserialize<'de> for Network {
       node_map,
       link_map,
       contains_pressure_control_valve,
+      network_version: 0,
     };
 
     // convert the network to standard units

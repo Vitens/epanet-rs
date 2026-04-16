@@ -25,9 +25,18 @@ pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bo
     error!("Failed to load network: {}", e);
     std::process::exit(1);
   });
-  let mut simulation = Simulation::new(&network);
+  let mut simulation = Simulation::new(&network).unwrap_or_else(|e| {
+    error!("Failed to create simulation: {}", e);
+    std::process::exit(1);
+  });
   simulation.skip_timesteps = false;
-  let rs_result = simulation.solve_hydraulics(parallel);
+  let rs_result = match simulation.solve_hydraulics(parallel) {
+    Ok(result) => result,
+    Err(e) => {
+      error!("Solver failed: {}", e);
+      return false;
+    }
+  };
 
   info!("Running EPANET to validate results");
 

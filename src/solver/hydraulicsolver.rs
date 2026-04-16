@@ -65,11 +65,13 @@ pub struct HydraulicSolver {
   pub csc_indices: Vec<CSCIndex>,
   /// precomputed indices for the rows of the Jacobian matrix for each node
   pub node_rows: Vec<Option<usize>>,
+  /// network version used to create matrices, should match the network version
+  pub network_version: i32,
 }
 
 impl HydraulicSolver {
 
-  pub fn new(network: &Network) -> Self {
+  pub fn new(network: &Network) -> Result<Self, String> {
     // build the sparsity pattern and the global unknown-numbering map
     let node_to_unknown = build_unknown_numbering_map(network);
     let sparsity_pattern = build_sparsity_pattern(network, &node_to_unknown);
@@ -85,14 +87,19 @@ impl HydraulicSolver {
     // precompute the AMD fill-reducing permutation for error mapping
     let perm_fwd = compute_amd_permutation(&sparsity_pattern, &node_to_unknown);
     // precompute the symbolic Cholesky factorization
-    let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).expect("Failed to compute symbolic Cholesky factorization");
+    let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).map_err(|e| format!("Failed to compute symbolic Cholesky factorization: {}", e))?;
 
-    Self { node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows }
+    Ok(Self { node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows, network_version: network.network_version })
   }
 
   /// Solve the network for a single timestep using the Global Gradient Algorithm (Todini & Pilati, 1987).
   /// Takes a solver state and returns a new state after convergence.
   pub fn solve(&self, network: &Network, state: &SolverState) -> Result<SolverState, String> {
+    
+    // verify that the network version matches the solver version
+    if self.network_version != network.network_version {
+      return Err(format!("Network topology has changed since the solver was created, please recreate the solver"));
+    }
 
     // clone the solver state to avoid modifying the original
     let mut state = state.clone();
