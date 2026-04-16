@@ -12,28 +12,28 @@ use crate::model::units::{Cfs, Ft3};
 use crate::model::options::DemandModel;
 use crate::model::control::ControlCondition;
 
-pub struct Simulation<'a> {
-  pub network: &'a Network,
+pub struct Simulation {
+  pub network: Network,
   pub solver: HydraulicSolver,
   pub state: SolverState,
   pub time: usize,
   pub skip_timesteps: bool,
 }
 
-impl<'a> Simulation<'a> {
+impl Simulation {
 
   /// Creates a new simulation, allocating the hydraulic solver and initializing state.
   /// Functionally equivalent to EN_openH followed by EN_initH.
-  pub fn new(network: &'a Network) -> Result<Self, SolverError> {
-    let solver = HydraulicSolver::new(network)?;
-    let state = SolverState::new_with_initial_values(network);
+  pub fn new(network: Network) -> Result<Self, SolverError> {
+    let solver = HydraulicSolver::new(&network)?;
+    let state = SolverState::new_with_initial_values(&network);
     Ok(Self { network, solver, state, time: 0, skip_timesteps: true })
   }
 
   /// Resets the simulation to initial conditions (time = 0, fresh state).
   /// Equivalent to EN_initH.
   pub fn initialize_hydraulics(&mut self) {
-    self.state = SolverState::new_with_initial_values(self.network);
+    self.state = SolverState::new_with_initial_values(&self.network);
     self.time = 0;
   }
 
@@ -42,9 +42,9 @@ impl<'a> Simulation<'a> {
   /// Equivalent to EN_runH.
   pub fn run_hydraulics(&mut self, time: usize) -> Result<usize, SolverError> {
     self.time = time;
-    Self::apply_patterns(self.network, &mut self.state, self.time);
-    Self::apply_controls(self.network, &mut self.state, self.time);
-    self.state = self.solver.solve(self.network, &self.state)?;
+    Self::apply_patterns(&self.network, &mut self.state, self.time);
+    Self::apply_controls(&self.network, &mut self.state, self.time);
+    self.state = self.solver.solve(&self.network, &self.state)?;
     Ok(self.time)
   }
 
@@ -57,8 +57,8 @@ impl<'a> Simulation<'a> {
       return 0;
     }
     let remaining = duration - self.time;
-    let timestep = Self::calculate_time_step(self.network, &self.state, self.time, self.skip_timesteps).min(remaining);
-    Self::update_tanks(self.network, &mut self.state, timestep);
+    let timestep = Self::calculate_time_step(&self.network, &self.state, self.time, self.skip_timesteps).min(remaining);
+    Self::update_tanks(&self.network, &mut self.state, timestep);
     self.time += timestep;
     timestep
   }
@@ -113,8 +113,8 @@ impl<'a> Simulation<'a> {
 
     // First solve the first time step, and use that as the initial state for the parallel solve
     // allowing for faster convergence.
-    Self::apply_patterns(self.network, &mut self.state, 0);
-    self.state = self.solver.solve(self.network, &self.state)?;
+    Self::apply_patterns(&self.network, &mut self.state, 0);
+    self.state = self.solver.solve(&self.network, &self.state)?;
     results.append(&self.state, 0);
 
     let initial_state = self.state.clone();
@@ -122,8 +122,8 @@ impl<'a> Simulation<'a> {
     // Solve the remaining time steps in parallel
     let par_results: Vec<Result<SolverState, SolverError>> = (1..report_steps).into_par_iter().map(|step| {
       let mut state = initial_state.clone();
-      Self::apply_patterns(self.network, &mut state, step * report_timestep);
-      self.solver.solve(self.network, &state)
+      Self::apply_patterns(&self.network, &mut state, step * report_timestep);
+      self.solver.solve(&self.network, &state)
     }).collect();
 
     // update the results vector with the parallel solve results

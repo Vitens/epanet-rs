@@ -5,6 +5,9 @@ edition = "2024"
 description = "A fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust."
 license = "MIT OR Apache-2.0"
 
+[lib]
+crate-type = ["rlib", "cdylib"]
+
 [dependencies]
 faer = { version = "0.23.2", features = ["linalg", "perf-warn"] }
 hashbrown = { version = "0.16", features = ["serde"] }
