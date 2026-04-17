@@ -146,6 +146,12 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, print
     error!("Failed to create simulation: {}", e);
     std::process::exit(1);
   });
+
+  simulation.initialize_hydraulics().unwrap_or_else(|e| {
+    error!("Failed to initialize simulation: {}", e);
+    std::process::exit(1);
+  });
+
   let result = simulation.solve_hydraulics(parallel).unwrap_or_else(|e| {
     error!("Solver failed: {}", e);
     std::process::exit(1);

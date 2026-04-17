@@ -18,12 +18,12 @@ pub enum DemandModel {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct TimeOptions {
-  pub duration: usize,      // duration of the simulation in hours
-  pub hydraulic_timestep: usize, // hydraulic timestep in hours
-  pub report_timestep: usize, // report timestep in hours
-  pub pattern_timestep: usize, // pattern timestep in hours
-  pub pattern_start: usize, // pattern start in hours
-  pub start_clocktime: usize, // start clocktime in hours
+  pub duration: usize,      // duration of the simulation in seconds
+  pub hydraulic_timestep: usize, // hydraulic timestep in seconds
+  pub report_timestep: usize, // report timestep in seconds
+  pub pattern_timestep: usize, // pattern timestep in seconds
+  pub pattern_start: usize, // pattern start in seconds
+  pub start_clocktime: usize, // start clocktime in seconds
 }
 
 impl Default for TimeOptions {

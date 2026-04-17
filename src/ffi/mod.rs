@@ -15,4 +15,6 @@ mod nodes;
 mod links;
 mod curves;
 mod error_codes;
+mod analysis_options;
+mod hydraulic_solver;
 pub mod enums;

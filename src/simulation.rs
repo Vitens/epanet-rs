@@ -14,7 +14,7 @@ use crate::model::control::ControlCondition;
 
 pub struct Simulation {
   pub network: Network,
-  pub solver: HydraulicSolver,
+  pub solver: Option<HydraulicSolver>,
   pub state: SolverState,
   pub time: usize,
   pub skip_timesteps: bool,
@@ -23,28 +23,32 @@ pub struct Simulation {
 impl Simulation {
 
   /// Creates a new simulation, allocating the hydraulic solver and initializing state.
-  /// Functionally equivalent to EN_openH followed by EN_initH.
+  /// Functionally equivalent to EN_openH.
   pub fn new(network: Network) -> Result<Self, SolverError> {
-    let solver = HydraulicSolver::new(&network)?;
     let state = SolverState::new_with_initial_values(&network);
-    Ok(Self { network, solver, state, time: 0, skip_timesteps: true })
+    Ok(Self { network, solver: None, state, time: 0, skip_timesteps: true })
   }
 
   /// Resets the simulation to initial conditions (time = 0, fresh state).
   /// Equivalent to EN_initH.
-  pub fn initialize_hydraulics(&mut self) {
+  pub fn initialize_hydraulics(&mut self) -> Result<(), SolverError> {
+    self.solver = Some(HydraulicSolver::new(&self.network)?);
+    // update the solver if the network version has changed
     self.state = SolverState::new_with_initial_values(&self.network);
     self.time = 0;
+    Ok(())
   }
 
   /// Applies patterns and controls, then solves hydraulics at the given time.
   /// Returns the solved state at the given time.
   /// Equivalent to EN_runH.
   pub fn run_hydraulics(&mut self, time: usize) -> Result<usize, SolverError> {
+    // check if the solver is initialized
+    let solver = self.solver.as_ref().ok_or(SolverError::NotInitialized)?;
     self.time = time;
     Self::apply_patterns(&self.network, &mut self.state, self.time);
     Self::apply_controls(&self.network, &mut self.state, self.time);
-    self.state = self.solver.solve(&self.network, &self.state)?;
+    self.state = solver.solve(&self.network, &self.state)?;
     Ok(self.time)
   }
 
@@ -68,7 +72,10 @@ impl Simulation {
   /// Simulations can be run in parallel or sequentially. Parallel mode is only supported for networks without tanks or pressure controls.
   /// Returns a SolverResult containing the flows and heads at each report step.
   pub fn solve_hydraulics(&mut self, parallel: bool) -> Result<SolverResult, SolverError> {
-    self.initialize_hydraulics();
+    // check if the solver is initialized
+    if self.solver.is_none() {
+      return Err(SolverError::NotInitialized);
+    }
 
     if parallel && !self.network.has_tanks() && !self.network.has_pressure_controls() {
       return self.solve_parallel();
@@ -103,6 +110,7 @@ impl Simulation {
 
   /// Solves the hydraulics in parallel, only supported for networks without tanks or pressure controls.
   fn solve_parallel(&mut self) -> Result<SolverResult, SolverError> {
+    let solver = self.solver.as_ref().ok_or(SolverError::NotInitialized)?;
 
     // parallel solve is only supported for networks without tanks or pressure controls, so we only use the report timestep to determine the number of steps
     let report_timestep = self.network.options.time_options.report_timestep;
@@ -114,7 +122,7 @@ impl Simulation {
     // First solve the first time step, and use that as the initial state for the parallel solve
     // allowing for faster convergence.
     Self::apply_patterns(&self.network, &mut self.state, 0);
-    self.state = self.solver.solve(&self.network, &self.state)?;
+    self.state = solver.solve(&self.network, &self.state)?;
     results.append(&self.state, 0);
 
     let initial_state = self.state.clone();
@@ -123,7 +131,7 @@ impl Simulation {
     let par_results: Vec<Result<SolverState, SolverError>> = (1..report_steps).into_par_iter().map(|step| {
       let mut state = initial_state.clone();
       Self::apply_patterns(&self.network, &mut state, step * report_timestep);
-      self.solver.solve(&self.network, &state)
+      solver.solve(&self.network, &state)
     }).collect();
 
     // update the results vector with the parallel solve results

@@ -1,11 +1,12 @@
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation, get_simulation_mut};
+use crate::ffi::enums::NodeProperty;
 use crate::model::node::NodeType;
 
 use crate::ffi::enums::NodeType as ENNodeType;
 
 use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_int, c_double};
 
 /// Gets the index of a node given its ID name.
 #[unsafe(no_mangle)]
@@ -120,6 +121,74 @@ pub extern "C" fn EN_getnodetype(ph: *mut Project, index: c_int, out_type: *mut 
   };
 
   unsafe { *out_type = node_type_int };
+
+  ErrorCode::Ok
+}
+
+/// Retrieves the property value of a node
+#[unsafe(no_mangle)]
+pub extern "C" fn EN_getnodevalue(ph: *mut Project, index: c_int, property: c_int, out_value: *mut c_double) -> ErrorCode {
+  let simulation = get_simulation!(ph);
+
+  // EPANET indexes from 1, so we need to subtract 1 from the index
+  let index = (index-1) as usize;
+
+  let node = match simulation.network.nodes.get(index) {
+    Some(node) => node,
+    None => return ErrorCode::UndefinedNode,
+  };
+
+  let options = &simulation.network.options;
+  let unit_system = &options.unit_system;
+  let flow_units = &options.flow_units;
+  let pressure_units = &options.pressure_units;
+
+  let property = match NodeProperty::from_repr(property) {
+    Some(property) => property,
+    None => return ErrorCode::InvalidParameterCode,
+  };
+
+  let value = match property {
+    NodeProperty::Elevation => node.elevation * unit_system.per_feet(),
+    NodeProperty::BaseDemand => match &node.node_type {
+      NodeType::Junction(junction) => junction.basedemand * flow_units.per_cfs(),
+      _ => 0.0,
+    },
+    NodeProperty::Pattern => match &node.node_type {
+      NodeType::Junction(junction) => junction.pattern_index.map(|index| (index+1) as f64).unwrap_or(0.0),
+      NodeType::Reservoir(reservoir) => reservoir.head_pattern_index.map(|index| (index+1) as f64).unwrap_or(0.0),
+      _ => 0.0,
+    },
+    NodeProperty::Emitter => match &node.node_type {
+      NodeType::Junction(junction) => {
+        let e = junction.emitter_coefficient;
+        if e > 0.0 {
+          flow_units.per_cfs() / (pressure_units.per_feet() * e).powf(1.0 / options.emitter_exponent)
+        } else {
+          0.0
+        }
+      }
+      _ => 0.0,
+    },
+    NodeProperty::InitQual => 0.0,  // TODO: quality not implemented yet
+    NodeProperty::SourceQual => 0.0,  // TODO: quality not implemented yet
+    NodeProperty::SourcePat => 0.0,  // TODO: quality not implemented yet
+    NodeProperty::SourceType => 0.0,  // TODO: quality not implemented yet
+
+    NodeProperty::TankLevel => match &node.node_type {
+      NodeType::Tank(_) => (simulation.state.heads[index] - node.elevation) * unit_system.per_feet(),
+      _ => 0.0,
+    },
+
+    NodeProperty::Demand => simulation.state.demands[index] * flow_units.per_cfs(),
+    NodeProperty::Head => simulation.state.heads[index] * unit_system.per_feet(),
+    NodeProperty::Pressure => (simulation.state.heads[index] - node.elevation) * pressure_units.per_feet(),
+    NodeProperty::Quality => 0.0,  // TODO: quality not implemented yet
+    NodeProperty::SourceMass => 0.0,  // TODO: mass not implemented yet
+    _ => 0.0,
+  };
+
+  unsafe { *out_value = value as c_double };
 
   ErrorCode::Ok
 }

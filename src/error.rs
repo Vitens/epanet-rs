@@ -3,6 +3,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SolverError {
+  #[error("Solver not initialized")]
+  NotInitialized,
   #[error("Singular matrix: check connectivity at node '{node_id}'")]
   SingularMatrix { node_id: Box<str> },
   #[error("Maximum number of iterations reached: {max_trials}")]
