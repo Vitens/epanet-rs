@@ -23,10 +23,10 @@ pub struct Network {
     pub links: Vec<Link>,
 
     /// Curves in the network
-    pub curves: HashMap<Box<str>, Curve>,
+    pub curves: Vec<Curve>,
 
     /// Patterns in the network
-    pub patterns: HashMap<Box<str>, Pattern>,
+    pub patterns: Vec<Pattern>,
 
     /// Controls in the network
     pub controls: Vec<Control>,
@@ -36,6 +36,10 @@ pub struct Network {
     pub node_map: HashMap<Box<str>, usize>,
     #[serde(skip)]
     pub link_map: HashMap<Box<str>, usize>,
+    #[serde(skip)]
+    pub curve_map: HashMap<Box<str>, usize>,
+    #[serde(skip)]
+    pub pattern_map: HashMap<Box<str>, usize>,
     #[serde(skip)]
     pub contains_pressure_control_valve: bool,
     #[serde(skip)]
@@ -51,8 +55,25 @@ impl Network {
     self.controls.iter().any(|c| matches!(c.condition, ControlCondition::LowPressure { .. } | ControlCondition::HighPressure { .. }))
   }
   pub fn has_quality(&self) -> bool {
-    // return false for now, quality simulation is not supported
     return false
+  }
+
+  /// Resolves pattern name references to cached vector indices on each node.
+  /// Must be called after all patterns and nodes have been loaded.
+  pub fn resolve_pattern_indices(&mut self) {
+    for node in self.nodes.iter_mut() {
+      match &mut node.node_type {
+        NodeType::Junction(junction) => {
+          junction.pattern_index = junction.pattern.as_ref()
+            .and_then(|id| self.pattern_map.get(id).copied());
+        }
+        NodeType::Reservoir(reservoir) => {
+          reservoir.head_pattern_index = reservoir.head_pattern.as_ref()
+            .and_then(|id| self.pattern_map.get(id).copied());
+        }
+        _ => {}
+      }
+    }
   }
 }
 
@@ -62,36 +83,32 @@ impl<'de> Deserialize<'de> for Network {
   where
     D: Deserializer<'de>,
   {
-    // Deserialize the network data
     #[derive(Deserialize)]
     struct NetworkData {
       title: Option<Box<str>>,
       options: SimulationOptions,
       nodes: Vec<Node>,
       links: Vec<Link>,
-      curves: HashMap<Box<str>, Curve>,
-      patterns: HashMap<Box<str>, Pattern>,
+      curves: Vec<Curve>,
+      patterns: Vec<Pattern>,
       controls: Vec<Control>,
     }
 
     let mut data = NetworkData::deserialize(deserializer)?;
 
-    // Build node_map from nodes
     let node_map: HashMap<Box<str>, usize> = data.nodes
-      .iter()
-      .enumerate()
-      .map(|(i, n)| (n.id.clone(), i))
-      .collect();
+      .iter().enumerate().map(|(i, n)| (n.id.clone(), i)).collect();
 
-    // Build link_map from links
     let link_map: HashMap<Box<str>, usize> = data.links
-      .iter()
-      .enumerate()
-      .map(|(i, l)| (l.id.clone(), i))
-      .collect();
+      .iter().enumerate().map(|(i, l)| (l.id.clone(), i)).collect();
+
+    let curve_map: HashMap<Box<str>, usize> = data.curves
+      .iter().enumerate().map(|(i, c)| (c.id.clone(), i)).collect();
+
+    let pattern_map: HashMap<Box<str>, usize> = data.patterns
+      .iter().enumerate().map(|(i, p)| (p.id.clone(), i)).collect();
 
     let mut contains_pressure_control_valve = false;
-    // Update link start and end node indices, and check if the network contains a pressure control valve
     for link in data.links.iter_mut() {
       link.start_node = *node_map.get(&link.start_node_id).unwrap();
       link.end_node = *node_map.get(&link.end_node_id).unwrap();
@@ -101,7 +118,6 @@ impl<'de> Deserialize<'de> for Network {
         }
       }
     }
-
 
     let mut network = Network {
       title: data.title,
@@ -113,11 +129,13 @@ impl<'de> Deserialize<'de> for Network {
       controls: data.controls,
       node_map,
       link_map,
+      curve_map,
+      pattern_map,
       contains_pressure_control_valve,
       network_version: 0,
     };
 
-    // convert the network to standard units
+    network.resolve_pattern_indices();
     network.convert_to_standard(&network.options.clone());
 
     Ok(network)

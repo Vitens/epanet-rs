@@ -12,5 +12,7 @@
 mod project;
 mod report;
 mod nodes;
+mod links;
+mod curves;
 mod error_codes;
 pub mod enums;

@@ -144,21 +144,20 @@ impl Simulation {
     let pattern_index = pattern_time / time_options.pattern_timestep;
 
     for (i, node) in network.nodes.iter().enumerate() {
-      let Some(head_pattern) = node.head_pattern() else { continue };
-      let pattern = &network.patterns[head_pattern];
+      let NodeType::Reservoir(reservoir) = &node.node_type else { continue };
+      let Some(pat_idx) = reservoir.head_pattern_index else { continue };
+      let pattern = &network.patterns[pat_idx];
       state.heads[i] = node.elevation * pattern.multipliers[pattern_index % pattern.multipliers.len()];
     }
 
-    // Resolve the default demand pattern: explicit PATTERN option, or EPANET's default "1"
-    let default_pattern_id: Box<str> = network.options.pattern.clone()
-      .unwrap_or_else(|| "1".into());
-    let default_pattern = network.patterns.get(&default_pattern_id);
+    let default_pattern_idx = network.options.pattern.as_ref()
+      .or(Some(&Box::from("1")))
+      .and_then(|id| network.pattern_map.get(id).copied());
 
     state.demands = network.nodes.iter().map(|n| {
       let NodeType::Junction(junction) = &n.node_type else { return 0.0 };
-      let pattern = junction.pattern.as_ref()
-        .and_then(|id| network.patterns.get(id))
-        .or(default_pattern);
+      let pat_idx = junction.pattern_index.or(default_pattern_idx);
+      let pattern = pat_idx.map(|idx| &network.patterns[idx]);
       let multiplier = match pattern {
         Some(p) => p.multipliers[pattern_index % p.multipliers.len()],
         None => 1.0,

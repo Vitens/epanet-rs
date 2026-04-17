@@ -60,7 +60,7 @@ impl Network {
 
   pub fn read_msgpack(&mut self, msgpack: &str) -> Result<(), InputError> {
     let file = File::open(msgpack)
-      .map_err(|e| InputError::file_open(msgpack, e))?;
+      .map_err(|e| InputError::new(format!("Failed to open file '{}': {}", msgpack, e)))?;
     let reader = BufReader::new(file);
     let network: Network = rmp_serde::from_read(reader)
       .map_err(|e| InputError::new(format!("Failed to parse msgpack file '{}': {}", msgpack, e)))?;
@@ -71,7 +71,7 @@ impl Network {
   /// Read a network from a JSON file using serde_json.
   pub fn read_json(&mut self, json: &str) -> Result<(), InputError> {
     let file = File::open(json)
-      .map_err(|e| InputError::file_open(json, e))?;
+      .map_err(|e| InputError::new(format!("Failed to open file '{}': {}", json, e)))?;
     let reader = BufReader::new(file);
     let network: Network = serde_json::from_reader(reader)
       .map_err(|e| InputError::new(format!("Failed to parse JSON file '{}': {}", json, e)))?;
@@ -86,7 +86,7 @@ impl Network {
 
     // open the INP file
     let file = File::open(inp)
-      .map_err(|e| InputError::file_open(inp, e))?;
+      .map_err(|e| InputError::new(format!("Failed to open file '{}': {}", inp, e)))?;
 
     // create a new reader
     let mut reader = BufReader::new(file);
@@ -199,11 +199,9 @@ impl Network {
       // clear the line buffer
       line_buffer.clear();
     }
-    // convert units
+    self.resolve_pattern_indices();
     self.convert_to_standard(&self.options.clone());
-    // update links
     self.update_links()?;
-    // convert control settings to internal units
     self.convert_control_settings();
 
     Ok(())
@@ -215,8 +213,9 @@ impl Network {
       if let LinkType::Pump(pump) = &mut link.link_type {
         // get the head curve
         if let Some(head_curve_id) = &pump.head_curve_id {
-          let curve = self.curves.get(head_curve_id)
+          let curve_index = self.curve_map.get(head_curve_id)
             .ok_or_else(|| InputError::new(format!("Head curve '{}' not found for pump", head_curve_id)))?;
+          let curve = &self.curves[*curve_index];
           // assign the head curve to the pump and convert units to standard units (US standard) and CFS
           pump.head_curve = Some(HeadCurve::new(curve, &self.options.flow_units, &self.options.unit_system)?);
         }
@@ -234,8 +233,9 @@ impl Network {
         }
         // assign the valve curve to the valve
         if let Some(curve_id) = &valve.curve_id {
-          let curve = self.curves.get(curve_id)
+          let curve_index = self.curve_map.get(curve_id)
             .ok_or_else(|| InputError::new(format!("Curve '{}' not found for valve", curve_id)))?;
+          let curve = &self.curves[*curve_index];
           valve.valve_curve = Some(ValveCurve::new(curve, &self.options.flow_units, &self.options.unit_system)?);
         }
       }
@@ -317,7 +317,7 @@ impl Network {
     Ok(Node {
       id,
       elevation,
-      node_type: NodeType::Junction(Junction { basedemand: demand, pattern, emitter_coefficient: 0.0 }),
+      node_type: NodeType::Junction(Junction { basedemand: demand, pattern, pattern_index: None, emitter_coefficient: 0.0 }),
       coordinates: None,
     })
   }
@@ -332,7 +332,7 @@ impl Network {
     Ok(Node {
       id,
       elevation,
-      node_type: NodeType::Reservoir(Reservoir { head_pattern: pattern }),
+      node_type: NodeType::Reservoir(Reservoir { head_pattern: pattern, head_pattern_index: None }),
       coordinates: None,
     })
   }
@@ -351,7 +351,7 @@ impl Network {
       return Ok(Node {
         id,
         elevation,
-        node_type: NodeType::Reservoir(Reservoir { head_pattern: None }),
+        node_type: NodeType::Reservoir(Reservoir { head_pattern: None, head_pattern_index: None }),
         coordinates: None,
       });
     }
@@ -553,23 +553,18 @@ impl Network {
     let x = parts.next().ok_or_missing("x value")?.parse_field::<f64>("x value")?;
     let y = parts.next().ok_or_missing("y value")?.parse_field::<f64>("y value")?;
     
-    // create curve if it does not exist
-    if !self.curves.contains_key(&id) {
-      self.curves.insert(id.clone(), Curve { id, x: vec![x], y: vec![y]});
-    }
-    // otherwise, add the point to the curve
-    else {
-      let curve = self.curves.get_mut(&id)
-        .ok_or_else(|| InputError::new(format!("Curve '{}' not found", id)))?;
-      // check if the x value is in ascending order
+    if let Some(&index) = self.curve_map.get(&id) {
+      let curve = &mut self.curves[index];
       if let Some(last_x) = curve.x.last() {
         if x < *last_x {
           return Err(InputError::new(format!("X values must be in ascending order for curve '{}': {} < {}", id, x, last_x)));
         }
       }
-      // add the point to the curve
       curve.x.push(x);
       curve.y.push(y);
+    } else {
+      self.curve_map.insert(id.clone(), self.curves.len());
+      self.curves.push(Curve { id, x: vec![x], y: vec![y] });
     }
     Ok(())
   }
@@ -584,12 +579,11 @@ impl Network {
       .collect();
     let multipliers = multipliers?;
     
-    if !self.patterns.contains_key(&id) {
-      self.patterns.insert(id.clone(), Pattern { multipliers });
+    if let Some(&index) = self.pattern_map.get(&id) {
+      self.patterns[index].multipliers.extend(multipliers);
     } else {
-      let pattern = self.patterns.get_mut(&id)
-        .ok_or_else(|| InputError::new(format!("Pattern '{}' not found", id)))?;
-      pattern.multipliers.extend(multipliers);
+      self.pattern_map.insert(id.clone(), self.patterns.len());
+      self.patterns.push(Pattern { id, multipliers });
     }
     Ok(())
   }
@@ -945,13 +939,13 @@ mod tests {
       network.add_node(Node {
         id: "N1".into(),
         elevation: 0.0,
-        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, emitter_coefficient: 0.0 }),
+        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, pattern_index: None, emitter_coefficient: 0.0 }),
         coordinates: None,
       }).unwrap();
       network.add_node(Node {
         id: "N2".into(),
         elevation: 0.0,
-        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, emitter_coefficient: 0.0 }),
+        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, pattern_index: None, emitter_coefficient: 0.0 }),
         coordinates: None,
       }).unwrap();
       network.add_link(Link {
@@ -1243,7 +1237,8 @@ mod tests {
     let mut network = test_network(false);
     network.read_curve("CURVE1  100.0  50.0").unwrap();
     
-    let curve = network.curves.get("CURVE1").unwrap();
+    let &index = network.curve_map.get("CURVE1").unwrap();
+    let curve = &network.curves[index];
     assert_eq!(curve.x, vec![100.0]);
     assert_eq!(curve.y, vec![50.0]);
   }
@@ -1255,7 +1250,8 @@ mod tests {
     network.read_curve("CURVE2  50.0  75.0").unwrap();
     network.read_curve("CURVE2  100.0  25.0").unwrap();
     
-    let curve = network.curves.get("CURVE2").unwrap();
+    let &index = network.curve_map.get("CURVE2").unwrap();
+    let curve = &network.curves[index];
     assert_eq!(curve.x, vec![0.0, 50.0, 100.0]);
     assert_eq!(curve.y, vec![100.0, 75.0, 25.0]);
   }
@@ -1267,7 +1263,8 @@ mod tests {
     let mut network = test_network(false);
     network.read_pattern("PAT1  1.0  1.2  0.8  1.1").unwrap();
     
-    let pattern = network.patterns.get("PAT1").unwrap();
+    let &index = network.pattern_map.get("PAT1").unwrap();
+    let pattern = &network.patterns[index];
     assert_eq!(pattern.multipliers, vec![1.0, 1.2, 0.8, 1.1]);
   }
 
@@ -1277,7 +1274,8 @@ mod tests {
     network.read_pattern("PAT2  1.0  1.5").unwrap();
     network.read_pattern("PAT2  2.0  0.5").unwrap();
     
-    let pattern = network.patterns.get("PAT2").unwrap();
+    let &index = network.pattern_map.get("PAT2").unwrap();
+    let pattern = &network.patterns[index];
     assert_eq!(pattern.multipliers, vec![1.0, 1.5, 2.0, 0.5]);
   }
 

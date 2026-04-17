@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 pub struct Junction {
   pub basedemand: Cfs,
   pub pattern: Option<Box<str>>,
+  #[serde(skip)]
+  pub pattern_index: Option<usize>,
   pub emitter_coefficient: f64,
 }
 

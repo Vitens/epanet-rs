@@ -43,16 +43,16 @@ pub enum NodeType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
 #[repr(i32)]
 pub enum LinkType {
-    CvPipe = 0,
+    CVPipe = 0,
     Pipe   = 1,
     Pump   = 2,
-    Prv    = 3,
-    Psv    = 4,
-    Pbv    = 5,
-    Fcv    = 6,
-    Tcv    = 7,
-    Gpv    = 8,
-    Pcv    = 9,
+    PRV    = 3,
+    PSV    = 4,
+    PBV    = 5,
+    FCV    = 6,
+    TCV    = 7,
+    GPV    = 8,
+    PCV    = 9,
 }
 
 /// Types of pump curves.

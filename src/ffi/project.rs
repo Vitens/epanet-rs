@@ -30,7 +30,6 @@ macro_rules! get_simulation {
 }
 
 /// Macro to get mutable simulation from a project handle.
-#[allow(unused_macros)]
 macro_rules! get_simulation_mut {
     ($ph:expr) => {{
         if $ph.is_null() {
