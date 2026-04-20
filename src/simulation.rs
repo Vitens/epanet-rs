@@ -2,67 +2,94 @@ use rayon::prelude::*;
 
 use simplelog::warn;
 
-use crate::error::SolverError;
+use crate::error::{InputError, SolverError};
 use crate::solver::hydraulicsolver::HydraulicSolver;
 use crate::solver::state::SolverState;
 use crate::solver::result::SolverResult;
 use crate::model::network::Network;
 use crate::model::node::NodeType;
-use crate::model::units::{Cfs, Ft3};
-use crate::model::options::DemandModel;
+use crate::model::units::{UnitConversion, FlowUnits};
+use crate::model::options::HeadlossFormula;
+use crate::model::node::Node;
+use crate::model::junction::Junction;
+use crate::model::options::SimulationOptions;
+
 use crate::model::control::ControlCondition;
+
+use crate::constants::*;
 
 pub struct Simulation {
   pub network: Network,
   pub solver: Option<HydraulicSolver>,
-  pub state: SolverState,
+  pub state: Option<SolverState>,
   pub time: usize,
   pub skip_timesteps: bool,
+  /// flag to indicate if the simulation is solved
+  pub solved: bool,
 }
 
 impl Simulation {
 
+  /// Creates a new simulation from an input file.
+  pub fn from_file(path: &str) -> Result<Self, InputError> {
+    let network = Network::from_file(path)?;
+    Ok(Self::new(network))
+  }
+  /// Creates a new simulation with the given network and options.
+  pub fn init(flow_units: FlowUnits, headloss_formula: HeadlossFormula) -> Self {
+    let mut network = Network::default();
+    network.options = SimulationOptions::new(flow_units, headloss_formula);
+    Self::new(network)
+  }
+
   /// Creates a new simulation, allocating the hydraulic solver and initializing state.
-  /// Functionally equivalent to EN_openH.
-  pub fn new(network: Network) -> Result<Self, SolverError> {
-    let state = SolverState::new_with_initial_values(&network);
-    Ok(Self { network, solver: None, state, time: 0, skip_timesteps: true })
+  /// Functionally equivalent to EN_openH followed by EN_initH.
+  pub fn new(network: Network) -> Self {
+    Self { network, solver: None, state: None, time: 0, skip_timesteps: true, solved: false }
   }
 
   /// Resets the simulation to initial conditions (time = 0, fresh state).
   /// Equivalent to EN_initH.
   pub fn initialize_hydraulics(&mut self) -> Result<(), SolverError> {
-    self.solver = Some(HydraulicSolver::new(&self.network)?);
     // update the solver if the network version has changed
-    self.state = SolverState::new_with_initial_values(&self.network);
+    self.solver = Some(HydraulicSolver::new(&self.network)?);
+    self.state = Some(SolverState::new_with_initial_values(&self.network));
     self.time = 0;
+    self.solved = false;
     Ok(())
   }
 
   /// Applies patterns and controls, then solves hydraulics at the given time.
   /// Returns the solved state at the given time.
   /// Equivalent to EN_runH.
-  pub fn run_hydraulics(&mut self, time: usize) -> Result<usize, SolverError> {
+  pub fn run_hydraulics(&mut self) -> Result<usize, SolverError> {
     // check if the solver is initialized
     let solver = self.solver.as_ref().ok_or(SolverError::NotInitialized)?;
-    self.time = time;
-    Self::apply_patterns(&self.network, &mut self.state, self.time);
-    Self::apply_controls(&self.network, &mut self.state, self.time);
-    self.state = solver.solve(&self.network, &self.state)?;
+    let state = self.state.as_mut().unwrap();
+
+    state.apply_patterns(&self.network, self.time);
+    state.apply_controls(&self.network, self.time);
+    self.state = Some(solver.solve(&self.network, &state)?);
+    // set the solved flag to true
+    self.solved = true;
     Ok(self.time)
   }
 
   /// Advances to the next hydraulic time step (updating tank levels).
-  /// Returns the time step length in seconds. Returns 0 when the simulation is complete.
+  /// Returns the time step length in seconds. Returns 0 when the simulation is complete or the state is not initialized.
   /// Equivalent to EN_nextH.
   pub fn next_hydraulic_timestep(&mut self) -> usize {
+
+    // unwrap the state, if it is none, return 0
+    let Some(state) = self.state.as_mut() else { return 0 };
+
     let duration = self.network.options.time_options.duration;
     if self.time >= duration {
       return 0;
     }
     let remaining = duration - self.time;
-    let timestep = Self::calculate_time_step(&self.network, &self.state, self.time, self.skip_timesteps).min(remaining);
-    Self::update_tanks(&self.network, &mut self.state, timestep);
+    let timestep = Self::calculate_time_step(&self.network, &state, self.time, self.skip_timesteps).min(remaining);
+    state.update_tanks(&self.network, timestep);
     self.time += timestep;
     timestep
   }
@@ -72,9 +99,9 @@ impl Simulation {
   /// Simulations can be run in parallel or sequentially. Parallel mode is only supported for networks without tanks or pressure controls.
   /// Returns a SolverResult containing the flows and heads at each report step.
   pub fn solve_hydraulics(&mut self, parallel: bool) -> Result<SolverResult, SolverError> {
-    // check if the solver is initialized
+    // initialize the solver if it is not initialized
     if self.solver.is_none() {
-      return Err(SolverError::NotInitialized);
+      self.initialize_hydraulics()?;
     }
 
     if parallel && !self.network.has_tanks() && !self.network.has_pressure_controls() {
@@ -90,18 +117,17 @@ impl Simulation {
     let mut results = SolverResult::new(self.network.links.len(), self.network.nodes.len(), report_steps);
 
     // Run the simulation step by step
-    let mut time = 0;
     loop {
-      let t = self.run_hydraulics(time)?;
+      let t = self.run_hydraulics()?;
       // Append the results to the SolverResult if the time step is a report step
       if t % report_timestep == 0 {
-        results.append(&self.state, t / report_timestep);
+        results.append(self.state.as_ref().unwrap(), t / report_timestep);
       }
       // Advance the time step, returns 0 if the simulation is complete
       let dt = self.next_hydraulic_timestep();
       if dt == 0 { break; }
-      time += dt;
     }
+    self.solved = true;
 
     // Convert the units of the results to the original units
     results.convert_units(&self.network.options.flow_units, &self.network.options.unit_system);
@@ -111,6 +137,7 @@ impl Simulation {
   /// Solves the hydraulics in parallel, only supported for networks without tanks or pressure controls.
   fn solve_parallel(&mut self) -> Result<SolverResult, SolverError> {
     let solver = self.solver.as_ref().ok_or(SolverError::NotInitialized)?;
+    let state = self.state.as_mut().unwrap();
 
     // parallel solve is only supported for networks without tanks or pressure controls, so we only use the report timestep to determine the number of steps
     let report_timestep = self.network.options.time_options.report_timestep;
@@ -121,16 +148,14 @@ impl Simulation {
 
     // First solve the first time step, and use that as the initial state for the parallel solve
     // allowing for faster convergence.
-    Self::apply_patterns(&self.network, &mut self.state, 0);
-    self.state = solver.solve(&self.network, &self.state)?;
-    results.append(&self.state, 0);
-
-    let initial_state = self.state.clone();
+    state.apply_patterns(&self.network, 0);
+    let initial_state = solver.solve(&self.network, state)?;
+    results.append(&initial_state, 0);
 
     // Solve the remaining time steps in parallel
     let par_results: Vec<Result<SolverState, SolverError>> = (1..report_steps).into_par_iter().map(|step| {
       let mut state = initial_state.clone();
-      Self::apply_patterns(&self.network, &mut state, step * report_timestep);
+      state.apply_patterns(&self.network, step * report_timestep);
       solver.solve(&self.network, &state)
     }).collect();
 
@@ -138,62 +163,11 @@ impl Simulation {
     for (step, step_result) in par_results.into_iter().enumerate() {
       results.append(&step_result?, step + 1);
     }
+    self.solved = true;
 
     // Convert the units of the results to the original units
     results.convert_units(&self.network.options.flow_units, &self.network.options.unit_system);
     Ok(results)
-  }
-
-  /// Applies demand and head patterns to the state at the given time.
-  /// TODO: Add support for multiple patterns
-  fn apply_patterns(network: &Network, state: &mut SolverState, time: usize) {
-    let time_options = &network.options.time_options;
-    let pattern_time = time_options.pattern_start + time;
-    let pattern_index = pattern_time / time_options.pattern_timestep;
-
-    for (i, node) in network.nodes.iter().enumerate() {
-      let NodeType::Reservoir(reservoir) = &node.node_type else { continue };
-      let Some(pat_idx) = reservoir.head_pattern_index else { continue };
-      let pattern = &network.patterns[pat_idx];
-      state.heads[i] = node.elevation * pattern.multipliers[pattern_index % pattern.multipliers.len()];
-    }
-
-    let default_pattern_idx = network.options.pattern.as_ref()
-      .or(Some(&Box::from("1")))
-      .and_then(|id| network.pattern_map.get(id).copied());
-
-    state.demands = network.nodes.iter().map(|n| {
-      let NodeType::Junction(junction) = &n.node_type else { return 0.0 };
-      let pat_idx = junction.pattern_index.or(default_pattern_idx);
-      let pattern = pat_idx.map(|idx| &network.patterns[idx]);
-      let multiplier = match pattern {
-        Some(p) => p.multipliers[pattern_index % p.multipliers.len()],
-        None => 1.0,
-      };
-      junction.basedemand * multiplier * network.options.demand_multiplier
-    }).collect::<Vec<Cfs>>();
-
-    if network.options.demand_model == DemandModel::PDA {
-      state.demand_flows = state.demands.clone();
-    }
-  }
-
-  /// Applies controls to the state at the given time.
-  fn apply_controls(network: &Network, state: &mut SolverState, time: usize) {
-    let clocktime = (time + network.options.time_options.start_clocktime) % (24 * 3600);
-
-    for control in &network.controls {
-      // skip controls that are not pressure or level controls
-      if matches!(control.condition, ControlCondition::LowPressure { .. } | ControlCondition::HighPressure { .. }) {
-        continue;
-      }
-      if matches!(control.condition, ControlCondition::LowLevel { .. } | ControlCondition::HighLevel { .. }) && time == 0 {
-        continue;
-      }
-      if control.is_active(state, network, time, clocktime) {
-        control.activate(state, network);
-      }
-    }
   }
 
   /// Calculates the time step for the next hydraulic time step.
@@ -256,15 +230,113 @@ impl Simulation {
     *[t_report, t_pattern, t_tanks, t_controls, times.hydraulic_timestep].iter().filter(|&x| *x > 0).min().unwrap()
   }
 
-  /// Updates the tank levels for the given time step.
-  fn update_tanks(network: &Network, state: &mut SolverState, timestep: usize) {
-    for (tank_index, node) in network.nodes.iter().enumerate() {
-      if let NodeType::Tank(tank) = &node.node_type {
-        // calculate the delta volume and new head for the tank
-        let delta_volume = state.demands[tank_index] * timestep as Ft3;
-        let new_head = tank.new_head(delta_volume, state.heads[tank_index]);
-        state.heads[tank_index] = new_head;
-      }
+  /// get the solved state if it is available, otherwise return None
+  pub(crate) fn solved_state(&self) -> Option<&SolverState> {
+    if self.solved {
+      self.state.as_ref()
+    } else {
+      None
     }
   }
+}
+
+/// Methods to modify the network and solverstate
+impl Simulation {
+
+  /// Add a new junction node to the network.
+  pub fn add_junction(&mut self, id: &str, elevation: f64, basedemand: f64, pattern: Option<&str>, emitter_coefficient: f64, coordinates: Option<(f64, f64)>) -> Result<(), InputError> {
+
+    if self.solver.is_some() {
+      return Err(InputError::TopologyChangeWhileSolverOpen);
+    }
+
+    // get the pattern index if it is provided
+    let pattern_index = if let Some(pattern) = pattern {
+      Some(*self.network.pattern_map.get(pattern).ok_or(InputError::PatternNotFound { pattern_id: pattern.into() })?)
+    } else {
+      None
+    };
+
+    let mut junction = Node {
+      id: id.into(),
+      elevation: elevation,
+      node_type: NodeType::Junction(Junction { basedemand: basedemand, pattern: pattern.map(|s| s.into()), pattern_index: pattern_index, emitter_coefficient: emitter_coefficient }),
+      coordinates: coordinates,
+    };
+
+    junction.convert_to_standard(&self.network.options);
+
+    self.network.add_node(junction)?;
+
+    Ok(())
+  }
+
+
+
+  /// Sets the elevation of a node and updates the state heads if the hydraulic simulation is open.
+  pub fn set_node_elevation(&mut self, node_id: &str, elevation: f64) {
+    let index = self.network.node_map.get(node_id).unwrap();
+    let node = &mut self.network.nodes[*index];
+    // update elevation
+    let value = elevation / self.network.options.unit_system.per_feet();
+    
+    // update the state heads
+    if let Some(state) = self.state.as_mut() {
+      match &mut node.node_type {
+        NodeType::Tank(_) => state.heads[*index] = (node.elevation - state.heads[*index]) + value,
+        NodeType::Reservoir(_) => state.heads[*index] = value,
+        _ => (),
+      }
+    }
+
+    node.elevation = value;
+  }
+
+}
+
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn test_network_addition() {
+    let network = Network::default();
+    let mut simulation = Simulation::init(FlowUnits::CFS, HeadlossFormula::HazenWilliams);
+    simulation.add_junction("J1", 100.0, 10.0, None, 0.0, None).unwrap();
+
+    assert_eq!(simulation.network.nodes.len(), 1);
+    assert_eq!(simulation.network.nodes[0].id, "J1".into());
+    assert_eq!(simulation.network.nodes[0].elevation, 100.0);
+
+  }
+
+  #[test]
+  fn test_network_addition_with_units() {
+    let mut simulation = Simulation::init(FlowUnits::LPS, HeadlossFormula::DarcyWeisbach);
+    simulation.add_junction("J1", 100.0, 10.0, None, 0.0, None).unwrap();
+
+    dbg!(&simulation.network.options);
+
+    assert_eq!(simulation.network.nodes.len(), 1);
+    assert_eq!(simulation.network.nodes[0].id, "J1".into());
+    assert_eq!(simulation.network.nodes[0].elevation, 100.0 / MperFT); // test conversion to standard units
+
+    let NodeType::Junction(junction) = &simulation.network.nodes[0].node_type else {
+      panic!("Node is not a junction");
+    };
+    assert_eq!(junction.basedemand, 10.0 / LPSperCFS); // test conversion to standard units
+  }
+
+
+
+  // #[test]
+  // fn test_set_node_elevation() {
+  //   let network = test_network();
+  //   let mut simulation = Simulation::new(network);
+  //   simulation.initialize_hydraulics().unwrap();
+  //   simulation.set_node_elevation("R1", 123.0);
+  //   assert_eq!(simulation.network.nodes[0].elevation, 123.0);
+  //   assert_eq!(simulation.state.as_ref().unwrap().heads[0], 123.0);
+  // }
 }

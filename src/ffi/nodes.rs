@@ -176,13 +176,13 @@ pub extern "C" fn EN_getnodevalue(ph: *mut Project, index: c_int, property: c_in
     NodeProperty::SourceType => 0.0,  // TODO: quality not implemented yet
 
     NodeProperty::TankLevel => match &node.node_type {
-      NodeType::Tank(_) => (simulation.state.heads[index] - node.elevation) * unit_system.per_feet(),
+      NodeType::Tank(_) => simulation.solved_state().map_or(0.0, |state| state.heads[index] - node.elevation) * unit_system.per_feet(),
       _ => 0.0,
     },
 
-    NodeProperty::Demand => simulation.state.demands[index] * flow_units.per_cfs(),
-    NodeProperty::Head => simulation.state.heads[index] * unit_system.per_feet(),
-    NodeProperty::Pressure => (simulation.state.heads[index] - node.elevation) * pressure_units.per_feet(),
+    NodeProperty::Demand => simulation.solved_state().map_or(0.0, |state| state.demands[index] * flow_units.per_cfs()),
+    NodeProperty::Head => simulation.solved_state().map_or(0.0, |state| state.heads[index] * unit_system.per_feet()),
+    NodeProperty::Pressure => simulation.solved_state().map_or(0.0, |state| (state.heads[index] - node.elevation) * pressure_units.per_feet()),
     NodeProperty::Quality => 0.0,  // TODO: quality not implemented yet
     NodeProperty::SourceMass => 0.0,  // TODO: mass not implemented yet
     _ => 0.0,

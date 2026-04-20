@@ -5,6 +5,8 @@
 
 use strum::FromRepr;
 
+pub const MISSING_VALUE: f64 = -1.0e10;
+
 /// Types of network objects.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
 #[repr(i32)]

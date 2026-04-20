@@ -9,6 +9,8 @@ use crate::model::options::SimulationOptions;
 use crate::model::control::{Control, ControlCondition};
 use crate::model::units::UnitConversion;
 
+use crate::error::InputError;
+
 use serde::{Deserialize, Deserializer, Serialize};
 
 #[derive(Default, Serialize, Clone)]
@@ -142,19 +144,19 @@ impl<'de> Deserialize<'de> for Network {
   }
 }
 
-/// Network methods to add nodes and links
+/// Cargo-private Utility methods to add nodes and links
 impl Network {
-  pub fn add_node(&mut self, node: Node) -> Result<(), String> {
+  pub(crate) fn add_node(&mut self, node: Node) -> Result<(), InputError> {
     if self.node_map.contains_key(&node.id) {
-      return Err(format!("Node {} already exists", node.id));
+      return Err(InputError::NodeExists { node_id: node.id.clone() });
     }
     self.node_map.insert(node.id.clone(), self.nodes.len());
     self.nodes.push(node);
     Ok(())
   }
-  pub fn add_link(&mut self, link: Link) -> Result<(), String> {
+  pub(crate) fn add_link(&mut self, link: Link) -> Result<(), InputError> {
     if self.link_map.contains_key(&link.id) {
-      return Err(format!("Link {} already exists", link.id));
+      return Err(InputError::LinkExists { link_id: link.id.clone() });
     }
     self.link_map.insert(link.id.clone(), self.links.len());
     self.links.push(link);

@@ -29,14 +29,12 @@
 - [x] Fix Unit conversion when serializing using Serde
 - [x] Unit conversion for GPV head curves
 - [x] Setup unit and integration testing, improve coverage
+- [x] Setup automated benchmarks
+- [ ] Create EPANET2_3 API compatibility layer
 - [ ] Implement headerror convergence criteria
 - [ ] Update convergence criteria for PDA
 - [ ] Implement RULES
 - [ ] Implement report start and statistic option
 - [ ] Tanks with volume curve
-- [ ] Introduce more robust unit type system to handle conversions between different units and systems
 - [ ] Network validation (connectivity, presence of tanks)
 - [ ] Identify and remove unconnected zones from the solver
-- [ ] Try to get the solver working for f32 in addition to f64 (SIMD speedup?)
-- [ ] Setup automated benchmarks
-- [ ] Create EPANET2_3 API compatibility layer

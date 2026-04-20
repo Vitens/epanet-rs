@@ -46,6 +46,12 @@ enum ReadState {
 
 impl Network {
 
+  pub fn from_file(file: &str) -> Result<Network, InputError> {
+    let mut network = Network::default();
+    network.read_file(file)?;
+    Ok(network)
+  }
+
   pub fn read_file(&mut self, file: &str) -> Result<(), InputError> {
     let file_extension = file.split('.').last()
       .ok_or_else(|| InputError::new(format!("Cannot determine file extension for: {}", file)))?;
@@ -130,31 +136,13 @@ impl Network {
             self.title = Some(line.trim().into());
             Ok(())
           }
-          ReadState::Junctions => { 
-            let junction = self.read_junction(line)?;
-            self.add_node(junction).map_err(|e| InputError::new(e))
-          }
-          ReadState::Valves => { 
-            let valve = self.read_valve(line)?;
-            self.add_link(valve).map_err(|e| InputError::new(e))
-          }
-          ReadState::Pipes => { 
-            let pipe = self.read_pipe(line)?;
-            self.add_link(pipe).map_err(|e| InputError::new(e))
-          }
-          ReadState::Tanks => { 
-            let tank = self.read_tank(line)?;
-            self.add_node(tank).map_err(|e| InputError::new(e))
-          }
-          ReadState::Reservoirs => { 
-            let reservoir = self.read_reservoir(line)?;
-            self.add_node(reservoir).map_err(|e| InputError::new(e))
-          }
-          ReadState::Pumps => { 
-            let pump = self.read_pump(line)?;
-            self.add_link(pump).map_err(|e| InputError::new(e))
-          }
-          ReadState::Curves => { 
+          ReadState::Junctions => self.add_node(self.read_junction(line)?),
+          ReadState::Valves =>  self.add_link(self.read_valve(line)?),
+          ReadState::Pipes => self.add_link(self.read_pipe(line)?),
+          ReadState::Tanks => self.add_node(self.read_tank(line)?),
+          ReadState::Reservoirs => self.add_node(self.read_reservoir(line)?),
+          ReadState::Pumps => self.add_link(self.read_pump(line)?),
+          ReadState::Curves => {
             self.read_curve(line)
           }
           ReadState::Demands => { 
@@ -307,7 +295,7 @@ impl Network {
   }
 
   /// Read a junction from a parts iterator
-  fn read_junction(&mut self, line: &str) -> Result<Node, InputError> {
+  fn read_junction(&self, line: &str) -> Result<Node, InputError> {
     let mut parts = parse_line(line);
     let id = parts.next().ok_or_missing("junction id")?.into();
     let elevation = parts.next().unwrap_or("0").parse_field::<f64>("elevation")?;
@@ -323,7 +311,7 @@ impl Network {
   }
 
   /// Read a reservoir from a parts iterator
-  fn read_reservoir(&mut self, line: &str) -> Result<Node, InputError> {
+  fn read_reservoir(&self, line: &str) -> Result<Node, InputError> {
     let mut parts = parse_line(line);
     let id = parts.next().ok_or_missing("reservoir id")?.into();
     let elevation = parts.next().ok_or_missing("elevation")?.parse_field::<f64>("elevation")?;
@@ -337,7 +325,7 @@ impl Network {
     })
   }
 
-  fn read_tank(&mut self, line: &str) -> Result<Node, InputError> {
+  fn read_tank(&self, line: &str) -> Result<Node, InputError> {
     let mut parts = parse_line(line);
     let id = parts.next().ok_or_missing("tank id")?.into();
     let elevation = parts.next().ok_or_missing("elevation")?.parse_field::<f64>("elevation")?;
@@ -384,7 +372,7 @@ impl Network {
   }
 
   /// Read a valve from a parts iterator
-  fn read_valve(&mut self, line: &str) -> Result<Link, InputError> {
+  fn read_valve(&self, line: &str) -> Result<Link, InputError> {
     let mut parts = parse_line(line);
 
     let id = parts.next().ok_or_missing("valve id")?.into();
@@ -966,7 +954,7 @@ mod tests {
 
   #[test]
   fn test_read_junction_basic() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_junction("J1  100.5  25.0").unwrap();
     
     assert_eq!(&*node.id, "J1");
@@ -982,7 +970,7 @@ mod tests {
 
   #[test]
   fn test_read_junction_with_pattern() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_junction("J2  50.0  100.0  PAT1").unwrap();
     
     assert_eq!(&*node.id, "J2");
@@ -998,7 +986,7 @@ mod tests {
 
   #[test]
   fn test_read_junction_with_comment() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     // Pattern field contains semicolon (comment marker) - should be ignored
     let node = network.read_junction("J3  75.0  50.0  ;comment").unwrap();
     
@@ -1011,7 +999,7 @@ mod tests {
 
   #[test]
   fn test_read_junction_missing_demand() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     // Only ID and elevation provided - demand should default to 0.0
     let node = network.read_junction("J4  200.0").unwrap();
 
@@ -1026,7 +1014,7 @@ mod tests {
 
   #[test]
   fn test_read_valve_basic() {
-    let mut network = test_network(true);
+    let network = test_network(true);
     let valve = network.read_valve("V1  N1  N2 12.0 PRV 50.0  100.0").unwrap();
     
     assert_eq!(&*valve.id, "V1");
@@ -1042,7 +1030,7 @@ mod tests {
 
   #[test]
   fn test_read_valve_gpv() {
-    let mut network = test_network(true);
+    let network = test_network(true);
     let valve = network.read_valve("V2  N1  N2 12.0 GPV GPV_CURVE  100.0").unwrap();
     
     assert_eq!(&*valve.id, "V2");
@@ -1055,7 +1043,7 @@ mod tests {
 
   #[test]
   fn test_read_valve_fcv() {
-    let mut network = test_network(true);
+    let network = test_network(true);
     let valve = network.read_valve("V3  N1  N2 12.0 FCV 50.0  100.0 FCV_CURVE").unwrap();
     
     assert_eq!(&*valve.id, "V3");
@@ -1073,7 +1061,7 @@ mod tests {
 
   #[test]
   fn test_read_reservoir_basic() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_reservoir("RES1  150.0").unwrap();
     
     assert_eq!(&*node.id, "RES1");
@@ -1088,7 +1076,7 @@ mod tests {
 
   #[test]
   fn test_read_reservoir_with_pattern() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_reservoir("RES2  200.0  HEADPAT; comment").unwrap();
     
     let NodeType::Reservoir(reservoir) = &node.node_type else {
@@ -1146,7 +1134,7 @@ mod tests {
 
   #[test]
   fn test_read_tank_basic() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_tank("T1  100  15  5  25  120  0  *  Yes").unwrap();
 
     let NodeType::Tank(tank) = &node.node_type else {
@@ -1164,7 +1152,7 @@ mod tests {
   }
   #[test]
   fn test_read_tank_with_volume_curve() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_tank("T2  100  15  5  25  120  0  VOLCURVE").unwrap();
     
     let NodeType::Tank(tank) = &node.node_type else {
@@ -1176,7 +1164,7 @@ mod tests {
 
   #[test]
   fn test_read_tank_as_reservoir() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_tank("T3  100").unwrap();
 
     let NodeType::Reservoir(_reservoir) = &node.node_type else {

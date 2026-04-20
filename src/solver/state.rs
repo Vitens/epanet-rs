@@ -2,6 +2,10 @@ use crate::model::link::{LinkTrait, LinkStatus};
 use crate::model::network::Network;
 use crate::model::node::NodeType;
 
+use crate::model::units::{Cfs, Ft3};
+use crate::model::options::DemandModel;
+use crate::model::control::ControlCondition;
+
 /// The solver state is the initial/final state of the solver for a single step
 #[derive(Debug, Clone)]
 pub struct SolverState {
@@ -25,7 +29,6 @@ impl SolverState {
     } else { 0.0 }
     ).collect::<Vec<f64>>();
 
-
     Self { flows: network.links.iter().map(|l| l.initial_flow()).collect::<Vec<f64>>(), 
            heads: network.nodes.iter().map(|n| n.initial_head()).collect::<Vec<f64>>(), 
            emitter_flows: initial_emitter_flows,
@@ -35,5 +38,69 @@ impl SolverState {
            statuses: network.links.iter().map(|l| l.initial_status).collect::<Vec<LinkStatus>>(),
            resistances: network.links.iter().map(|l| l.resistance()).collect::<Vec<f64>>(),
          }
+  }
+
+  /// Applies demand and head patterns to the state at the given time.
+  /// TODO: Add support for multiple patterns
+  pub fn apply_patterns(&mut self, network: &Network, time: usize) {
+    let time_options = &network.options.time_options;
+    let pattern_time = time_options.pattern_start + time;
+    let pattern_index = pattern_time / time_options.pattern_timestep;
+
+    for (i, node) in network.nodes.iter().enumerate() {
+      let NodeType::Reservoir(reservoir) = &node.node_type else { continue };
+      let Some(pat_idx) = reservoir.head_pattern_index else { continue };
+      let pattern = &network.patterns[pat_idx];
+      self.heads[i] = node.elevation * pattern.multipliers[pattern_index % pattern.multipliers.len()];
+    }
+
+    let default_pattern_idx = network.options.pattern.as_ref()
+      .or(Some(&Box::from("1")))
+      .and_then(|id| network.pattern_map.get(id).copied());
+
+    self.demands = network.nodes.iter().map(|n| {
+      let NodeType::Junction(junction) = &n.node_type else { return 0.0 };
+      let pat_idx = junction.pattern_index.or(default_pattern_idx);
+      let pattern = pat_idx.map(|idx| &network.patterns[idx]);
+      let multiplier = match pattern {
+        Some(p) => p.multipliers[pattern_index % p.multipliers.len()],
+        None => 1.0,
+      };
+      junction.basedemand * multiplier * network.options.demand_multiplier
+    }).collect::<Vec<Cfs>>();
+
+    if network.options.demand_model == DemandModel::PDA {
+      self.demand_flows = self.demands.clone();
+    }
+  }
+
+  /// Applies controls to the state at the given time.
+  pub fn apply_controls(&mut self, network: &Network, time: usize) {
+    let clocktime = (time + network.options.time_options.start_clocktime) % (24 * 3600);
+
+    for control in &network.controls {
+      // skip controls that are not pressure or level controls
+      if matches!(control.condition, ControlCondition::LowPressure { .. } | ControlCondition::HighPressure { .. }) {
+        continue;
+      }
+      if matches!(control.condition, ControlCondition::LowLevel { .. } | ControlCondition::HighLevel { .. }) && time == 0 {
+        continue;
+      }
+      if control.is_active(self, network, time, clocktime) {
+        control.activate(self, network);
+      }
+    }
+  }
+
+  /// Updates the tank levels for the given time step.
+  pub fn update_tanks(&mut self, network: &Network, timestep: usize) {
+    for (tank_index, node) in network.nodes.iter().enumerate() {
+      if let NodeType::Tank(tank) = &node.node_type {
+        // calculate the delta volume and new head for the tank
+        let delta_volume = self.demands[tank_index] * timestep as Ft3;
+        let new_head = tank.new_head(delta_volume, self.heads[tank_index]);
+        self.heads[tank_index] = new_head;
+      }
+    }
   }
 }

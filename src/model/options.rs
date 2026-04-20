@@ -98,6 +98,32 @@ impl Default for SimulationOptions {
     }
   }
 }
+// create a new simulation options with the given flow units and headloss formula
+impl SimulationOptions {
+  pub fn new(flow_units: FlowUnits, headloss_formula: HeadlossFormula) -> Self {
+    let mut options = Self::default();
+    // set the unit system based on the flow units
+    options.flow_units = flow_units;
+    options.unit_system = match flow_units {
+      FlowUnits::CFS | FlowUnits::GPM | FlowUnits::MGD | FlowUnits::IMGD | FlowUnits::AFD => UnitSystem::US,
+      FlowUnits::LPS | FlowUnits::LPM | FlowUnits::MLD | FlowUnits::CMS | FlowUnits::CMH | FlowUnits::CMD => UnitSystem::SI,
+    };
+    // set the default pressure units based on the unit system
+    options.pressure_units = match options.unit_system {
+      UnitSystem::US => PressureUnits::PSI,
+      UnitSystem::SI => PressureUnits::METERS,
+    };
+
+    options.headloss_formula = headloss_formula;
+
+    // convert the options to standard units
+    options.convert_to_standard();
+
+    options
+  }
+}
+
+
 
 // unit conversion methods for simulationoptions
 impl SimulationOptions {

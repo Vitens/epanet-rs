@@ -2,7 +2,6 @@ use std::ffi::CStr;
 use std::os::raw::{c_char};
 
 use crate::error::InputError;
-use crate::model::network::Network;
 
 use crate::simulation::Simulation;
 use crate::ffi::error_codes::ErrorCode;
@@ -91,17 +90,16 @@ pub extern "C" fn EN_open(
         Err(_) => return ErrorCode::CannotOpenInputFile,
     };
 
-    let mut network = Network::default();
-    if let Err(e) = network.read_file(path) {
-        return match e {
+    let simulation = match Simulation::from_file(path) {
+        Ok(s) => s,
+        Err(e) => return match e {
             InputError::FileOpen { .. } | InputError::FileRead(_) => ErrorCode::CannotOpenInputFile,
             InputError::Parse { .. } => ErrorCode::InputError,
-        };
-    }
-
-    let simulation = match Simulation::new(network) {
-        Ok(s) => s,
-        Err(_) => return ErrorCode::CannotSolveHydraulics,
+            InputError::NodeExists { .. } => ErrorCode::DuplicateId,
+            InputError::LinkExists { .. } => ErrorCode::DuplicateId,
+            InputError::PatternNotFound { .. } => ErrorCode::UndefinedPattern,
+            _ => ErrorCode::InputError,
+        },
     };
 
     let project = unsafe { &mut *ph };

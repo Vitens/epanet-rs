@@ -26,6 +26,18 @@ pub enum InputError {
   #[error("IO error: {0}")]
   FileRead(#[from] std::io::Error),
 
+  #[error("Topology changes not allowed while the solver is open")]
+  TopologyChangeWhileSolverOpen,
+
+  #[error("Node {node_id} already exists")]
+  NodeExists { node_id: Box<str> },
+
+  #[error("Link {link_id} already exists")]
+  LinkExists { link_id: Box<str> },
+
+  #[error("Pattern {pattern_id} not found")]
+  PatternNotFound { pattern_id: Box<str> },
+
   #[error("{message}{}", format_suffix(.line, .context))]
   Parse {
     message: String,

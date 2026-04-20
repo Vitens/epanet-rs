@@ -142,10 +142,7 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, print
   debug!("Network loaded in {:?}", end_time.duration_since(start_time));
 
   let start_time = Instant::now();
-  let mut simulation = Simulation::new(network).unwrap_or_else(|e| {
-    error!("Failed to create simulation: {}", e);
-    std::process::exit(1);
-  });
+  let mut simulation = Simulation::new(network);
 
   simulation.initialize_hydraulics().unwrap_or_else(|e| {
     error!("Failed to initialize simulation: {}", e);

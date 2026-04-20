@@ -6,7 +6,6 @@ use std::process::Stdio;
 
 use simplelog::{info, warn, error};
 
-use crate::model::network::Network;
 use crate::simulation::Simulation;
 use crate::utils::binfile::read_outfile;
 
@@ -20,13 +19,8 @@ pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bo
     return false;
   }
 
-  let mut network = Network::default();
-  network.read_file(input_file).unwrap_or_else(|e| {
+  let mut simulation = Simulation::from_file(input_file).unwrap_or_else(|e| {
     error!("Failed to load network: {}", e);
-    std::process::exit(1);
-  });
-  let mut simulation = Simulation::new(network).unwrap_or_else(|e| {
-    error!("Failed to create simulation: {}", e);
     std::process::exit(1);
   });
   simulation.skip_timesteps = false;
