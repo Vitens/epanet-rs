@@ -1,6 +1,6 @@
 //! Integration test for the hydraulic solver using pump.inp
 
-use epanet_rs::model::network::Network;
+use epanet_rs::model::network::{Network};
 use epanet_rs::simulation::Simulation;
 use epanet_rs::solver::result::SolverResult;
 
@@ -33,10 +33,7 @@ fn verify_heads_and_flows(network: &Network, result: &SolverResult, expected_hea
 /// Test solving pump.inp and verify exact head and flow values
 #[test]
 fn test_solve_pump_network() {
-    let mut network = Network::default();
-    network.read_inp("tests/pump.inp").expect("Failed to load pump.inp");
-
-    let mut simulation = Simulation::new(network).expect("Failed to create simulation");
+    let mut simulation = Simulation::from_file("tests/pump.inp").expect("Failed to create simulation");
     let result = simulation.solve_hydraulics(false).expect("Failed to solve hydraulics");
 
     // Expected heads (in feet)
@@ -71,10 +68,7 @@ fn test_solve_pump_network() {
 /// Test solving valve.inp and verify exact head and flow values
 #[test]
 fn test_solve_valve_network() {
-  let mut network = Network::default();
-  network.read_inp("tests/valves.inp").expect("Failed to load valves.inp");
-
-  let mut simulation = Simulation::new(network).expect("Failed to create simulation");
+  let mut simulation = Simulation::from_file("tests/valves.inp").expect("Failed to create simulation");
   let result = simulation.solve_hydraulics(false).expect("Failed to solve hydraulics");
 
   // Expected heads (in CFS)
@@ -122,10 +116,7 @@ fn test_solve_valve_network() {
 
 #[test]
 fn test_solve_tanks_network() {
-  let mut network = Network::default();
-  network.read_inp("tests/tanks.inp").expect("Failed to load tanks.inp");
-
-  let mut simulation = Simulation::new(network).expect("Failed to create simulation");
+  let mut simulation = Simulation::from_file("tests/tanks.inp").expect("Failed to create simulation");
   let result = simulation.solve_hydraulics(false).expect("Failed to solve hydraulics");
 
   let expected_heads: Vec<(&str, f64)> = vec![
@@ -150,10 +141,7 @@ fn test_solve_tanks_network() {
 /// Test solving 2tanks.inp and verify exact head and flow values
 #[test]
 fn test_solve_2tanks_controls_network() {
-  let mut network = Network::default();
-  network.read_inp("tests/2tanks-controls.inp").expect("Failed to load 2tanks-controls.inp");
-
-  let mut simulation = Simulation::new(network).expect("Failed to create simulation");
+  let mut simulation = Simulation::from_file("tests/2tanks-controls.inp").expect("Failed to create simulation");
   let result = simulation.solve_hydraulics(false).expect("Failed to solve hydraulics");
 
   let expected_heads: Vec<(&str, f64)> = vec![
@@ -170,10 +158,7 @@ fn test_solve_2tanks_controls_network() {
 
 #[test]
 fn test_solve_emitters_network() {
-  let mut network = Network::default();
-  network.read_inp("tests/emitter.inp").expect("Failed to load emitters.inp");
-
-  let mut simulation = Simulation::new(network).expect("Failed to create simulation");
+  let mut simulation = Simulation::from_file("tests/emitter.inp").expect("Failed to create simulation");
   let result = simulation.solve_hydraulics(false).expect("Failed to solve hydraulics");
 
   let expected_heads: Vec<(&str, f64)> = vec![
@@ -196,10 +181,7 @@ fn test_solve_emitters_network() {
 
 #[test]
 fn test_solve_pda_network() {
-  let mut network = Network::default();
-  network.read_inp("tests/pda.inp").expect("Failed to load pda.inp");
-
-  let mut simulation = Simulation::new(network).expect("Failed to create simulation");
+  let mut simulation = Simulation::from_file("tests/pda.inp").expect("Failed to create simulation");
   let result = simulation.solve_hydraulics(false).expect("Failed to solve hydraulics");
 
   let expected_flows: Vec<(&str, f64)> = vec![
