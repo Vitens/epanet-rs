@@ -12,6 +12,7 @@ use crate::model::units::{UnitConversion, FlowUnits};
 use crate::model::options::HeadlossFormula;
 use crate::model::node::Node;
 use crate::model::junction::Junction;
+use crate::model::reservoir::Reservoir;
 use crate::model::options::SimulationOptions;
 
 use crate::model::control::ControlCondition;
@@ -238,105 +239,4 @@ impl Simulation {
       None
     }
   }
-}
-
-/// Methods to modify the network and solverstate
-impl Simulation {
-
-  /// Add a new junction node to the network.
-  pub fn add_junction(&mut self, id: &str, elevation: f64, basedemand: f64, pattern: Option<&str>, emitter_coefficient: f64, coordinates: Option<(f64, f64)>) -> Result<(), InputError> {
-
-    if self.solver.is_some() {
-      return Err(InputError::TopologyChangeWhileSolverOpen);
-    }
-
-    // get the pattern index if it is provided
-    let pattern_index = if let Some(pattern) = pattern {
-      Some(*self.network.pattern_map.get(pattern).ok_or(InputError::PatternNotFound { pattern_id: pattern.into() })?)
-    } else {
-      None
-    };
-
-    let mut junction = Node {
-      id: id.into(),
-      elevation: elevation,
-      node_type: NodeType::Junction(Junction { basedemand: basedemand, pattern: pattern.map(|s| s.into()), pattern_index: pattern_index, emitter_coefficient: emitter_coefficient }),
-      coordinates: coordinates,
-    };
-
-    junction.convert_to_standard(&self.network.options);
-
-    self.network.add_node(junction)?;
-
-    Ok(())
-  }
-
-
-
-  /// Sets the elevation of a node and updates the state heads if the hydraulic simulation is open.
-  pub fn set_node_elevation(&mut self, node_id: &str, elevation: f64) {
-    let index = self.network.node_map.get(node_id).unwrap();
-    let node = &mut self.network.nodes[*index];
-    // update elevation
-    let value = elevation / self.network.options.unit_system.per_feet();
-    
-    // update the state heads
-    if let Some(state) = self.state.as_mut() {
-      match &mut node.node_type {
-        NodeType::Tank(_) => state.heads[*index] = (node.elevation - state.heads[*index]) + value,
-        NodeType::Reservoir(_) => state.heads[*index] = value,
-        _ => (),
-      }
-    }
-
-    node.elevation = value;
-  }
-
-}
-
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn test_network_addition() {
-    let network = Network::default();
-    let mut simulation = Simulation::init(FlowUnits::CFS, HeadlossFormula::HazenWilliams);
-    simulation.add_junction("J1", 100.0, 10.0, None, 0.0, None).unwrap();
-
-    assert_eq!(simulation.network.nodes.len(), 1);
-    assert_eq!(simulation.network.nodes[0].id, "J1".into());
-    assert_eq!(simulation.network.nodes[0].elevation, 100.0);
-
-  }
-
-  #[test]
-  fn test_network_addition_with_units() {
-    let mut simulation = Simulation::init(FlowUnits::LPS, HeadlossFormula::DarcyWeisbach);
-    simulation.add_junction("J1", 100.0, 10.0, None, 0.0, None).unwrap();
-
-    dbg!(&simulation.network.options);
-
-    assert_eq!(simulation.network.nodes.len(), 1);
-    assert_eq!(simulation.network.nodes[0].id, "J1".into());
-    assert_eq!(simulation.network.nodes[0].elevation, 100.0 / MperFT); // test conversion to standard units
-
-    let NodeType::Junction(junction) = &simulation.network.nodes[0].node_type else {
-      panic!("Node is not a junction");
-    };
-    assert_eq!(junction.basedemand, 10.0 / LPSperCFS); // test conversion to standard units
-  }
-
-
-
-  // #[test]
-  // fn test_set_node_elevation() {
-  //   let network = test_network();
-  //   let mut simulation = Simulation::new(network);
-  //   simulation.initialize_hydraulics().unwrap();
-  //   simulation.set_node_elevation("R1", 123.0);
-  //   assert_eq!(simulation.network.nodes[0].elevation, 123.0);
-  //   assert_eq!(simulation.state.as_ref().unwrap().heads[0], 123.0);
-  // }
 }

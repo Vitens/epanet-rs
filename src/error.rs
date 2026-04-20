@@ -35,6 +35,15 @@ pub enum InputError {
   #[error("Link {link_id} already exists")]
   LinkExists { link_id: Box<str> },
 
+  #[error("Node {node_id} not found")]
+  NodeNotFound { node_id: Box<str> },
+
+  #[error("Node {node_id} is not a junction")]
+  NodeNotAJunction { node_id: Box<str> },
+
+  #[error("Link {link_id} not found")]
+  LinkNotFound { link_id: Box<str> },
+
   #[error("Pattern {pattern_id} not found")]
   PatternNotFound { pattern_id: Box<str> },
 

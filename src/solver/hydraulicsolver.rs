@@ -66,8 +66,6 @@ pub struct HydraulicSolver {
   pub csc_indices: Vec<CSCIndex>,
   /// precomputed indices for the rows of the Jacobian matrix for each node
   pub node_rows: Vec<Option<usize>>,
-  /// network version used to create matrices, should match the network version
-  pub network_version: i32,
 }
 
 impl HydraulicSolver {
@@ -90,18 +88,13 @@ impl HydraulicSolver {
     // precompute the symbolic Cholesky factorization
     let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower).map_err(|e| SolverError::Factorization(e.to_string()))?;
 
-    Ok(Self { node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows, network_version: network.network_version })
+    Ok(Self { node_to_unknown, sparsity_pattern, symbolic_llt, perm_fwd, jac, csc_indices, node_rows })
   }
 
   /// Solve the network for a single timestep using the Global Gradient Algorithm (Todini & Pilati, 1987).
   /// Takes a solver state and returns a new state after convergence.
   pub fn solve(&self, network: &Network, state: &SolverState) -> Result<SolverState, SolverError> {
     
-    // verify that the network version matches the solver version
-    if self.network_version != network.network_version {
-      return Err(SolverError::StaleTopology);
-    }
-
     // clone the solver state to avoid modifying the original
     let mut state = state.clone();
 

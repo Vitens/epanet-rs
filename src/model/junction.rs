@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Junction {
   pub basedemand: Cfs,
+  pub emitter_coefficient: f64,
   pub pattern: Option<Box<str>>,
   #[serde(skip)]
   pub pattern_index: Option<usize>,
-  pub emitter_coefficient: f64,
 }
 
 impl Junction {
@@ -82,5 +82,12 @@ impl UnitConversion for Junction {
   }
   fn convert_from_standard(&mut self, options: &SimulationOptions) {
     self.basedemand = self.basedemand * options.flow_units.per_cfs();
+    // convert the emitter coefficient from the standard unit system
+    if self.emitter_coefficient > 0.0 {
+      let pressure_factor = if options.unit_system == UnitSystem::US { PSIperFT } else { MperFT };
+      let conversion_factor = options.flow_units.per_cfs().powf(options.emitter_exponent) / pressure_factor;
+
+      self.emitter_coefficient = (conversion_factor / self.emitter_coefficient).powf(1.0 / options.emitter_exponent);
+    }
   }
 }
