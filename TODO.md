@@ -38,3 +38,6 @@
 - [ ] Tanks with volume curve
 - [ ] Network validation (connectivity, presence of tanks)
 - [ ] Identify and remove unconnected zones from the solver
+
+# Network modify API
+- [ ] Update PSV/PRV valve setting on node elevation change

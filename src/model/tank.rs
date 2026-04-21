@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Tank {
+  /// This is a duplicate of the node elevation, but stored here for convenience.
   pub elevation: Ft,        // elevation of the tank (ft)
   pub initial_level: Ft,    // initial level of the tank (ft)
   pub min_level: Ft,        // minimum level of the tank (ft)
@@ -121,6 +122,8 @@ impl Tank {
 
 impl UnitConversion for Tank {
   fn convert_to_standard(&mut self, options: &SimulationOptions) {
+    // convert the elevation to feet
+    self.elevation = self.elevation / options.unit_system.per_feet();
     // convert the initial level, min level, max level, diameter, min volume
     self.initial_level = self.initial_level / options.unit_system.per_feet();
     self.min_level = self.min_level / options.unit_system.per_feet();
@@ -129,6 +132,7 @@ impl UnitConversion for Tank {
     self.min_volume = self.min_volume / options.unit_system.per_cubic_feet();
   }
   fn convert_from_standard(&mut self, options: &SimulationOptions) {
+    self.elevation = self.elevation * options.unit_system.per_feet();
     // convert the initial level, min level, max level, diameter, min volume
     self.initial_level = self.initial_level * options.unit_system.per_feet();
     self.min_level = self.min_level * options.unit_system.per_feet();

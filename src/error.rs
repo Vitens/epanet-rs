@@ -11,6 +11,8 @@ pub enum SolverError {
   MaxIterations { max_trials: usize },
   #[error("Network topology has changed since the solver was created, please recreate the solver")]
   StaleTopology,
+  #[error("Network properties have changed since the solver state was created, please update the solver state")]
+  StaleProperties,
   #[error("Failed to compute Cholesky factorization: {0}")]
   Factorization(String),
 }
@@ -26,9 +28,6 @@ pub enum InputError {
   #[error("IO error: {0}")]
   FileRead(#[from] std::io::Error),
 
-  #[error("Topology changes not allowed while the solver is open")]
-  TopologyChangeWhileSolverOpen,
-
   #[error("Node {node_id} already exists")]
   NodeExists { node_id: Box<str> },
 
@@ -41,11 +40,32 @@ pub enum InputError {
   #[error("Node {node_id} is not a junction")]
   NodeNotAJunction { node_id: Box<str> },
 
+  #[error("Node {node_id} is not a tank")]
+  NodeNotATank { node_id: Box<str> },
+
+  #[error("Node {node_id} is not a reservoir")]
+  NodeNotAReservoir { node_id: Box<str> },
+
   #[error("Link {link_id} not found")]
   LinkNotFound { link_id: Box<str> },
 
+  #[error("Link {link_id} is not a pipe")]
+  LinkNotAPipe { link_id: Box<str> },
+
+  #[error("Link {link_id} is not a pump")]
+  LinkNotAPump { link_id: Box<str> },
+
+  #[error("Link {link_id} is not a valve")]
+  LinkNotAValve { link_id: Box<str> },
+
   #[error("Pattern {pattern_id} not found")]
   PatternNotFound { pattern_id: Box<str> },
+
+  #[error("Curve {curve_id} not found")]
+  CurveNotFound { curve_id: Box<str> },
+
+  #[error("Tank {tank_id} levels are invalid: initial_level={initial_level}, min_level={min_level}, max_level={max_level}")]
+  TankLevelsInvalid { tank_id: Box<str>, initial_level: f64, min_level: f64, max_level: f64 },
 
   #[error("{message}{}", format_suffix(.line, .context))]
   Parse {

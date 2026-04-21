@@ -197,7 +197,7 @@ impl Network {
 
   fn update_links(&mut self) -> Result<(), InputError> {
     // update link specific statistics (TODO: move to separate method)
-    for (link_index, link) in self.links.iter_mut().enumerate() {
+    for link in self.links.iter_mut() {
       if let LinkType::Pump(pump) = &mut link.link_type {
         // get the head curve
         if let Some(head_curve_id) = &pump.head_curve_id {
@@ -231,13 +231,7 @@ impl Network {
         // convert the minor loss to a coefficient
         pipe.minor_loss = 0.02517 * pipe.minor_loss / pipe.diameter.powi(4);
       }
-      // check if the link is connected to a tank
-      if let NodeType::Tank(tank) = &mut self.nodes[link.end_node].node_type {
-        tank.links_to.push(link_index);
-      }
-      if let NodeType::Tank(tank) = &mut self.nodes[link.start_node].node_type {
-        tank.links_from.push(link_index);
-      }
+      // tank links_to/links_from are maintained by Network::add_link
     }
     Ok(())
   }

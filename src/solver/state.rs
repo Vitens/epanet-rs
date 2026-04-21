@@ -17,6 +17,10 @@ pub struct SolverState {
   pub statuses: Vec<LinkStatus>,
   pub settings: Vec<f64>,
   pub resistances: Vec<f64>,
+  /// version of the topology of the network on which the state was created
+  pub topology_version: u32,
+  /// version of the properties of the network on which the state was created
+  pub properties_version: u32,
 }
 
 impl SolverState {
@@ -37,6 +41,8 @@ impl SolverState {
            settings: network.links.iter().map(|l| l.initial_setting()).collect::<Vec<f64>>(),
            statuses: network.links.iter().map(|l| l.initial_status).collect::<Vec<LinkStatus>>(),
            resistances: network.links.iter().map(|l| l.resistance()).collect::<Vec<f64>>(),
+           topology_version: network.topology_version,
+           properties_version: network.properties_version,
          }
   }
 
@@ -108,9 +114,11 @@ impl SolverState {
   pub fn update_with_network_changes(&mut self, network: &mut Network) {
 
     // if the topology has changed, reset the state to the initial values
-    if network.topology_changed {
+    if network.topology_version != self.topology_version {
       *self = SolverState::new_with_initial_values(network);
       // clear the updated nodes and links
+      network.updated_nodes.clear();
+      network.updated_links.clear();
     }
     else {
 
@@ -145,5 +153,6 @@ impl SolverState {
     network.updated_nodes.clear();
     network.updated_links.clear();
 
+    self.properties_version = network.properties_version;
   }
 }

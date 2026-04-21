@@ -65,13 +65,16 @@ impl Simulation {
   /// Returns the solved state at the given time.
   /// Equivalent to EN_runH.
   pub fn run_hydraulics(&mut self) -> Result<usize, SolverError> {
-    // check if the solver is initialized
-    if self.network.topology_changed {
-      // re-initialize the solver and state
+    // check if the solver is initialized and that its topology matches the network
+    let needs_reinit = match self.solver.as_ref() {
+      Some(solver) => self.network.topology_version != solver.topology_version,
+      None => return Err(SolverError::NotInitialized),
+    };
+    if needs_reinit {
       self.initialize_hydraulics()?;
     }
 
-    let solver = self.solver.as_ref().ok_or(SolverError::NotInitialized)?;
+    let solver = self.solver.as_ref().unwrap();
     let state = self.state.as_mut().unwrap();
 
     // update the state with the changes to the network
@@ -79,7 +82,7 @@ impl Simulation {
 
     state.apply_patterns(&self.network, self.time);
     state.apply_controls(&self.network, self.time);
-    self.state = Some(solver.solve(&self.network, &state)?);
+    self.state = Some(solver.solve(&self.network, state)?);
     // set the solved flag to true
     self.solved = true;
     Ok(self.time)
