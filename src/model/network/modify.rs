@@ -948,19 +948,15 @@ impl Network {
     Ok(())
   }
 
-  /// Remove a node from the network. Fails if any link or control still
-  /// references the node. Uses `swap_remove` internally, so the last node in
-  /// `nodes` takes the removed node's slot; `node_map`, link endpoint indices,
-  /// control node/tank indices and `updated_nodes` are all kept in sync.
+  /// Remove a node from the network. Any links attached to the node are
+  /// cascade-removed first via `remove_link` (so their controls must not
+  /// block removal). Fails if a control still references the node itself.
+  /// Uses `swap_remove` internally, so the last node in `nodes` takes the
+  /// removed node's slot; `node_map`, link endpoint indices, control
+  /// node/tank indices and `updated_nodes` are all kept in sync.
   pub fn remove_node(&mut self, id: &str) -> Result<(), InputError> {
     let node_index = *self.node_map.get(id)
       .ok_or_else(|| InputError::NodeNotFound { node_id: id.into() })?;
-
-    if self.links.iter().any(|l| l.start_node == node_index || l.end_node == node_index) {
-      return Err(InputError::new(format!(
-        "Cannot remove node {}: referenced by one or more links", id
-      )));
-    }
 
     let referenced_by_control = self.controls.iter().any(|c| match &c.condition {
       ControlCondition::HighPressure { node_index: ni, .. }
@@ -973,6 +969,17 @@ impl Network {
       return Err(InputError::new(format!(
         "Cannot remove node {}: referenced by a control", id
       )));
+    }
+
+    // cascade-remove every link attached to this node (at either endpoint).
+    // ids are collected up front since `remove_link` uses `swap_remove` and
+    // therefore invalidates positional link indices as it runs.
+    let connected_link_ids: Vec<Box<str>> = self.links.iter()
+      .filter(|l| l.start_node == node_index || l.end_node == node_index)
+      .map(|l| l.id.clone())
+      .collect();
+    for link_id in &connected_link_ids {
+      self.remove_link(link_id)?;
     }
 
     self.node_map.remove(id);
@@ -2934,13 +2941,49 @@ mod tests {
   }
 
   #[test]
-  fn test_remove_node_referenced_by_link_fails() {
+  fn test_remove_node_cascade_removes_connected_links() {
+    // J1 -P1- J2 -P2- J3 and a stray P3 (J1 -> J3). Removing J1 should
+    // cascade-remove P1 and P3 but leave P2 alone.
+    let mut network = Network::default();
+    add_two_junctions(&mut network);
+    network.add_junction("J3", &JunctionData {
+      elevation: 0.0, basedemand: 0.0, emitter_coefficient: 0.0,
+      pattern: None, coordinates: None,
+    }).unwrap();
+    network.add_pipe("P1", &sample_pipe_data()).unwrap();
+    network.add_pipe("P2", &PipeData {
+      start_node: "J2".into(), end_node: "J3".into(),
+      ..sample_pipe_data()
+    }).unwrap();
+    network.add_pipe("P3", &PipeData {
+      start_node: "J1".into(), end_node: "J3".into(),
+      ..sample_pipe_data()
+    }).unwrap();
+
+    network.remove_node("J1").unwrap();
+
+    assert_eq!(network.nodes.len(), 2);
+    assert!(network.node_map.get("J1").is_none());
+    assert_eq!(network.links.len(), 1);
+    assert!(network.link_map.get("P1").is_none());
+    assert!(network.link_map.get("P3").is_none());
+    assert!(network.link_map.get("P2").is_some());
+  }
+
+  #[test]
+  fn test_remove_node_cascade_fails_if_link_referenced_by_control() {
+    use crate::model::control::{Control, ControlCondition};
     let mut network = Network::default();
     add_two_junctions(&mut network);
     network.add_pipe("P1", &sample_pipe_data()).unwrap();
+    network.controls.push(Control {
+      condition: ControlCondition::Time { seconds: 0 },
+      link_id: "P1".into(),
+      setting: None,
+      status: Some(LinkStatus::Closed),
+    });
     let err = network.remove_node("J1").unwrap_err();
     assert!(matches!(err, InputError::Parse { .. }));
-    assert_eq!(network.nodes.len(), 2);
   }
 
   #[test]

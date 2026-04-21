@@ -62,4 +62,15 @@ fn test_network_creation() {
   let result = simulation.solve_hydraulics(false).unwrap();
   assert_eq!(result.heads[0][0], 110.00);
   assert!((result.heads[0][1] - 105.50).abs() < 0.01);
+
+  // remove node "7"
+  simulation.network.remove_node("7").unwrap();
+  // check that the network now has 7 nodes and 7 links
+  assert_eq!(simulation.network.nodes.len(), 7);
+  assert_eq!(simulation.network.links.len(), 7);
+
+  let result = simulation.solve_hydraulics(false).unwrap();
+  assert!((result.heads[0][1] - 106.35).abs() < 0.01);
+
+
 }
