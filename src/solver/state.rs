@@ -103,4 +103,47 @@ impl SolverState {
       }
     }
   }
+
+  /// Updates the state with the changes to the network.
+  pub fn update_with_network_changes(&mut self, network: &mut Network) {
+
+    // if the topology has changed, reset the state to the initial values
+    if network.topology_changed {
+      *self = SolverState::new_with_initial_values(network);
+      // clear the updated nodes and links
+    }
+    else {
+
+      for node_index in network.updated_nodes.iter() {
+        let node = &network.nodes[*node_index];
+
+        match &node.node_type {
+          NodeType::Junction(junction) => {
+            // set the emitter flow to 1.0 if the emitter coefficient is greater than 0.0, otherwise set it to 0.0
+            self.emitter_flows[*node_index] = if junction.emitter_coefficient > 0.0 { 1.0 } else { 0.0 };
+          }
+          NodeType::Tank(_) | NodeType::Reservoir(_) => {
+            // update the head
+            self.heads[*node_index] = node.initial_head();
+          }
+        }
+      }
+
+      for link_index in network.updated_links.iter() {
+        let link = &network.links[*link_index];
+        // update the resistance of the link
+        self.resistances[*link_index] = link.resistance();
+        // reset the flow of the link to the initial flow
+        self.flows[*link_index] = link.initial_flow();
+        // reset the status of the link to the initial status
+        // TODO: investigate whether this leads to inconsistent results when changing non-status parameters of the link
+        self.statuses[*link_index] = link.initial_status;
+      }
+    }
+
+    // clear the updated nodes and links
+    network.updated_nodes.clear();
+    network.updated_links.clear();
+
+  }
 }

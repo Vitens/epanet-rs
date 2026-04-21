@@ -234,6 +234,12 @@ pub struct JunctionUpdate {
 }
 
 impl Network {
+  /// Resets the change tracking flags and sets the topology changed flag to false
+  pub fn reset_changes(&mut self) {
+    self.topology_changed = false;
+    self.updated_nodes.clear();
+    self.updated_links.clear();
+  }
   // Add a new junction to the network and return the index of the new junction
   pub fn add_junction(&mut self, id: &str, data: &JunctionData) -> Result<(), InputError> {
 

@@ -55,6 +55,7 @@ impl Simulation {
     // update the solver if the network version has changed
     self.solver = Some(HydraulicSolver::new(&self.network)?);
     self.state = Some(SolverState::new_with_initial_values(&self.network));
+    self.network.reset_changes();
     self.time = 0;
     self.solved = false;
     Ok(())
@@ -65,8 +66,16 @@ impl Simulation {
   /// Equivalent to EN_runH.
   pub fn run_hydraulics(&mut self) -> Result<usize, SolverError> {
     // check if the solver is initialized
+    if self.network.topology_changed {
+      // re-initialize the solver and state
+      self.initialize_hydraulics()?;
+    }
+
     let solver = self.solver.as_ref().ok_or(SolverError::NotInitialized)?;
     let state = self.state.as_mut().unwrap();
+
+    // update the state with the changes to the network
+    state.update_with_network_changes(&mut self.network);
 
     state.apply_patterns(&self.network, self.time);
     state.apply_controls(&self.network, self.time);
