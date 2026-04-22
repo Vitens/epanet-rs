@@ -3,7 +3,6 @@ use epanet_rs::model::link::LinkStatus;
 use epanet_rs::model::options::HeadlossFormula;
 use epanet_rs::model::units::FlowUnits;
 use epanet_rs::simulation::Simulation;
-use epanet_rs::solver::result::SolverResult;
 use epanet_rs::model::network::modify::*;
 
 
@@ -72,5 +71,6 @@ fn test_network_creation() {
   let result = simulation.solve_hydraulics(false).unwrap();
   assert!((result.heads[0][1] - 106.35).abs() < 0.01);
 
+  // switch link "G" to a valve 
 
 }

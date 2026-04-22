@@ -2,6 +2,7 @@ use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation, get_simulation_mut};
 use crate::ffi::enums::NodeProperty;
 use crate::model::node::NodeType;
+use crate::model::network::modify::{NodeUpdate, JunctionUpdate, TankUpdate, ReservoirUpdate};
 
 use crate::ffi::enums::NodeType as ENNodeType;
 
@@ -189,6 +190,57 @@ pub extern "C" fn EN_getnodevalue(ph: *mut Project, index: c_int, property: c_in
   };
 
   unsafe { *out_value = value as c_double };
+
+  ErrorCode::Ok
+}
+
+// Set the property value of a node
+#[unsafe(no_mangle)]
+pub extern "C" fn EN_setnodevalue(ph: *mut Project, index: c_int, property: c_int, value: c_double) -> ErrorCode {
+  let simulation = get_simulation_mut!(ph);
+
+  // EPANET indexes from 1, so we need to subtract 1 from the index
+  let index = (index-1) as usize;
+
+  let network = &mut simulation.network;
+
+  let node_id = match network.nodes.get(index) {
+    Some(node) => node.id.clone(),
+    None => return ErrorCode::UndefinedNode,
+  };
+
+  let property = match NodeProperty::from_repr(property) {
+    Some(property) => property,
+    None => return ErrorCode::InvalidParameterCode,
+  };
+
+
+  let result = match property {
+    NodeProperty::Elevation => {
+      network.update_node(&node_id, &NodeUpdate { elevation: Some(value as f64), ..Default::default() })
+    }
+    NodeProperty::BaseDemand => {
+      network.update_junction(&node_id, &JunctionUpdate { basedemand: Some(value as f64), ..Default::default() })
+    }
+    NodeProperty::Emitter => {
+      network.update_junction(&node_id, &JunctionUpdate { emitter_coefficient: Some(value as f64), ..Default::default() })
+    }
+    NodeProperty::TankDiam => {
+      network.update_tank(&node_id, &TankUpdate { diameter: Some(value as f64), ..Default::default() })
+    }
+    NodeProperty::MinLevel => {
+      network.update_tank(&node_id, &TankUpdate { min_level: Some(value as f64), ..Default::default() })
+    }
+    NodeProperty::MaxLevel => {
+      network.update_tank(&node_id, &TankUpdate { max_level: Some(value as f64), ..Default::default() })
+    }
+    // TODO: implement missing properties
+    _ => return ErrorCode::InvalidParameterCode,
+  };
+
+  if result.is_err() {
+    return ErrorCode::IllegalNodeProperty;
+  }
 
   ErrorCode::Ok
 }

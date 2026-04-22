@@ -8,6 +8,8 @@ use crate::ffi::enums::LinkProperty;
 use crate::ffi::enums::MISSING_VALUE;
 use crate::constants::MperFT;
 
+use crate::model::network::modify::{LinkUpdate, PipeUpdate, ValveUpdate, PumpUpdate};
+
 use crate::model::units::UnitSystem;
 use crate::model::options::HeadlossFormula;
 use crate::model::link::LinkStatus;
@@ -228,6 +230,80 @@ pub extern "C" fn EN_getlinkvalue(ph: *mut Project, index: c_int, property: c_in
   };
 
   unsafe { *out_value = value };
+
+  ErrorCode::Ok
+}
+
+// Set the property value of a link
+#[unsafe(no_mangle)]
+pub extern "C" fn EN_setlinkvalue(ph: *mut Project, index: c_int, property: c_int, value: c_double) -> ErrorCode {
+  let simulation = get_simulation_mut!(ph);
+
+  let index = (index - 1) as usize;
+
+  let link = match simulation.network.links.get(index) {
+    Some(link) => link,
+    None => return ErrorCode::UndefinedLink,
+  };
+  let link_id = link.id.clone();
+
+  let property = match LinkProperty::from_repr(property) {
+    Some(property) => property,
+    None => return ErrorCode::InvalidParameterCode,
+  };
+
+  let result = match property {
+    LinkProperty::Diameter => {
+      match &link.link_type {
+        LinkType::Pipe(_) => { simulation.network.update_pipe(&link_id, &PipeUpdate { diameter: Some(value as f64), ..Default::default() }) }
+        LinkType::Valve(_) => { simulation.network.update_valve(&link_id, &ValveUpdate { diameter: Some(value as f64), ..Default::default() }) }
+        LinkType::Pump(_) => { return ErrorCode::InvalidParameterCode; }
+      }
+    },
+    LinkProperty::Length => {
+      simulation.network.update_pipe(&link_id, &PipeUpdate { length: Some(value as f64), ..Default::default() })
+    },
+    LinkProperty::Roughness => {
+      simulation.network.update_pipe(&link_id, &PipeUpdate { roughness: Some(value as f64), ..Default::default() })
+    },
+    LinkProperty::MinorLoss => {
+      match &link.link_type {
+        LinkType::Pipe(_) => { simulation.network.update_pipe(&link_id, &PipeUpdate { minor_loss: Some(value as f64), ..Default::default() }) }
+        LinkType::Valve(_) => { simulation.network.update_valve(&link_id, &ValveUpdate { minor_loss: Some(value as f64), ..Default::default() }) }
+        LinkType::Pump(_) => { return ErrorCode::InvalidParameterCode; }
+      }
+    }
+    LinkProperty::InitStatus | LinkProperty::Status => {
+      let link_status = match value {
+        0.0 => LinkStatus::Closed,
+        1.0 => LinkStatus::Open,
+        _ => return ErrorCode::InvalidParameterCode,
+      };
+
+      // if the link is a pipe with check_valve, return an error
+      if let LinkType::Pipe(pipe) = &link.link_type {
+        if pipe.check_valve {
+          return ErrorCode::IllegalValveControl;
+        }
+      }
+      simulation.network.update_link(&link_id, &LinkUpdate { initial_status: Some(link_status), ..Default::default() })
+    },
+    LinkProperty::InitSetting | LinkProperty::Setting => {
+      match &link.link_type {
+        // for pipes, the setting is the roughness
+        LinkType::Pipe(_) => { simulation.network.update_pipe(&link_id, &PipeUpdate { roughness: Some(value as f64), ..Default::default() }) },
+        // for valves, the setting is the valve setting
+        LinkType::Valve(_) => { simulation.network.update_valve(&link_id, &ValveUpdate { setting: Some(value as f64), ..Default::default() }) },
+        // for pumps, the setting is the pump speed
+        LinkType::Pump(_) => { simulation.network.update_pump(&link_id, &PumpUpdate { speed: Some(value as f64), ..Default::default() }) }
+      }
+    },
+    _ => return ErrorCode::InvalidParameterCode,
+  };
+
+  if result.is_err() {
+    return ErrorCode::IllegalLinkProperty;
+  }
 
   ErrorCode::Ok
 }

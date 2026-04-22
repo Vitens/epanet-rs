@@ -39,5 +39,9 @@
 - [ ] Network validation (connectivity, presence of tanks)
 - [ ] Identify and remove unconnected zones from the solver
 
-# Network modify API
-- [ ] Update PSV/PRV valve setting on node elevation change
+# Cleanup and refactoring
+- [ ] Refactor curves to use a combined x and y vector instead of separate vectors
+- [ ] Investigate performance degradation using HashMap for lookup of nodes, links, curves, patterns instead of Vec index
+- [ ] Otherwise, write a method to remap all indices based on ids
+- [ ] Setting tank_level should be possible?
+- [ ] Implement get_* for getting link/node/curve/pattern/control/rule properties in correct units

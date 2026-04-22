@@ -1,7 +1,8 @@
 use crate::error::InputError;
 use crate::model::control::ControlCondition;
-use crate::model::curve::{HeadCurve, ValveCurve};
+use crate::model::curve::{Curve, HeadCurve, ValveCurve};
 use crate::model::junction::Junction;
+use crate::model::pattern::Pattern;
 use crate::model::link::{Link, LinkStatus, LinkType};
 use crate::model::network::Network;
 use crate::model::node::{Node, NodeType};
@@ -149,6 +150,7 @@ pub struct ValveData {
   pub vertices: Option<Vec<(f64, f64)>>,
 }
 
+#[derive(Default)]
 pub struct ValveUpdate {
   pub diameter: Option<f64>,
   pub setting: Option<f64>,
@@ -166,11 +168,41 @@ pub struct ValveUpdate {
 
 /// Generic update for any link. Changing `start_node`/`end_node` is a topology change, forcing a complete solver and state re-initialization.
 /// changing `initial_status` or `vertices` is not.
+#[derive(Default)]
 pub struct LinkUpdate {
   pub start_node: Option<Box<str>>,
   pub end_node: Option<Box<str>>,
   pub vertices: Option<Vec<(f64, f64)>>,
   pub initial_status: Option<LinkStatus>,
+}
+
+/// Data for adding a new time pattern.
+#[derive(Default)]
+pub struct PatternData {
+  pub multipliers: Vec<f64>,
+}
+
+/// Data for updating an existing pattern. Only provided fields are changed.
+#[derive(Default)]
+pub struct PatternUpdate {
+  pub multipliers: Option<Vec<f64>>,
+}
+
+/// Data for adding a new curve. `x` and `y` must be non-empty and the same
+/// length; `x` must be strictly increasing.
+#[derive(Default)]
+pub struct CurveData {
+  pub x: Vec<f64>,
+  pub y: Vec<f64>,
+}
+
+/// Data for updating an existing curve. Any provided axis replaces the
+/// existing values; the resulting `x`/`y` pair must still satisfy the
+/// non-empty / same-length / monotonic-x invariants.
+#[derive(Default)]
+pub struct CurveUpdate {
+  pub x: Option<Vec<f64>>,
+  pub y: Option<Vec<f64>>,
 }
 
 impl Network {
@@ -1020,6 +1052,165 @@ impl Network {
     Ok(())
   }
 
+  // --- pattern methods ---
+
+  /// Add a new time pattern to the network. Fails if a pattern with the same
+  /// id already exists.
+  pub fn add_pattern(&mut self, id: &str, data: &PatternData) -> Result<(), InputError> {
+    if self.pattern_map.contains_key(id) {
+      return Err(InputError::new(format!("Pattern {} already exists", id)));
+    }
+    let pattern = Pattern {
+      id: id.into(),
+      multipliers: data.multipliers.clone(),
+    };
+    self.pattern_map.insert(pattern.id.clone(), self.patterns.len());
+    self.patterns.push(pattern);
+    Ok(())
+  }
+
+  /// Update an existing pattern's multipliers in place. Only provided fields
+  /// are changed.
+  pub fn update_pattern(&mut self, id: &str, update: &PatternUpdate) -> Result<(), InputError> {
+    let pattern_index = *self.pattern_map.get(id)
+      .ok_or_else(|| InputError::PatternNotFound { pattern_id: id.into() })?;
+
+    if let Some(multipliers) = &update.multipliers {
+      self.patterns[pattern_index].multipliers = multipliers.clone();
+      // pattern coefficients are re-read every timestep, so no per-node
+      // invalidation is required; bump properties_version so callers can
+      // still detect a change.
+      self.properties_version += 1;
+    }
+    Ok(())
+  }
+
+  /// Remove a pattern from the network. Fails if any junction or reservoir
+  /// still references the pattern. Uses `swap_remove` internally, so the last
+  /// pattern in `patterns` takes the removed pattern's slot; `pattern_map`
+  /// and every cached `pattern_index`/`head_pattern_index` is kept in sync.
+  pub fn remove_pattern(&mut self, id: &str) -> Result<(), InputError> {
+    let pattern_index = *self.pattern_map.get(id)
+      .ok_or_else(|| InputError::PatternNotFound { pattern_id: id.into() })?;
+
+    let referenced = self.nodes.iter().any(|n| match &n.node_type {
+      NodeType::Junction(j) => j.pattern.as_deref() == Some(id),
+      NodeType::Reservoir(r) => r.head_pattern.as_deref() == Some(id),
+      _ => false,
+    });
+    if referenced {
+      return Err(InputError::new(format!(
+        "Cannot remove pattern {}: referenced by one or more nodes", id
+      )));
+    }
+
+    self.pattern_map.remove(id);
+
+    let last_index = self.patterns.len() - 1;
+    self.patterns.swap_remove(pattern_index);
+
+    // if swap_remove moved a different pattern into this slot, rebind it in
+    // the map and re-resolve every node's cached pattern_index so stale
+    // `last_index` hits become `pattern_index`.
+    if pattern_index != last_index {
+      let moved_id = self.patterns[pattern_index].id.clone();
+      self.pattern_map.insert(moved_id, pattern_index);
+      self.resolve_pattern_indices();
+    }
+    Ok(())
+  }
+
+  // --- curve methods ---
+
+  /// Add a new curve to the network. Fails if the id already exists or the
+  /// x/y arrays are empty, of unequal length, or x is not strictly
+  /// increasing.
+  pub fn add_curve(&mut self, id: &str, data: &CurveData) -> Result<(), InputError> {
+    if self.curve_map.contains_key(id) {
+      return Err(InputError::new(format!("Curve {} already exists", id)));
+    }
+    validate_curve_axes(&data.x, &data.y)?;
+    let curve = Curve {
+      id: id.into(),
+      x: data.x.clone(),
+      y: data.y.clone(),
+    };
+    self.curve_map.insert(curve.id.clone(), self.curves.len());
+    self.curves.push(curve);
+    Ok(())
+  }
+
+  /// Update an existing curve's axes. Any axis left `None` is preserved.
+  /// Every pump/valve whose cached `HeadCurve`/`ValveCurve` was derived from
+  /// this curve is rebuilt, and those links are marked as updated.
+  pub fn update_curve(&mut self, id: &str, update: &CurveUpdate) -> Result<(), InputError> {
+    let curve_index = *self.curve_map.get(id)
+      .ok_or_else(|| InputError::CurveNotFound { curve_id: id.into() })?;
+
+    // decide the new x/y up front so we can validate before mutating
+    let new_x = update.x.clone().unwrap_or_else(|| self.curves[curve_index].x.clone());
+    let new_y = update.y.clone().unwrap_or_else(|| self.curves[curve_index].y.clone());
+    validate_curve_axes(&new_x, &new_y)?;
+
+    self.curves[curve_index].x = new_x;
+    self.curves[curve_index].y = new_y;
+
+    // rebuild every derived HeadCurve/ValveCurve that references this curve
+    // by id, and mark the owning link as updated so the solver picks up the
+    // new coefficients.
+    let curve = &self.curves[curve_index];
+    for (i, link) in self.links.iter_mut().enumerate() {
+      match &mut link.link_type {
+        LinkType::Pump(pump) if pump.head_curve_id.as_deref() == Some(id) => {
+          pump.head_curve = Some(HeadCurve::new(curve, &self.options.flow_units, &self.options.unit_system)?);
+          self.updated_links.insert(i);
+        }
+        LinkType::Valve(valve) if valve.curve_id.as_deref() == Some(id) => {
+          valve.valve_curve = Some(ValveCurve::new(curve, &self.options.flow_units, &self.options.unit_system)?);
+          self.updated_links.insert(i);
+        }
+        _ => {}
+      }
+    }
+    self.properties_version += 1;
+    Ok(())
+  }
+
+  /// Remove a curve from the network. Fails if any pump, valve or tank still
+  /// references the curve. Uses `swap_remove` internally; `curve_map` is
+  /// kept in sync. Derived `HeadCurve`/`ValveCurve` caches are not tracked
+  /// by index and therefore need no remapping.
+  pub fn remove_curve(&mut self, id: &str) -> Result<(), InputError> {
+    let curve_index = *self.curve_map.get(id)
+      .ok_or_else(|| InputError::CurveNotFound { curve_id: id.into() })?;
+
+    let referenced_by_link = self.links.iter().any(|l| match &l.link_type {
+      LinkType::Pump(p) => p.head_curve_id.as_deref() == Some(id),
+      LinkType::Valve(v) => v.curve_id.as_deref() == Some(id),
+      _ => false,
+    });
+    let referenced_by_tank = self.nodes.iter().any(|n| match &n.node_type {
+      NodeType::Tank(t) => t.volume_curve_id.as_deref() == Some(id),
+      _ => false,
+    });
+    if referenced_by_link || referenced_by_tank {
+      return Err(InputError::new(format!(
+        "Cannot remove curve {}: referenced by one or more links or tanks", id
+      )));
+    }
+
+    self.curve_map.remove(id);
+
+    let last_index = self.curves.len() - 1;
+    self.curves.swap_remove(curve_index);
+
+    if curve_index != last_index {
+      let moved_id = self.curves[curve_index].id.clone();
+      self.curve_map.insert(moved_id, curve_index);
+    }
+    Ok(())
+  }
+
   // --- private helpers ---
 
   fn resolve_head_curve(&self, curve_id: Option<&str>) -> Result<Option<HeadCurve>, InputError> {
@@ -1037,6 +1228,28 @@ impl Network {
     let curve = &self.curves[curve_index];
     Ok(Some(ValveCurve::new(curve, &self.options.flow_units, &self.options.unit_system)?))
   }
+}
+
+/// Validate a raw curve's x/y arrays: both must be non-empty, of equal
+/// length, and `x` must be strictly increasing. Unit-specific validation
+/// (e.g. pump curve monotonicity) happens later when the derived
+/// `HeadCurve`/`ValveCurve` is built.
+fn validate_curve_axes(x: &[f64], y: &[f64]) -> Result<(), InputError> {
+  if x.is_empty() || y.is_empty() {
+    return Err(InputError::new("Curve x/y arrays must be non-empty"));
+  }
+  if x.len() != y.len() {
+    return Err(InputError::new(format!(
+      "Curve x/y arrays must have the same length (got {} and {})",
+      x.len(), y.len(),
+    )));
+  }
+  for i in 1..x.len() {
+    if x[i] <= x[i - 1] {
+      return Err(InputError::new("Curve x values must be strictly increasing"));
+    }
+  }
+  Ok(())
 }
 
 /// Remove `link_index` from the tank's outgoing (`links_from`) or incoming
@@ -1079,7 +1292,6 @@ mod tests {
   use super::*;
   use crate::constants::MperFT;
   use crate::model::options::HeadlossFormula;
-  use crate::model::pattern::Pattern;
   use crate::model::reservoir::Reservoir;
   use crate::model::tank::Tank;
   use crate::model::units::FlowUnits;
@@ -3039,5 +3251,293 @@ mod tests {
     let mut network = Network::default();
     let err = network.remove_node("missing").unwrap_err();
     assert!(matches!(err, InputError::NodeNotFound { .. }));
+  }
+
+  // --- pattern tests ---
+
+  #[test]
+  fn test_add_pattern_basic() {
+    let mut network = Network::default();
+    network.add_pattern("P1", &PatternData {
+      multipliers: vec![1.0, 1.2, 0.8],
+    }).unwrap();
+    assert_eq!(network.patterns.len(), 1);
+    assert_eq!(network.pattern_map.get("P1").copied(), Some(0));
+    assert_eq!(network.patterns[0].multipliers, vec![1.0, 1.2, 0.8]);
+  }
+
+  #[test]
+  fn test_add_pattern_duplicate_fails() {
+    let mut network = Network::default();
+    network.add_pattern("P1", &PatternData { multipliers: vec![1.0] }).unwrap();
+    let err = network.add_pattern("P1", &PatternData { multipliers: vec![2.0] }).unwrap_err();
+    assert!(matches!(err, InputError::Parse { .. }));
+  }
+
+  #[test]
+  fn test_update_pattern_replaces_multipliers() {
+    let mut network = Network::default();
+    network.add_pattern("P1", &PatternData { multipliers: vec![1.0] }).unwrap();
+    let props_before = network.properties_version;
+
+    network.update_pattern("P1", &PatternUpdate {
+      multipliers: Some(vec![0.5, 1.5]),
+    }).unwrap();
+
+    assert_eq!(network.patterns[0].multipliers, vec![0.5, 1.5]);
+    assert_eq!(network.properties_version, props_before + 1);
+  }
+
+  #[test]
+  fn test_update_pattern_not_found() {
+    let mut network = Network::default();
+    let err = network.update_pattern("missing", &PatternUpdate::default()).unwrap_err();
+    assert!(matches!(err, InputError::PatternNotFound { .. }));
+  }
+
+  #[test]
+  fn test_remove_pattern_basic() {
+    let mut network = Network::default();
+    network.add_pattern("P1", &PatternData { multipliers: vec![1.0] }).unwrap();
+    network.remove_pattern("P1").unwrap();
+    assert!(network.patterns.is_empty());
+    assert!(network.pattern_map.get("P1").is_none());
+  }
+
+  #[test]
+  fn test_remove_pattern_reindexes_junctions_and_reservoirs() {
+    // two patterns P1, P2. Junction J1 uses P2; remove P1 and verify P2
+    // now sits at index 0 AND J1's cached pattern_index points to 0.
+    let mut network = Network::default();
+    network.add_pattern("P1", &PatternData { multipliers: vec![1.0] }).unwrap();
+    network.add_pattern("P2", &PatternData { multipliers: vec![2.0] }).unwrap();
+    network.add_junction("J1", &JunctionData {
+      elevation: 0.0, basedemand: 1.0, emitter_coefficient: 0.0,
+      pattern: Some("P2".into()),
+      coordinates: None,
+    }).unwrap();
+    network.add_reservoir("R1", &ReservoirData {
+      elevation: 100.0,
+      head_pattern: Some("P2".into()),
+      coordinates: None,
+    }).unwrap();
+
+    network.remove_pattern("P1").unwrap();
+
+    assert_eq!(network.pattern_map.get("P2").copied(), Some(0));
+    let NodeType::Junction(j) = &network.nodes[0].node_type else { panic!() };
+    assert_eq!(j.pattern_index, Some(0));
+    let NodeType::Reservoir(r) = &network.nodes[1].node_type else { panic!() };
+    assert_eq!(r.head_pattern_index, Some(0));
+  }
+
+  #[test]
+  fn test_remove_pattern_referenced_fails() {
+    let mut network = Network::default();
+    network.add_pattern("P1", &PatternData { multipliers: vec![1.0] }).unwrap();
+    network.add_junction("J1", &JunctionData {
+      elevation: 0.0, basedemand: 1.0, emitter_coefficient: 0.0,
+      pattern: Some("P1".into()),
+      coordinates: None,
+    }).unwrap();
+    let err = network.remove_pattern("P1").unwrap_err();
+    assert!(matches!(err, InputError::Parse { .. }));
+    assert_eq!(network.patterns.len(), 1);
+  }
+
+  #[test]
+  fn test_remove_pattern_not_found() {
+    let mut network = Network::default();
+    let err = network.remove_pattern("missing").unwrap_err();
+    assert!(matches!(err, InputError::PatternNotFound { .. }));
+  }
+
+  // --- curve tests ---
+
+  #[test]
+  fn test_add_curve_basic() {
+    let mut network = Network::default();
+    network.add_curve("C1", &CurveData {
+      x: vec![0.0, 10.0, 20.0],
+      y: vec![100.0, 80.0, 40.0],
+    }).unwrap();
+    assert_eq!(network.curves.len(), 1);
+    assert_eq!(network.curve_map.get("C1").copied(), Some(0));
+  }
+
+  #[test]
+  fn test_add_curve_rejects_mismatched_lengths() {
+    let mut network = Network::default();
+    let err = network.add_curve("C1", &CurveData {
+      x: vec![0.0, 10.0],
+      y: vec![100.0],
+    }).unwrap_err();
+    assert!(matches!(err, InputError::Parse { .. }));
+  }
+
+  #[test]
+  fn test_add_curve_rejects_non_monotonic_x() {
+    let mut network = Network::default();
+    let err = network.add_curve("C1", &CurveData {
+      x: vec![0.0, 10.0, 5.0],
+      y: vec![1.0, 2.0, 3.0],
+    }).unwrap_err();
+    assert!(matches!(err, InputError::Parse { .. }));
+  }
+
+  #[test]
+  fn test_add_curve_rejects_empty() {
+    let mut network = Network::default();
+    let err = network.add_curve("C1", &CurveData {
+      x: vec![], y: vec![],
+    }).unwrap_err();
+    assert!(matches!(err, InputError::Parse { .. }));
+  }
+
+  #[test]
+  fn test_add_curve_duplicate_fails() {
+    let mut network = Network::default();
+    network.add_curve("C1", &CurveData {
+      x: vec![0.0, 1.0], y: vec![1.0, 0.0],
+    }).unwrap();
+    let err = network.add_curve("C1", &CurveData {
+      x: vec![0.0, 1.0], y: vec![1.0, 0.0],
+    }).unwrap_err();
+    assert!(matches!(err, InputError::Parse { .. }));
+  }
+
+  #[test]
+  fn test_update_curve_rebuilds_pump_head_curve() {
+    // a pump referencing C1 should have its cached HeadCurve refreshed when
+    // C1's axes are updated, and the owning link marked as updated.
+    let mut network = Network::default();
+    add_two_junctions(&mut network);
+    network.add_curve("C1", &CurveData {
+      x: vec![0.0, 50.0, 100.0],
+      y: vec![100.0, 80.0, 40.0],
+    }).unwrap();
+    network.add_pump("PU1", &PumpData {
+      start_node: "J1".into(),
+      end_node: "J2".into(),
+      speed: 1.0,
+      head_curve_id: Some("C1".into()),
+      power: 0.0,
+      initial_status: LinkStatus::Open,
+      vertices: None,
+    }).unwrap();
+    network.reset_changes();
+    let props_before = network.properties_version;
+
+    network.update_curve("C1", &CurveUpdate {
+      x: Some(vec![0.0, 25.0, 60.0]),
+      y: Some(vec![120.0, 90.0, 30.0]),
+    }).unwrap();
+
+    assert_eq!(network.curves[0].x, vec![0.0, 25.0, 60.0]);
+    assert_eq!(network.curves[0].y, vec![120.0, 90.0, 30.0]);
+    let LinkType::Pump(pump) = &network.links[0].link_type else { panic!() };
+    assert!(pump.head_curve.is_some());
+    // the refreshed shutoff head (in feet) should reflect the new y[0]
+    let hc = pump.head_curve.as_ref().unwrap();
+    assert!((hc.statistics.h_shutoff - 120.0).abs() < 1e-6);
+    assert!(network.updated_links.contains(&0));
+    assert_eq!(network.properties_version, props_before + 1);
+  }
+
+  #[test]
+  fn test_update_curve_partial_preserves_other_axis() {
+    let mut network = Network::default();
+    network.add_curve("C1", &CurveData {
+      x: vec![0.0, 1.0, 2.0],
+      y: vec![10.0, 8.0, 5.0],
+    }).unwrap();
+
+    network.update_curve("C1", &CurveUpdate {
+      x: None,
+      y: Some(vec![20.0, 15.0, 9.0]),
+    }).unwrap();
+
+    assert_eq!(network.curves[0].x, vec![0.0, 1.0, 2.0]);
+    assert_eq!(network.curves[0].y, vec![20.0, 15.0, 9.0]);
+  }
+
+  #[test]
+  fn test_update_curve_rejects_invalid_combined_axes() {
+    let mut network = Network::default();
+    network.add_curve("C1", &CurveData {
+      x: vec![0.0, 1.0, 2.0],
+      y: vec![10.0, 8.0, 5.0],
+    }).unwrap();
+
+    let err = network.update_curve("C1", &CurveUpdate {
+      x: Some(vec![0.0, 2.0]), // shorter than existing y
+      y: None,
+    }).unwrap_err();
+    assert!(matches!(err, InputError::Parse { .. }));
+    // curve must be unchanged on failure
+    assert_eq!(network.curves[0].x, vec![0.0, 1.0, 2.0]);
+  }
+
+  #[test]
+  fn test_update_curve_not_found() {
+    let mut network = Network::default();
+    let err = network.update_curve("missing", &CurveUpdate::default()).unwrap_err();
+    assert!(matches!(err, InputError::CurveNotFound { .. }));
+  }
+
+  #[test]
+  fn test_remove_curve_basic() {
+    let mut network = Network::default();
+    network.add_curve("C1", &CurveData {
+      x: vec![0.0, 1.0], y: vec![1.0, 0.0],
+    }).unwrap();
+    network.remove_curve("C1").unwrap();
+    assert!(network.curves.is_empty());
+    assert!(network.curve_map.get("C1").is_none());
+  }
+
+  #[test]
+  fn test_remove_curve_reindexes_curve_map() {
+    let mut network = Network::default();
+    network.add_curve("C1", &CurveData {
+      x: vec![0.0, 1.0], y: vec![1.0, 0.0],
+    }).unwrap();
+    network.add_curve("C2", &CurveData {
+      x: vec![0.0, 1.0], y: vec![2.0, 1.0],
+    }).unwrap();
+
+    network.remove_curve("C1").unwrap();
+    assert_eq!(network.curves.len(), 1);
+    assert_eq!(network.curve_map.get("C2").copied(), Some(0));
+  }
+
+  #[test]
+  fn test_remove_curve_referenced_by_pump_fails() {
+    let mut network = Network::default();
+    add_two_junctions(&mut network);
+    network.add_curve("C1", &CurveData {
+      x: vec![0.0, 50.0, 100.0],
+      y: vec![100.0, 80.0, 40.0],
+    }).unwrap();
+    network.add_pump("PU1", &PumpData {
+      start_node: "J1".into(),
+      end_node: "J2".into(),
+      speed: 1.0,
+      head_curve_id: Some("C1".into()),
+      power: 0.0,
+      initial_status: LinkStatus::Open,
+      vertices: None,
+    }).unwrap();
+
+    let err = network.remove_curve("C1").unwrap_err();
+    assert!(matches!(err, InputError::Parse { .. }));
+    assert_eq!(network.curves.len(), 1);
+  }
+
+  #[test]
+  fn test_remove_curve_not_found() {
+    let mut network = Network::default();
+    let err = network.remove_curve("missing").unwrap_err();
+    assert!(matches!(err, InputError::CurveNotFound { .. }));
   }
 }

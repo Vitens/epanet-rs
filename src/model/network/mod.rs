@@ -25,6 +25,8 @@ pub use modify::{
   PumpData, PumpUpdate,
   ValveData, ValveUpdate,
   LinkUpdate,
+  PatternData, PatternUpdate,
+  CurveData, CurveUpdate,
 };
 
 #[derive(Default, Serialize, Clone)]
