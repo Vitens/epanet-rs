@@ -712,7 +712,7 @@ impl Network {
 
     // capture the current valve_type and resolve the target valve_type so we
     // can validate the update before mutating anything.
-    let (old_valve_type, had_curve) = if let LinkType::Valve(valve) = &self.links[link_index].link_type {
+    let (old_valve_type, _had_curve) = if let LinkType::Valve(valve) = &self.links[link_index].link_type {
       (valve.valve_type.clone(), valve.curve_id.is_some())
     } else {
       unreachable!()

@@ -467,8 +467,8 @@ pub extern "C" fn EN_addlink(ph: *mut Project, id: *const c_char, link_type: c_i
   };
 
   let mut new_valve = ValveData {
-    start_node: start_node_id.clone().into(),
-    end_node: end_node_id.clone().into(),
+    start_node: start_node_id.into(),
+    end_node: end_node_id.into(),
     diameter: 10.0/12.0 * simulation.network.options.unit_system.per_feet(), // 10 inches to 
     valve_type: ValveType::PRV,
     setting: 0.0,
@@ -516,8 +516,8 @@ pub extern "C" fn EN_addlink(ph: *mut Project, id: *const c_char, link_type: c_i
     }
     ENLinkType::Pump => {
       let new_pump = PumpData {
-        start_node: start_node_id.clone().into(),
-        end_node: end_node_id.clone().into(),
+        start_node: start_node_id.into(),
+        end_node: end_node_id.into(),
         speed: 1.0,
         head_curve_id: None,
         power: 0.0,

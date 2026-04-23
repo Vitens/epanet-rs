@@ -89,8 +89,10 @@
  Statistic          	None
 
 [REPORT]
- Status             	No
+ Status             	FULL
  Summary            	No
+ Nodes                ALL
+ LINKS                ALL
  Page               	0
 
 [OPTIONS]

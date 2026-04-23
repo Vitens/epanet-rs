@@ -8,16 +8,12 @@ use crate::solver::state::SolverState;
 use crate::solver::result::SolverResult;
 use crate::model::network::Network;
 use crate::model::node::NodeType;
-use crate::model::units::{UnitConversion, FlowUnits};
+use crate::model::units::FlowUnits;
 use crate::model::options::HeadlossFormula;
-use crate::model::node::Node;
-use crate::model::junction::Junction;
-use crate::model::reservoir::Reservoir;
 use crate::model::options::SimulationOptions;
 
 use crate::model::control::ControlCondition;
 
-use crate::constants::*;
 
 pub struct Simulation {
   pub network: Network,

@@ -77,10 +77,10 @@ pub extern "C" fn EN_setdemandmodel(ph: *mut Project, demand_model: c_int) -> Er
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setoption(ph: *mut Project, option: c_int, value: c_long) -> ErrorCode {
-  let simulation = get_simulation_mut!(ph);
+pub extern "C" fn EN_setoption(ph: *mut Project, option: c_int, _value: c_long) -> ErrorCode {
+  let _simulation = get_simulation_mut!(ph);
 
-  let option = match SimOption::from_repr(option) {
+  let _option = match SimOption::from_repr(option) {
     Some(option) => option,
     None => return ErrorCode::InvalidParameterCode,
   };

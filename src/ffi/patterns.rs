@@ -1,4 +1,3 @@
-use clap::error::Error;
 
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation, get_simulation_mut};

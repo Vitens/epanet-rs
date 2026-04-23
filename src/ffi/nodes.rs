@@ -333,7 +333,7 @@ pub extern "C" fn EN_setnodevalue(ph: *mut Project, index: c_int, property: c_in
       network.update_tank(&node_id, &TankUpdate { initial_level: Some(value as f64), ..Default::default() })
     },
     NodeProperty::Pattern => {
-      let pattern_id = match network.patterns.get((value as usize - 1)) {
+      let pattern_id = match network.patterns.get(value as usize - 1 ) {
         Some(pattern) => pattern.id.clone(),
         None => return ErrorCode::UndefinedPattern,
       };
