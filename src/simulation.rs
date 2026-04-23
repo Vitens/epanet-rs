@@ -1,6 +1,6 @@
 use rayon::prelude::*;
 
-use simplelog::warn;
+use simplelog::{debug, warn};
 
 use crate::error::{InputError, SolverError};
 use crate::solver::hydraulicsolver::HydraulicSolver;
@@ -127,6 +127,8 @@ impl Simulation {
 
     // Run the simulation step by step
     loop {
+      let t = self.time;
+      debug!("Running hydraulics at hour: {}:{:02}:{:02}", t / 3600, (t % 3600) / 60, t % 60);
       let t = self.run_hydraulics()?;
       // Append the results to the SolverResult if the time step is a report step
       if t % report_timestep == 0 {

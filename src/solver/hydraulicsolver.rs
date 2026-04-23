@@ -194,10 +194,11 @@ impl HydraulicSolver {
       let max_flow_change = network.options.max_flow_change.unwrap_or(BIG_VALUE);
 
       // check for convergence:
+      // - not the first iteration
       // - relative change is less than the accuracy
       // - no status changes
       // - maximum flow change is less than the maximum flow change allowed
-      if stats.relative_change(&network.options) < network.options.accuracy && !stats.status_changed && stats.max_dq_converted(&network.options) < max_flow_change {
+      if iteration > 1 && stats.relative_change(&network.options) < network.options.accuracy && !stats.status_changed && stats.max_dq_converted(&network.options) < max_flow_change {
 
           // if pressure controls are active, apply them and continue the iteration
           if self.apply_pressure_controls(network, &mut state) {
