@@ -144,5 +144,4 @@ jobs:
           files: |
             artifacts/epanet-rs-linux-x86_64.tar.gz
             artifacts/epanet-rs-macos-aarch64.tar.gz
-            artifacts/epanet-rs-macos-x86_64.tar.gz
             artifacts/epanet-rs-windows-x86_64.zip
