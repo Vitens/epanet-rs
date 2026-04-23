@@ -21,6 +21,7 @@ jobs:
       run: |
         wget -q https://github.com/OpenWaterAnalytics/EPANET/releases/download/v2.3.5/EPANET_2_3_5_LINUX_x86_64.zip -O /tmp/epanet.zip
         unzip -q /tmp/epanet.zip -d /tmp/epanet
+
         binary=$(find /tmp/epanet -type f -name 'runepanet' | head -n1)
         if [ -z "$binary" ]; then
           echo "runepanet binary not found in release archive" >&2
@@ -28,6 +29,23 @@ jobs:
           exit 1
         fi
         sudo install -m 0755 "$binary" /usr/local/bin/runepanet
+
+        # Install libepanet.so (and any versioned symlinks) system-wide so runepanet can load it
+        libs=$(find /tmp/epanet -type f -name 'libepanet*.so*')
+        if [ -z "$libs" ]; then
+          echo "libepanet shared library not found in release archive" >&2
+          find /tmp/epanet -maxdepth 3 -type f
+          exit 1
+        fi
+        sudo mkdir -p /usr/local/lib/epanet
+        for lib in $libs; do
+          sudo install -m 0644 "$lib" /usr/local/lib/epanet/
+        done
+        echo "/usr/local/lib/epanet" | sudo tee /etc/ld.so.conf.d/epanet.conf
+        sudo ldconfig
+
+        ldd /usr/local/bin/runepanet || true
+        runepanet || true
 
     - name: Install hyperfine
       run: |
