@@ -8,7 +8,23 @@ env:
 
 jobs:
   benchmark:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            epanet_url: https://github.com/OpenWaterAnalytics/EPANET/releases/download/v2.3.5/EPANET_2_3_5_LINUX_x86_64.zip
+            hyperfine_deb: https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
+            rs_binary: ./target/release/epanet-rs
+          - os: windows-latest
+            epanet_url: https://github.com/OpenWaterAnalytics/EPANET/releases/download/v2.3.5/EPANET_2_3_5_WIN_32_64.zip
+            hyperfine_zip: https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine-v1.18.0-x86_64-pc-windows-msvc.zip
+            rs_binary: ./target/release/epanet-rs.exe
+
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
 
     steps:
     - name: Checkout epanet-rs
@@ -17,9 +33,12 @@ jobs:
     - name: Build epanet-rs (release)
       run: cargo build --release
 
-    - name: Install EPANET 2.3.5 (prebuilt release)
+    # --- Install EPANET --------------------------------------------------------
+
+    - name: Install EPANET 2.3.5 (Linux)
+      if: matrix.os == 'ubuntu-latest'
       run: |
-        wget -q https://github.com/OpenWaterAnalytics/EPANET/releases/download/v2.3.5/EPANET_2_3_5_LINUX_x86_64.zip -O /tmp/epanet.zip
+        wget -q "${{ matrix.epanet_url }}" -O /tmp/epanet.zip
         unzip -q /tmp/epanet.zip -d /tmp/epanet
 
         binary=$(find /tmp/epanet -type f -name 'runepanet' | head -n1)
@@ -30,14 +49,13 @@ jobs:
         fi
         sudo install -m 0755 "$binary" /usr/local/bin/runepanet
 
-        # Install libepanet.so (and any versioned symlinks) system-wide so runepanet can load it
+        sudo mkdir -p /usr/local/lib/epanet
         libs=$(find /tmp/epanet -type f -name 'libepanet*.so*')
         if [ -z "$libs" ]; then
           echo "libepanet shared library not found in release archive" >&2
           find /tmp/epanet -maxdepth 3 -type f
           exit 1
         fi
-        sudo mkdir -p /usr/local/lib/epanet
         for lib in $libs; do
           sudo install -m 0644 "$lib" /usr/local/lib/epanet/
         done
@@ -45,19 +63,75 @@ jobs:
         sudo ldconfig
 
         ldd /usr/local/bin/runepanet || true
-        runepanet || true
 
-    - name: Install hyperfine
+    - name: Install EPANET 2.3.5 (Windows)
+      if: matrix.os == 'windows-latest'
       run: |
-        wget -q https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
-        sudo dpkg -i hyperfine_1.18.0_amd64.deb
+        mkdir -p "$RUNNER_TEMP/epanet"
+        curl -sSL "${{ matrix.epanet_url }}" -o "$RUNNER_TEMP/epanet.zip"
+        unzip -q "$RUNNER_TEMP/epanet.zip" -d "$RUNNER_TEMP/epanet_raw"
+
+        # Prefer the 64-bit build; fall back to anything if it isn't laid out
+        # with explicit 32/64 subfolders.
+        runexe=$(find "$RUNNER_TEMP/epanet_raw" -type f -iname 'runepanet.exe' | grep -i 64 | head -n1)
+        if [ -z "$runexe" ]; then
+          runexe=$(find "$RUNNER_TEMP/epanet_raw" -type f -iname 'runepanet.exe' | head -n1)
+        fi
+        if [ -z "$runexe" ]; then
+          echo "runepanet.exe not found in release archive" >&2
+          find "$RUNNER_TEMP/epanet_raw" -type f
+          exit 1
+        fi
+        cp "$runexe" "$RUNNER_TEMP/epanet/"
+
+        # Copy the matching DLL next to the exe so Windows loads it at runtime.
+        dll=$(find "$(dirname "$runexe")" -maxdepth 1 -type f -iname 'epanet2*.dll' | head -n1)
+        if [ -z "$dll" ]; then
+          dll=$(find "$RUNNER_TEMP/epanet_raw" -type f -iname 'epanet2*.dll' | grep -i 64 | head -n1)
+        fi
+        if [ -z "$dll" ]; then
+          dll=$(find "$RUNNER_TEMP/epanet_raw" -type f -iname 'epanet2*.dll' | head -n1)
+        fi
+        if [ -z "$dll" ]; then
+          echo "epanet2.dll not found in release archive" >&2
+          find "$RUNNER_TEMP/epanet_raw" -type f
+          exit 1
+        fi
+        cp "$dll" "$RUNNER_TEMP/epanet/"
+
+        # Publish on PATH for subsequent steps (GitHub expects a Windows path here)
+        echo "$RUNNER_TEMP\\epanet" >> "$GITHUB_PATH"
+
+    # --- Install hyperfine -----------------------------------------------------
+
+    - name: Install hyperfine (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        wget -q "${{ matrix.hyperfine_deb }}" -O /tmp/hyperfine.deb
+        sudo dpkg -i /tmp/hyperfine.deb
+
+    - name: Install hyperfine (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        mkdir -p "$RUNNER_TEMP/hyperfine"
+        curl -sSL "${{ matrix.hyperfine_zip }}" -o "$RUNNER_TEMP/hyperfine.zip"
+        unzip -q "$RUNNER_TEMP/hyperfine.zip" -d "$RUNNER_TEMP/hyperfine_raw"
+        hf=$(find "$RUNNER_TEMP/hyperfine_raw" -type f -iname 'hyperfine.exe' | head -n1)
+        cp "$hf" "$RUNNER_TEMP/hyperfine/"
+        echo "$RUNNER_TEMP\\hyperfine" >> "$GITHUB_PATH"
+
+    # --- Run benchmark ---------------------------------------------------------
 
     - name: Run benchmark
       run: |
-        EPANET_RS="./target/release/epanet-rs"
+        RS_BIN="${{ matrix.rs_binary }}"
         INP="benchmarks/benchmark.inp"
         RESULTS_DIR="benchmark-results"
         mkdir -p "$RESULTS_DIR"
+
+        # Use a real file as EPANET's report output so the same command works on
+        # both Linux and Windows (Windows has no /dev/null).
+        EPANET_RPT="$RESULTS_DIR/epanet.rpt"
 
         hyperfine \
           --warmup 2 \
@@ -65,11 +139,11 @@ jobs:
           --export-json "$RESULTS_DIR/benchmark.json" \
           --export-markdown "$RESULTS_DIR/benchmark.md" \
           --command-name "EPANET" \
-            "runepanet '$INP' /dev/null" \
+            "runepanet '$INP' '$EPANET_RPT'" \
           --command-name "EPANET-RS" \
-            "$EPANET_RS run '$INP' --quiet" \
+            "$RS_BIN run '$INP' --quiet" \
           --command-name "EPANET-RS-parallel" \
-            "$EPANET_RS run '$INP' --quiet --parallel"
+            "$RS_BIN run '$INP' --quiet --parallel"
 
         epanet_ms=$(jq '.results[] | select(.command == "EPANET") | .mean * 1000' "$RESULTS_DIR/benchmark.json")
         rs_ms=$(jq '.results[] | select(.command == "EPANET-RS") | .mean * 1000' "$RESULTS_DIR/benchmark.json")
@@ -78,7 +152,7 @@ jobs:
         speedup_par=$(echo "scale=2; $epanet_ms / $rs_par_ms" | bc)
 
         {
-          echo "## Benchmark Results"
+          echo "## Benchmark Results (${{ matrix.os }})"
           echo ""
           echo "Network: \`$INP\`"
           echo ""
@@ -97,5 +171,5 @@ jobs:
       uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: benchmark-results
+        name: benchmark-results-${{ matrix.os }}
         path: benchmark-results/
