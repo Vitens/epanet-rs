@@ -1,8 +1,9 @@
 # EPANET-RS
+
 A fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust.
 
-[![Rust](https://github.com/vitens/epanet-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/AbelHeinsbroek/epanet-rs/actions/workflows/rust.yml)
-[![crate](https://img.shields.io/crates/v/epanet-rs.svg)](https://crates.io/crates/epanet-rs)
+[Rust](https://github.com/AbelHeinsbroek/epanet-rs/actions/workflows/rust.yml)
+[crate](https://crates.io/crates/epanet-rs)
 
 Dual-licensed under [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT).
 
@@ -15,7 +16,7 @@ Modern applications of the EPANET solver, such as monte-carlo simulations, leak 
 
 `epanet-rs` is a modern reimplementation of the EPANET2 hydraulic solver written in Rust, designed to preserve the original algorithms and numerical behavior while enabling safer memory management, improved maintainability, and performance optimizations through multi-threading and SIMD acceleration.  
 
-`epanet-rs` runs about as fast as the original EPANET2_3 solver in sequential mode, and up to 5 times faster in parallel mode for extended period simulations for supported networks (no tanks/controls)!
+`epanet-rs` runs about twice as fast as the original EPANET2_3 solver in sequential mode, and up to 5 times faster in parallel mode for extended period simulations for supported networks (no tanks/controls)!
 
 ## Design Goals
 
@@ -26,7 +27,28 @@ Modern applications of the EPANET solver, such as monte-carlo simulations, leak 
 - **Modern API** with a focus on ease of use and parallelization
 - **Backwards Compatibility** with EPANET2_3 network API methods
 
+## Benchmarks
+
+Example of a large network with 25742 nodes and 26683 links, run on an AWS `c5.12xlarge` instance using the latest version of EPANET (2.3.5) and EPANET-RS (0.2.0).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmark-dark.svg">
+  <img alt="Benchmark comparison" src="benchmark.svg">
+</picture>
+
+```bash
+hyperfine --warmup 3 'runepanet test.inp /dev/null' 'epanet-rs run test.inp --quiet' 'epanet-rs run test.inp --quiet --parallel'
+```
+
+| Command                                          | Mean [s]      | Min [s] | Max [s] | Relative    |
+| ------------------------------------------------ | ------------- | ------- | ------- | ----------- |
+| `runepanet test.inp /dev/null`                   | 2.138 ± 0.020 | 2.116   | 2.191   | 5.82 ± 0.07 |
+| `epanet-rs run test.inp --quiet`                 | 1.213 ± 0.005 | 1.202   | 1.218   | 3.30 ± 0.03 |
+| `epanet-rs run test.inp --quiet --parallel`      | 0.368 ± 0.003 | 0.361   | 0.371   | 1.00        |
+
 ## Usage
+
+### Command Line Interface
 
 ```bash
 # Run simulation
@@ -46,6 +68,21 @@ epanet-rs convert <network_file.inp> output.msgpack
 epanet-rs validate <network_file.inp>
 ```
 
+### Rust API 
+
+```rust
+use epanet_rs::model::network::Network;
+use epanet_rs::simulation::Simulation;
+
+let mut simulation = Simulation::from_file("test.inp").unwrap();
+let results = match simulation.solve_hydraulics() {
+  Ok(results) => results,
+  Err(e) => {
+    error!("Solver failed: {}", e);
+    std::process::exit(1);
+  }
+};
+```
 ## Building
 
 ```bash
@@ -68,14 +105,16 @@ cargo test --test solver_test
 
 ## Supported Features and To-Do
 
-- [x] INP file support
-- [x] Parallel Hydraulic Solver for extended period simulations
-- [ ] Quality simulations
-- [ ] Pressure dependent demand simulation
-- [ ] CONTROLS and RULES
-- [ ] EMITTERS and LEAKAGE
-- [ ] ENERGY
-- [ ] Backwards compatibility with EPANET2_3 network API methods
+- INP file support
+- Parallel Hydraulic Solver for extended period simulations
+- (Partial) Backwards compatibility with EPANET2_3 network API methods
+- Pressure dependent demand simulation
+- CONTROLS
+- EMITTERS
+- LEAKAGE
+- RULES
+- ENERGY
+- Quality simulation
 
 ## Dependencies
 
@@ -84,14 +123,19 @@ cargo test --test solver_test
 - [hashbrown](https://crates.io/crates/hashbrown) - Fast hash maps
 - [serde](https://crates.io/crates/serde) - Serialization
 - [clap](https://crates.io/crates/clap) - Command line parsing
-
+- [fastapprox](https://crates.io/crates/fastapprox) - Fast approximations
+- [log](https://crates.io/crates/log) - Logging
+- [simplelog](https://crates.io/crates/simplelog) - Logging
+- [time](https://crates.io/crates/time) - Time
+- [strum](https://crates.io/crates/strum) - String enums
+- [thiserror](https://crates.io/crates/thiserror) - Error handling
 
 ## License
 
 EPANET-RS is licensed under either of:
 
-- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or [http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))
 
 at your option.
 
