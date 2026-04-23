@@ -46,6 +46,12 @@ enum ReadState {
 
 impl Network {
 
+  pub fn from_file(file: &str) -> Result<Network, InputError> {
+    let mut network = Network::default();
+    network.read_file(file)?;
+    Ok(network)
+  }
+
   pub fn read_file(&mut self, file: &str) -> Result<(), InputError> {
     let file_extension = file.split('.').last()
       .ok_or_else(|| InputError::new(format!("Cannot determine file extension for: {}", file)))?;
@@ -130,31 +136,13 @@ impl Network {
             self.title = Some(line.trim().into());
             Ok(())
           }
-          ReadState::Junctions => { 
-            let junction = self.read_junction(line)?;
-            self.add_node(junction).map_err(|e| InputError::new(e))
-          }
-          ReadState::Valves => { 
-            let valve = self.read_valve(line)?;
-            self.add_link(valve).map_err(|e| InputError::new(e))
-          }
-          ReadState::Pipes => { 
-            let pipe = self.read_pipe(line)?;
-            self.add_link(pipe).map_err(|e| InputError::new(e))
-          }
-          ReadState::Tanks => { 
-            let tank = self.read_tank(line)?;
-            self.add_node(tank).map_err(|e| InputError::new(e))
-          }
-          ReadState::Reservoirs => { 
-            let reservoir = self.read_reservoir(line)?;
-            self.add_node(reservoir).map_err(|e| InputError::new(e))
-          }
-          ReadState::Pumps => { 
-            let pump = self.read_pump(line)?;
-            self.add_link(pump).map_err(|e| InputError::new(e))
-          }
-          ReadState::Curves => { 
+          ReadState::Junctions => self.add_node(self.read_junction(line)?),
+          ReadState::Valves =>  self.add_link(self.read_valve(line)?),
+          ReadState::Pipes => self.add_link(self.read_pipe(line)?),
+          ReadState::Tanks => self.add_node(self.read_tank(line)?),
+          ReadState::Reservoirs => self.add_node(self.read_reservoir(line)?),
+          ReadState::Pumps => self.add_link(self.read_pump(line)?),
+          ReadState::Curves => {
             self.read_curve(line)
           }
           ReadState::Demands => { 
@@ -199,11 +187,9 @@ impl Network {
       // clear the line buffer
       line_buffer.clear();
     }
-    // convert units
+    self.resolve_pattern_indices();
     self.convert_to_standard(&self.options.clone());
-    // update links
     self.update_links()?;
-    // convert control settings to internal units
     self.convert_control_settings();
 
     Ok(())
@@ -211,12 +197,13 @@ impl Network {
 
   fn update_links(&mut self) -> Result<(), InputError> {
     // update link specific statistics (TODO: move to separate method)
-    for (link_index, link) in self.links.iter_mut().enumerate() {
+    for link in self.links.iter_mut() {
       if let LinkType::Pump(pump) = &mut link.link_type {
         // get the head curve
         if let Some(head_curve_id) = &pump.head_curve_id {
-          let curve = self.curves.get(head_curve_id)
+          let curve_index = self.curve_map.get(head_curve_id)
             .ok_or_else(|| InputError::new(format!("Head curve '{}' not found for pump", head_curve_id)))?;
+          let curve = &self.curves[*curve_index];
           // assign the head curve to the pump and convert units to standard units (US standard) and CFS
           pump.head_curve = Some(HeadCurve::new(curve, &self.options.flow_units, &self.options.unit_system)?);
         }
@@ -234,8 +221,9 @@ impl Network {
         }
         // assign the valve curve to the valve
         if let Some(curve_id) = &valve.curve_id {
-          let curve = self.curves.get(curve_id)
+          let curve_index = self.curve_map.get(curve_id)
             .ok_or_else(|| InputError::new(format!("Curve '{}' not found for valve", curve_id)))?;
+          let curve = &self.curves[*curve_index];
           valve.valve_curve = Some(ValveCurve::new(curve, &self.options.flow_units, &self.options.unit_system)?);
         }
       }
@@ -243,13 +231,7 @@ impl Network {
         // convert the minor loss to a coefficient
         pipe.minor_loss = 0.02517 * pipe.minor_loss / pipe.diameter.powi(4);
       }
-      // check if the link is connected to a tank
-      if let NodeType::Tank(tank) = &mut self.nodes[link.end_node].node_type {
-        tank.links_to.push(link_index);
-      }
-      if let NodeType::Tank(tank) = &mut self.nodes[link.start_node].node_type {
-        tank.links_from.push(link_index);
-      }
+      // tank links_to/links_from are maintained by Network::add_link
     }
     Ok(())
   }
@@ -307,7 +289,7 @@ impl Network {
   }
 
   /// Read a junction from a parts iterator
-  fn read_junction(&mut self, line: &str) -> Result<Node, InputError> {
+  fn read_junction(&self, line: &str) -> Result<Node, InputError> {
     let mut parts = parse_line(line);
     let id = parts.next().ok_or_missing("junction id")?.into();
     let elevation = parts.next().unwrap_or("0").parse_field::<f64>("elevation")?;
@@ -317,13 +299,13 @@ impl Network {
     Ok(Node {
       id,
       elevation,
-      node_type: NodeType::Junction(Junction { basedemand: demand, pattern, emitter_coefficient: 0.0 }),
+      node_type: NodeType::Junction(Junction { basedemand: demand, pattern, pattern_index: None, emitter_coefficient: 0.0 }),
       coordinates: None,
     })
   }
 
   /// Read a reservoir from a parts iterator
-  fn read_reservoir(&mut self, line: &str) -> Result<Node, InputError> {
+  fn read_reservoir(&self, line: &str) -> Result<Node, InputError> {
     let mut parts = parse_line(line);
     let id = parts.next().ok_or_missing("reservoir id")?.into();
     let elevation = parts.next().ok_or_missing("elevation")?.parse_field::<f64>("elevation")?;
@@ -332,12 +314,12 @@ impl Network {
     Ok(Node {
       id,
       elevation,
-      node_type: NodeType::Reservoir(Reservoir { head_pattern: pattern }),
+      node_type: NodeType::Reservoir(Reservoir { head_pattern: pattern, head_pattern_index: None }),
       coordinates: None,
     })
   }
 
-  fn read_tank(&mut self, line: &str) -> Result<Node, InputError> {
+  fn read_tank(&self, line: &str) -> Result<Node, InputError> {
     let mut parts = parse_line(line);
     let id = parts.next().ok_or_missing("tank id")?.into();
     let elevation = parts.next().ok_or_missing("elevation")?.parse_field::<f64>("elevation")?;
@@ -351,7 +333,7 @@ impl Network {
       return Ok(Node {
         id,
         elevation,
-        node_type: NodeType::Reservoir(Reservoir { head_pattern: None }),
+        node_type: NodeType::Reservoir(Reservoir { head_pattern: None, head_pattern_index: None }),
         coordinates: None,
       });
     }
@@ -384,7 +366,7 @@ impl Network {
   }
 
   /// Read a valve from a parts iterator
-  fn read_valve(&mut self, line: &str) -> Result<Link, InputError> {
+  fn read_valve(&self, line: &str) -> Result<Link, InputError> {
     let mut parts = parse_line(line);
 
     let id = parts.next().ok_or_missing("valve id")?.into();
@@ -553,23 +535,18 @@ impl Network {
     let x = parts.next().ok_or_missing("x value")?.parse_field::<f64>("x value")?;
     let y = parts.next().ok_or_missing("y value")?.parse_field::<f64>("y value")?;
     
-    // create curve if it does not exist
-    if !self.curves.contains_key(&id) {
-      self.curves.insert(id.clone(), Curve { id, x: vec![x], y: vec![y]});
-    }
-    // otherwise, add the point to the curve
-    else {
-      let curve = self.curves.get_mut(&id)
-        .ok_or_else(|| InputError::new(format!("Curve '{}' not found", id)))?;
-      // check if the x value is in ascending order
+    if let Some(&index) = self.curve_map.get(&id) {
+      let curve = &mut self.curves[index];
       if let Some(last_x) = curve.x.last() {
         if x < *last_x {
           return Err(InputError::new(format!("X values must be in ascending order for curve '{}': {} < {}", id, x, last_x)));
         }
       }
-      // add the point to the curve
       curve.x.push(x);
       curve.y.push(y);
+    } else {
+      self.curve_map.insert(id.clone(), self.curves.len());
+      self.curves.push(Curve { id, x: vec![x], y: vec![y] });
     }
     Ok(())
   }
@@ -584,12 +561,11 @@ impl Network {
       .collect();
     let multipliers = multipliers?;
     
-    if !self.patterns.contains_key(&id) {
-      self.patterns.insert(id.clone(), Pattern { multipliers });
+    if let Some(&index) = self.pattern_map.get(&id) {
+      self.patterns[index].multipliers.extend(multipliers);
     } else {
-      let pattern = self.patterns.get_mut(&id)
-        .ok_or_else(|| InputError::new(format!("Pattern '{}' not found", id)))?;
-      pattern.multipliers.extend(multipliers);
+      self.pattern_map.insert(id.clone(), self.patterns.len());
+      self.patterns.push(Pattern { id, multipliers });
     }
     Ok(())
   }
@@ -945,13 +921,13 @@ mod tests {
       network.add_node(Node {
         id: "N1".into(),
         elevation: 0.0,
-        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, emitter_coefficient: 0.0 }),
+        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, pattern_index: None, emitter_coefficient: 0.0 }),
         coordinates: None,
       }).unwrap();
       network.add_node(Node {
         id: "N2".into(),
         elevation: 0.0,
-        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, emitter_coefficient: 0.0 }),
+        node_type: NodeType::Junction(Junction { basedemand: 0.0, pattern: None, pattern_index: None, emitter_coefficient: 0.0 }),
         coordinates: None,
       }).unwrap();
       network.add_link(Link {
@@ -972,7 +948,7 @@ mod tests {
 
   #[test]
   fn test_read_junction_basic() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_junction("J1  100.5  25.0").unwrap();
     
     assert_eq!(&*node.id, "J1");
@@ -988,7 +964,7 @@ mod tests {
 
   #[test]
   fn test_read_junction_with_pattern() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_junction("J2  50.0  100.0  PAT1").unwrap();
     
     assert_eq!(&*node.id, "J2");
@@ -1004,7 +980,7 @@ mod tests {
 
   #[test]
   fn test_read_junction_with_comment() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     // Pattern field contains semicolon (comment marker) - should be ignored
     let node = network.read_junction("J3  75.0  50.0  ;comment").unwrap();
     
@@ -1017,7 +993,7 @@ mod tests {
 
   #[test]
   fn test_read_junction_missing_demand() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     // Only ID and elevation provided - demand should default to 0.0
     let node = network.read_junction("J4  200.0").unwrap();
 
@@ -1032,7 +1008,7 @@ mod tests {
 
   #[test]
   fn test_read_valve_basic() {
-    let mut network = test_network(true);
+    let network = test_network(true);
     let valve = network.read_valve("V1  N1  N2 12.0 PRV 50.0  100.0").unwrap();
     
     assert_eq!(&*valve.id, "V1");
@@ -1048,7 +1024,7 @@ mod tests {
 
   #[test]
   fn test_read_valve_gpv() {
-    let mut network = test_network(true);
+    let network = test_network(true);
     let valve = network.read_valve("V2  N1  N2 12.0 GPV GPV_CURVE  100.0").unwrap();
     
     assert_eq!(&*valve.id, "V2");
@@ -1061,7 +1037,7 @@ mod tests {
 
   #[test]
   fn test_read_valve_fcv() {
-    let mut network = test_network(true);
+    let network = test_network(true);
     let valve = network.read_valve("V3  N1  N2 12.0 FCV 50.0  100.0 FCV_CURVE").unwrap();
     
     assert_eq!(&*valve.id, "V3");
@@ -1079,7 +1055,7 @@ mod tests {
 
   #[test]
   fn test_read_reservoir_basic() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_reservoir("RES1  150.0").unwrap();
     
     assert_eq!(&*node.id, "RES1");
@@ -1094,7 +1070,7 @@ mod tests {
 
   #[test]
   fn test_read_reservoir_with_pattern() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_reservoir("RES2  200.0  HEADPAT; comment").unwrap();
     
     let NodeType::Reservoir(reservoir) = &node.node_type else {
@@ -1152,7 +1128,7 @@ mod tests {
 
   #[test]
   fn test_read_tank_basic() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_tank("T1  100  15  5  25  120  0  *  Yes").unwrap();
 
     let NodeType::Tank(tank) = &node.node_type else {
@@ -1170,7 +1146,7 @@ mod tests {
   }
   #[test]
   fn test_read_tank_with_volume_curve() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_tank("T2  100  15  5  25  120  0  VOLCURVE").unwrap();
     
     let NodeType::Tank(tank) = &node.node_type else {
@@ -1182,7 +1158,7 @@ mod tests {
 
   #[test]
   fn test_read_tank_as_reservoir() {
-    let mut network = test_network(false);
+    let network = test_network(false);
     let node = network.read_tank("T3  100").unwrap();
 
     let NodeType::Reservoir(_reservoir) = &node.node_type else {
@@ -1243,7 +1219,8 @@ mod tests {
     let mut network = test_network(false);
     network.read_curve("CURVE1  100.0  50.0").unwrap();
     
-    let curve = network.curves.get("CURVE1").unwrap();
+    let &index = network.curve_map.get("CURVE1").unwrap();
+    let curve = &network.curves[index];
     assert_eq!(curve.x, vec![100.0]);
     assert_eq!(curve.y, vec![50.0]);
   }
@@ -1255,7 +1232,8 @@ mod tests {
     network.read_curve("CURVE2  50.0  75.0").unwrap();
     network.read_curve("CURVE2  100.0  25.0").unwrap();
     
-    let curve = network.curves.get("CURVE2").unwrap();
+    let &index = network.curve_map.get("CURVE2").unwrap();
+    let curve = &network.curves[index];
     assert_eq!(curve.x, vec![0.0, 50.0, 100.0]);
     assert_eq!(curve.y, vec![100.0, 75.0, 25.0]);
   }
@@ -1267,7 +1245,8 @@ mod tests {
     let mut network = test_network(false);
     network.read_pattern("PAT1  1.0  1.2  0.8  1.1").unwrap();
     
-    let pattern = network.patterns.get("PAT1").unwrap();
+    let &index = network.pattern_map.get("PAT1").unwrap();
+    let pattern = &network.patterns[index];
     assert_eq!(pattern.multipliers, vec![1.0, 1.2, 0.8, 1.1]);
   }
 
@@ -1277,7 +1256,8 @@ mod tests {
     network.read_pattern("PAT2  1.0  1.5").unwrap();
     network.read_pattern("PAT2  2.0  0.5").unwrap();
     
-    let pattern = network.patterns.get("PAT2").unwrap();
+    let &index = network.pattern_map.get("PAT2").unwrap();
+    let pattern = &network.patterns[index];
     assert_eq!(pattern.multipliers, vec![1.0, 1.5, 2.0, 0.5]);
   }
 

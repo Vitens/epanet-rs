@@ -2,63 +2,103 @@ use rayon::prelude::*;
 
 use simplelog::warn;
 
-use crate::error::SolverError;
+use crate::error::{InputError, SolverError};
 use crate::solver::hydraulicsolver::HydraulicSolver;
 use crate::solver::state::SolverState;
 use crate::solver::result::SolverResult;
 use crate::model::network::Network;
 use crate::model::node::NodeType;
-use crate::model::units::{Cfs, Ft3};
-use crate::model::options::DemandModel;
+use crate::model::units::FlowUnits;
+use crate::model::options::HeadlossFormula;
+use crate::model::options::SimulationOptions;
+
 use crate::model::control::ControlCondition;
 
-pub struct Simulation<'a> {
-  pub network: &'a Network,
-  pub solver: HydraulicSolver,
-  pub state: SolverState,
+
+pub struct Simulation {
+  pub network: Network,
+  pub solver: Option<HydraulicSolver>,
+  pub state: Option<SolverState>,
   pub time: usize,
   pub skip_timesteps: bool,
+  /// flag to indicate if the simulation is solved
+  pub solved: bool,
 }
 
-impl<'a> Simulation<'a> {
+impl Simulation {
+
+  /// Creates a new simulation from an input file.
+  pub fn from_file(path: &str) -> Result<Self, InputError> {
+    let network = Network::from_file(path)?;
+    Ok(Self::new(network))
+  }
+  /// Creates a new simulation with the given network and options.
+  pub fn init(flow_units: FlowUnits, headloss_formula: HeadlossFormula) -> Self {
+    let mut network = Network::default();
+    network.options = SimulationOptions::new(flow_units, headloss_formula);
+    Self::new(network)
+  }
 
   /// Creates a new simulation, allocating the hydraulic solver and initializing state.
   /// Functionally equivalent to EN_openH followed by EN_initH.
-  pub fn new(network: &'a Network) -> Result<Self, SolverError> {
-    let solver = HydraulicSolver::new(network)?;
-    let state = SolverState::new_with_initial_values(network);
-    Ok(Self { network, solver, state, time: 0, skip_timesteps: true })
+  pub fn new(network: Network) -> Self {
+    Self { network, solver: None, state: None, time: 0, skip_timesteps: true, solved: false }
   }
 
   /// Resets the simulation to initial conditions (time = 0, fresh state).
   /// Equivalent to EN_initH.
-  pub fn initialize_hydraulics(&mut self) {
-    self.state = SolverState::new_with_initial_values(self.network);
+  pub fn initialize_hydraulics(&mut self) -> Result<(), SolverError> {
+    // update the solver if the network version has changed
+    self.solver = Some(HydraulicSolver::new(&self.network)?);
+    self.state = Some(SolverState::new_with_initial_values(&self.network));
+    self.network.reset_changes();
     self.time = 0;
+    self.solved = false;
+    Ok(())
   }
 
   /// Applies patterns and controls, then solves hydraulics at the given time.
   /// Returns the solved state at the given time.
   /// Equivalent to EN_runH.
-  pub fn run_hydraulics(&mut self, time: usize) -> Result<usize, SolverError> {
-    self.time = time;
-    Self::apply_patterns(self.network, &mut self.state, self.time);
-    Self::apply_controls(self.network, &mut self.state, self.time);
-    self.state = self.solver.solve(self.network, &self.state)?;
+  pub fn run_hydraulics(&mut self) -> Result<usize, SolverError> {
+    // check if the solver is initialized and that its topology matches the network
+    let needs_reinit = match self.solver.as_ref() {
+      Some(solver) => self.network.topology_version != solver.topology_version,
+      None => return Err(SolverError::NotInitialized),
+    };
+    if needs_reinit {
+      self.initialize_hydraulics()?;
+    }
+
+    let solver = self.solver.as_ref().unwrap();
+    let state = self.state.as_mut().unwrap();
+
+    // update the state with the changes to the network
+    state.update_with_network_changes(&mut self.network);
+
+    state.apply_patterns(&self.network, self.time);
+    state.apply_controls(&self.network, self.time);
+    self.state = Some(solver.solve(&self.network, state)?);
+    // set the solved flag to true
+    self.solved = true;
     Ok(self.time)
   }
 
   /// Advances to the next hydraulic time step (updating tank levels).
-  /// Returns the time step length in seconds. Returns 0 when the simulation is complete.
+  /// Returns the time step length in seconds. Returns 0 when the simulation is complete or the state is not initialized.
   /// Equivalent to EN_nextH.
   pub fn next_hydraulic_timestep(&mut self) -> usize {
+
+    // unwrap the state, if it is none, return 0
+    let Some(state) = self.state.as_mut() else { return 0 };
+
     let duration = self.network.options.time_options.duration;
     if self.time >= duration {
       return 0;
     }
     let remaining = duration - self.time;
-    let timestep = Self::calculate_time_step(self.network, &self.state, self.time, self.skip_timesteps).min(remaining);
-    Self::update_tanks(self.network, &mut self.state, timestep);
+    let timestep = Self::calculate_time_step(&self.network, &state, self.time, self.skip_timesteps).min(remaining);
+    state.update_tanks(&self.network, timestep);
     self.time += timestep;
     timestep
   }
@@ -68,7 +108,10 @@ impl<'a> Simulation<'a> {
   /// Simulations can be run in parallel or sequentially. Parallel mode is only supported for networks without tanks or pressure controls.
   /// Returns a SolverResult containing the flows and heads at each report step.
   pub fn solve_hydraulics(&mut self, parallel: bool) -> Result<SolverResult, SolverError> {
-    self.initialize_hydraulics();
+    // initialize the solver if it is not initialized
+    if self.solver.is_none() {
+      self.initialize_hydraulics()?;
+    }
 
     if parallel && !self.network.has_tanks() && !self.network.has_pressure_controls() {
       return self.solve_parallel();
@@ -83,18 +126,17 @@ impl<'a> Simulation<'a> {
     let mut results = SolverResult::new(self.network.links.len(), self.network.nodes.len(), report_steps);
 
     // Run the simulation step by step
-    let mut time = 0;
     loop {
-      let t = self.run_hydraulics(time)?;
+      let t = self.run_hydraulics()?;
       // Append the results to the SolverResult if the time step is a report step
       if t % report_timestep == 0 {
-        results.append(&self.state, t / report_timestep);
+        results.append(self.state.as_ref().unwrap(), t / report_timestep);
       }
       // Advance the time step, returns 0 if the simulation is complete
       let dt = self.next_hydraulic_timestep();
       if dt == 0 { break; }
-      time += dt;
     }
+    self.solved = true;
 
     // Convert the units of the results to the original units
     results.convert_units(&self.network.options.flow_units, &self.network.options.unit_system);
@@ -103,6 +145,8 @@ impl<'a> Simulation<'a> {
 
   /// Solves the hydraulics in parallel, only supported for networks without tanks or pressure controls.
   fn solve_parallel(&mut self) -> Result<SolverResult, SolverError> {
+    let solver = self.solver.as_ref().ok_or(SolverError::NotInitialized)?;
+    let state = self.state.as_mut().unwrap();
 
     // parallel solve is only supported for networks without tanks or pressure controls, so we only use the report timestep to determine the number of steps
     let report_timestep = self.network.options.time_options.report_timestep;
@@ -113,80 +157,26 @@ impl<'a> Simulation<'a> {
 
     // First solve the first time step, and use that as the initial state for the parallel solve
     // allowing for faster convergence.
-    Self::apply_patterns(self.network, &mut self.state, 0);
-    self.state = self.solver.solve(self.network, &self.state)?;
-    results.append(&self.state, 0);
-
-    let initial_state = self.state.clone();
+    state.apply_patterns(&self.network, 0);
+    let initial_state = solver.solve(&self.network, state)?;
+    results.append(&initial_state, 0);
 
     // Solve the remaining time steps in parallel
     let par_results: Vec<Result<SolverState, SolverError>> = (1..report_steps).into_par_iter().map(|step| {
       let mut state = initial_state.clone();
-      Self::apply_patterns(self.network, &mut state, step * report_timestep);
-      self.solver.solve(self.network, &state)
+      state.apply_patterns(&self.network, step * report_timestep);
+      solver.solve(&self.network, &state)
     }).collect();
 
     // update the results vector with the parallel solve results
     for (step, step_result) in par_results.into_iter().enumerate() {
       results.append(&step_result?, step + 1);
     }
+    self.solved = true;
 
     // Convert the units of the results to the original units
     results.convert_units(&self.network.options.flow_units, &self.network.options.unit_system);
     Ok(results)
-  }
-
-  /// Applies demand and head patterns to the state at the given time.
-  /// TODO: Add support for multiple patterns
-  fn apply_patterns(network: &Network, state: &mut SolverState, time: usize) {
-    let time_options = &network.options.time_options;
-    let pattern_time = time_options.pattern_start + time;
-    let pattern_index = pattern_time / time_options.pattern_timestep;
-
-    for (i, node) in network.nodes.iter().enumerate() {
-      let Some(head_pattern) = node.head_pattern() else { continue };
-      let pattern = &network.patterns[head_pattern];
-      state.heads[i] = node.elevation * pattern.multipliers[pattern_index % pattern.multipliers.len()];
-    }
-
-    // Resolve the default demand pattern: explicit PATTERN option, or EPANET's default "1"
-    let default_pattern_id: Box<str> = network.options.pattern.clone()
-      .unwrap_or_else(|| "1".into());
-    let default_pattern = network.patterns.get(&default_pattern_id);
-
-    state.demands = network.nodes.iter().map(|n| {
-      let NodeType::Junction(junction) = &n.node_type else { return 0.0 };
-      let pattern = junction.pattern.as_ref()
-        .and_then(|id| network.patterns.get(id))
-        .or(default_pattern);
-      let multiplier = match pattern {
-        Some(p) => p.multipliers[pattern_index % p.multipliers.len()],
-        None => 1.0,
-      };
-      junction.basedemand * multiplier * network.options.demand_multiplier
-    }).collect::<Vec<Cfs>>();
-
-    if network.options.demand_model == DemandModel::PDA {
-      state.demand_flows = state.demands.clone();
-    }
-  }
-
-  /// Applies controls to the state at the given time.
-  fn apply_controls(network: &Network, state: &mut SolverState, time: usize) {
-    let clocktime = (time + network.options.time_options.start_clocktime) % (24 * 3600);
-
-    for control in &network.controls {
-      // skip controls that are not pressure or level controls
-      if matches!(control.condition, ControlCondition::LowPressure { .. } | ControlCondition::HighPressure { .. }) {
-        continue;
-      }
-      if matches!(control.condition, ControlCondition::LowLevel { .. } | ControlCondition::HighLevel { .. }) && time == 0 {
-        continue;
-      }
-      if control.is_active(state, network, time, clocktime) {
-        control.activate(state, network);
-      }
-    }
   }
 
   /// Calculates the time step for the next hydraulic time step.
@@ -249,15 +239,12 @@ impl<'a> Simulation<'a> {
     *[t_report, t_pattern, t_tanks, t_controls, times.hydraulic_timestep].iter().filter(|&x| *x > 0).min().unwrap()
   }
 
-  /// Updates the tank levels for the given time step.
-  fn update_tanks(network: &Network, state: &mut SolverState, timestep: usize) {
-    for (tank_index, node) in network.nodes.iter().enumerate() {
-      if let NodeType::Tank(tank) = &node.node_type {
-        // calculate the delta volume and new head for the tank
-        let delta_volume = state.demands[tank_index] * timestep as Ft3;
-        let new_head = tank.new_head(delta_volume, state.heads[tank_index]);
-        state.heads[tank_index] = new_head;
-      }
+  /// get the solved state if it is available, otherwise return None
+  pub(crate) fn solved_state(&self) -> Option<&SolverState> {
+    if self.solved {
+      self.state.as_ref()
+    } else {
+      None
     }
   }
 }

@@ -79,8 +79,11 @@ impl LinkTrait for Pump {
     BIG_VALUE
   }
 
-  fn update_status(&self, _: f64, _: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
-    None
+  fn update_status(&self, _: f64, status: LinkStatus, _: f64, _: f64, _: f64) -> Option<LinkStatus> {
+    if status == LinkStatus::Xhead {
+      return Some(LinkStatus::Open); // reopen the pipe if it was temporarily closed
+    }
+    return None;
   }
 
   fn initial_flow(&self) -> f64 {
@@ -88,7 +91,7 @@ impl LinkTrait for Pump {
       return Q_ZERO;
     }
     if let Some(head_curve) = &self.head_curve {
-      return head_curve.statistics.q_initial;
+      return head_curve.statistics.q_initial * self.speed;
     }
     else {
       return 1.0; // constant power pump

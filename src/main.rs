@@ -7,7 +7,7 @@ use simplelog::{format_description};
 
 
 use epanet_rs::model::network::Network;
-use epanet_rs::solver::simulation::Simulation;
+use epanet_rs::simulation::Simulation;
 use epanet_rs::utils::validate_epanet::validate_with_epanet;
 
 const BANNER: [&str; 6] = [
@@ -75,6 +75,7 @@ enum Commands {
 }
 
 fn main() -> Result<(), String> {
+
   let cli = Cli::parse();
 
   // Determine log level based on command
@@ -142,10 +143,13 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, print
   debug!("Network loaded in {:?}", end_time.duration_since(start_time));
 
   let start_time = Instant::now();
-  let mut simulation = Simulation::new(&network).unwrap_or_else(|e| {
-    error!("Failed to create simulation: {}", e);
+  let mut simulation = Simulation::new(network);
+
+  simulation.initialize_hydraulics().unwrap_or_else(|e| {
+    error!("Failed to initialize simulation: {}", e);
     std::process::exit(1);
   });
+
   let result = simulation.solve_hydraulics(parallel).unwrap_or_else(|e| {
     error!("Solver failed: {}", e);
     std::process::exit(1);
@@ -155,7 +159,7 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, print
 
   if let Some(output_file) = output_file {
     let start_time = Instant::now();
-    network.write_results(&result, output_file).expect("Failed to write results");
+    simulation.network.write_results(&result, output_file).expect("Failed to write results");
     let end_time = Instant::now();
     info!("Results written to {} in {:?}", output_file, end_time.duration_since(start_time));
   }
@@ -163,11 +167,11 @@ fn run_solver(input_file: &str, output_file: Option<&str>, parallel: bool, print
   if print_results {
     println!("Results:");
     println!("=== Heads:");
-    for (i, node) in network.nodes.iter().enumerate() {
+    for (i, node) in simulation.network.nodes.iter().enumerate() {
       println!("Node {}: {:.2}", node.id, result.heads[result.heads.len()-1][i]);
     }
     println!("=== Flows:");
-    for (i, link) in network.links.iter().enumerate() {
+    for (i, link) in simulation.network.links.iter().enumerate() {
       println!("Link {}: {:.2}", link.id, result.flows[result.flows.len()-1][i]);
     }
   }

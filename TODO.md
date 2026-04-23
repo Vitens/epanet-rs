@@ -29,14 +29,22 @@
 - [x] Fix Unit conversion when serializing using Serde
 - [x] Unit conversion for GPV head curves
 - [x] Setup unit and integration testing, improve coverage
+- [x] Setup automated benchmarks
+- [ ] Create EPANET2_3 API compatibility layer
 - [ ] Implement headerror convergence criteria
 - [ ] Update convergence criteria for PDA
 - [ ] Implement RULES
 - [ ] Implement report start and statistic option
 - [ ] Tanks with volume curve
-- [ ] Introduce more robust unit type system to handle conversions between different units and systems
 - [ ] Network validation (connectivity, presence of tanks)
 - [ ] Identify and remove unconnected zones from the solver
-- [ ] Try to get the solver working for f32 in addition to f64 (SIMD speedup?)
-- [ ] Setup automated benchmarks
-- [ ] Create EPANET2_3 API compatibility layer
+
+# API Methods
+- [ ] fix pattern removal (should disasocciate nodes from pattern)
+
+# Cleanup and refactoring
+- [ ] Refactor curves to use a combined x and y vector instead of separate vectors
+- [ ] Investigate performance degradation using HashMap for lookup of nodes, links, curves, patterns instead of Vec index
+- [ ] Otherwise, write a method to remap all indices based on ids
+- [ ] Setting tank_level should be possible?
+- [ ] Implement get_* for getting link/node/curve/pattern/control/rule properties in correct units

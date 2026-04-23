@@ -2,7 +2,7 @@ use crate::solver::state::SolverState;
 use crate::model::units::{Ft, Cfs, FlowUnits, UnitSystem};
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct SolverResult {
   pub flows: Vec<Vec<Cfs>>,
   pub heads: Vec<Vec<Ft>>,

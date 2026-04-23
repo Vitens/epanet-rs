@@ -150,18 +150,18 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
 
   // write curves
   write_section(&mut buffer, "CURVES", &[("ID", 10), ("X-Value", 12), ("Y-Value", 12)]);
-  for (id, curve) in network.curves.iter() {
+  for curve in network.curves.iter() {
     for (x, y) in curve.x.iter().zip(curve.y.iter()) {
-      write_line(&mut buffer, &format!("{:<10} {:<12} {:<12}", id, x, y));
+      write_line(&mut buffer, &format!("{:<10} {:<12} {:<12}", curve.id, x, y));
     }
     write_line(&mut buffer, ";");
   }
 
   // write patterns
   write_section(&mut buffer, "PATTERNS", &[("ID", 10), ("Multipliers", 12)]);
-  for (id, pattern) in network.patterns.iter() {
+  for pattern in network.patterns.iter() {
     for multiplier in pattern.multipliers.iter() {
-      write_line(&mut buffer, &format!("{:<10} {:<12}", id, multiplier));
+      write_line(&mut buffer, &format!("{:<10} {:<12}", pattern.id, multiplier));
     }
     write_line(&mut buffer, ";");
   }

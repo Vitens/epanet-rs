@@ -6,8 +6,7 @@ use std::process::Stdio;
 
 use simplelog::{info, warn, error};
 
-use crate::model::network::Network;
-use crate::solver::simulation::Simulation;
+use crate::simulation::Simulation;
 use crate::utils::binfile::read_outfile;
 
 pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bool) -> bool {
@@ -20,13 +19,8 @@ pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bo
     return false;
   }
 
-  let mut network = Network::default();
-  network.read_file(input_file).unwrap_or_else(|e| {
+  let mut simulation = Simulation::from_file(input_file).unwrap_or_else(|e| {
     error!("Failed to load network: {}", e);
-    std::process::exit(1);
-  });
-  let mut simulation = Simulation::new(&network).unwrap_or_else(|e| {
-    error!("Failed to create simulation: {}", e);
     std::process::exit(1);
   });
   simulation.skip_timesteps = false;
@@ -106,7 +100,7 @@ pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bo
     for j in 0..rs_result.demands[i].len() {
       if !values_equal(rs_result.demands[i][j], epanet_results.demands[i][j], rtol, atol) {
         // skip results for fixed_head nodes
-        if network.nodes[j].is_fixed() {
+        if simulation.network.nodes[j].is_fixed() {
           continue;
         }
         let diff = (rs_result.demands[i][j] - epanet_results.demands[i][j]).abs();

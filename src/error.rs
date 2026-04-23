@@ -3,22 +3,76 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SolverError {
+  #[error("Solver not initialized")]
+  NotInitialized,
   #[error("Singular matrix: check connectivity at node '{node_id}'")]
   SingularMatrix { node_id: Box<str> },
   #[error("Maximum number of iterations reached: {max_trials}")]
   MaxIterations { max_trials: usize },
   #[error("Network topology has changed since the solver was created, please recreate the solver")]
   StaleTopology,
+  #[error("Network properties have changed since the solver state was created, please update the solver state")]
+  StaleProperties,
   #[error("Failed to compute Cholesky factorization: {0}")]
   Factorization(String),
 }
 
 #[derive(Debug, Error)]
-#[error("{message}{}", format_suffix(.line, .context))]
-pub struct InputError {
-  pub message: String,
-  pub line: Option<usize>,
-  pub context: Option<String>,
+pub enum InputError {
+  #[error("Cannot open file '{path}': {source}")]
+  FileOpen {
+    path: String,
+    source: std::io::Error,
+  },
+
+  #[error("IO error: {0}")]
+  FileRead(#[from] std::io::Error),
+
+  #[error("Node {node_id} already exists")]
+  NodeExists { node_id: Box<str> },
+
+  #[error("Link {link_id} already exists")]
+  LinkExists { link_id: Box<str> },
+
+  #[error("Node {node_id} not found")]
+  NodeNotFound { node_id: Box<str> },
+
+  #[error("Node {node_id} is not a junction")]
+  NodeNotAJunction { node_id: Box<str> },
+
+  #[error("Node {node_id} is not a tank")]
+  NodeNotATank { node_id: Box<str> },
+
+  #[error("Node {node_id} is not a reservoir")]
+  NodeNotAReservoir { node_id: Box<str> },
+
+  #[error("Link {link_id} not found")]
+  LinkNotFound { link_id: Box<str> },
+
+  #[error("Link {link_id} is not a pipe")]
+  LinkNotAPipe { link_id: Box<str> },
+
+  #[error("Link {link_id} is not a pump")]
+  LinkNotAPump { link_id: Box<str> },
+
+  #[error("Link {link_id} is not a valve")]
+  LinkNotAValve { link_id: Box<str> },
+
+  #[error("Pattern {pattern_id} not found")]
+  PatternNotFound { pattern_id: Box<str> },
+
+  #[error("Curve {curve_id} not found")]
+  CurveNotFound { curve_id: Box<str> },
+
+  #[error("Tank {tank_id} levels are invalid: initial_level={initial_level}, min_level={min_level}, max_level={max_level}")]
+  TankLevelsInvalid { tank_id: Box<str>, initial_level: f64, min_level: f64, max_level: f64 },
+
+  #[error("{message}{}", format_suffix(.line, .context))]
+  Parse {
+    message: String,
+    line: Option<usize>,
+    context: Option<String>,
+  },
 }
 
 fn format_suffix(line: &Option<usize>, context: &Option<String>) -> String {
@@ -33,24 +87,31 @@ fn format_suffix(line: &Option<usize>, context: &Option<String>) -> String {
 }
 
 impl InputError {
+  /// Creates a parse error. This is the most common constructor.
   pub fn new(message: impl Into<String>) -> Self {
-    Self { message: message.into(), line: None, context: None }
+    Self::Parse { message: message.into(), line: None, context: None }
   }
 
-  pub fn with_line(mut self, line: usize) -> Self {
-    self.line = Some(line);
+  pub fn file_open(path: impl Into<String>, source: std::io::Error) -> Self {
+    Self::FileOpen { path: path.into(), source }
+  }
+
+  pub fn with_line(mut self, line_num: usize) -> Self {
+    if let Self::Parse { ref mut line, .. } = self {
+      *line = Some(line_num);
+    }
     self
   }
 
   pub fn with_context(mut self, context: impl Into<String>) -> Self {
-    self.context = Some(context.into());
+    if let Self::Parse { context: ref mut ctx, .. } = self {
+      *ctx = Some(context.into());
+    }
     self
   }
-}
 
-impl From<std::io::Error> for InputError {
-  fn from(err: std::io::Error) -> Self {
-    InputError::new(format!("IO error: {}", err))
+  pub fn is_file_error(&self) -> bool {
+    matches!(self, Self::FileOpen { .. } | Self::FileRead(_))
   }
 }
 
