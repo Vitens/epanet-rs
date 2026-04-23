@@ -29,72 +29,50 @@ jobs:
         wget -q https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
         sudo dpkg -i hyperfine_1.18.0_amd64.deb
 
-    - name: Clone example networks
-      run: git clone --depth 1 https://github.com/OpenWaterAnalytics/epanet-example-networks.git /tmp/example-networks
-
-    - name: Run benchmarks
+    - name: Run benchmark
       run: |
         EPANET_RS="./target/release/epanet-rs"
-        RESULTS_DIR="/tmp/benchmark-results"
+        INP="benchmarks/benchmark.inp"
+        RESULTS_DIR="benchmark-results"
         mkdir -p "$RESULTS_DIR"
 
-        echo "| Network | EPANET (ms) | EPANET-RS (ms) | EPANET-RS parallel (ms) | Speedup | Speedup (parallel) |" > "$RESULTS_DIR/summary.md"
-        echo "|---------|-------------|-----------------|-------------------------|---------|--------------------|" >> "$RESULTS_DIR/summary.md"
+        hyperfine \
+          --warmup 2 \
+          --min-runs 5 \
+          --export-json "$RESULTS_DIR/benchmark.json" \
+          --export-markdown "$RESULTS_DIR/benchmark.md" \
+          --command-name "EPANET" \
+            "runepanet '$INP' /dev/null" \
+          --command-name "EPANET-RS" \
+            "$EPANET_RS run '$INP' --quiet" \
+          --command-name "EPANET-RS-parallel" \
+            "$EPANET_RS run '$INP' --quiet --parallel"
 
-        for inp in $(find /tmp/example-networks -name '*.inp' | sort); do
-          name=$(basename "$inp" .inp)
-          echo "::group::Benchmarking $name"
+        epanet_ms=$(jq '.results[] | select(.command == "EPANET") | .mean * 1000' "$RESULTS_DIR/benchmark.json")
+        rs_ms=$(jq '.results[] | select(.command == "EPANET-RS") | .mean * 1000' "$RESULTS_DIR/benchmark.json")
+        rs_par_ms=$(jq '.results[] | select(.command == "EPANET-RS-parallel") | .mean * 1000' "$RESULTS_DIR/benchmark.json")
+        speedup=$(echo "scale=2; $epanet_ms / $rs_ms" | bc)
+        speedup_par=$(echo "scale=2; $epanet_ms / $rs_par_ms" | bc)
 
-          # Pre-flight: skip networks that fail or take too long
-          if ! timeout 60 runepanet "$inp" /dev/null 2>/dev/null; then
-            echo "⏭️ SKIPPED (EPANET failed or timed out): $name"
-            echo "::endgroup::"
-            continue
-          fi
-          if ! timeout 60 "$EPANET_RS" run "$inp" --quiet 2>/dev/null; then
-            echo "⏭️ SKIPPED (EPANET-RS failed or timed out): $name"
-            echo "::endgroup::"
-            continue
-          fi
-
-          hyperfine \
-            --warmup 1 \
-            --min-runs 3 \
-            --export-json "$RESULTS_DIR/${name}.json" \
-            --command-name "EPANET" \
-              "runepanet '$inp' /dev/null" \
-            --command-name "EPANET-RS" \
-              "$EPANET_RS run '$inp' --quiet" \
-            --command-name "EPANET-RS-parallel" \
-              "$EPANET_RS run '$inp' --quiet --parallel" \
-            || true
-
-          if [ -f "$RESULTS_DIR/${name}.json" ]; then
-            epanet_ms=$(jq '.results[] | select(.command == "EPANET") | .mean * 1000' "$RESULTS_DIR/${name}.json" 2>/dev/null || echo "N/A")
-            rs_ms=$(jq '.results[] | select(.command == "EPANET-RS") | .mean * 1000' "$RESULTS_DIR/${name}.json" 2>/dev/null || echo "N/A")
-            rs_par_ms=$(jq '.results[] | select(.command == "EPANET-RS-parallel") | .mean * 1000' "$RESULTS_DIR/${name}.json" 2>/dev/null || echo "N/A")
-
-            if [ "$epanet_ms" != "N/A" ] && [ "$rs_ms" != "N/A" ] && [ "$rs_par_ms" != "N/A" ]; then
-              speedup=$(echo "scale=2; $epanet_ms / $rs_ms" | bc 2>/dev/null || echo "N/A")
-              speedup_par=$(echo "scale=2; $epanet_ms / $rs_par_ms" | bc 2>/dev/null || echo "N/A")
-              epanet_fmt=$(printf "%.1f" "$epanet_ms")
-              rs_fmt=$(printf "%.1f" "$rs_ms")
-              rs_par_fmt=$(printf "%.1f" "$rs_par_ms")
-              echo "| $name | $epanet_fmt | $rs_fmt | $rs_par_fmt | ${speedup}x | ${speedup_par}x |" >> "$RESULTS_DIR/summary.md"
-            fi
-          fi
-
-          echo "::endgroup::"
-        done
-
-        echo ""
-        echo "## Benchmark Results"
-        echo ""
-        cat "$RESULTS_DIR/summary.md"
+        {
+          echo "## Benchmark Results"
+          echo ""
+          echo "Network: \`$INP\`"
+          echo ""
+          echo "| Command | Mean (ms) | Speedup |"
+          echo "|---------|-----------|---------|"
+          printf "| EPANET | %.1f | 1.00x |\n" "$epanet_ms"
+          printf "| EPANET-RS | %.1f | %sx |\n" "$rs_ms" "$speedup"
+          printf "| EPANET-RS (parallel) | %.1f | %sx |\n" "$rs_par_ms" "$speedup_par"
+          echo ""
+          echo "### Hyperfine output"
+          echo ""
+          cat "$RESULTS_DIR/benchmark.md"
+        } | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: Upload benchmark results
       uses: actions/upload-artifact@v4
       if: always()
       with:
         name: benchmark-results
-        path: /tmp/benchmark-results/
+        path: benchmark-results/
