@@ -37,7 +37,7 @@ impl LinkTrait for Pump {
 
 
     // Prevent negative flow
-    if q < -H_TOL {
+    if q < 0.0 {
       let hloss = -(setting.powi(2) * h_max) + BIG_VALUE * q;
       let hgrad = BIG_VALUE;
       return LinkCoefficients::new_status(1.0/hgrad, hloss/hgrad, LinkStatus::Xhead);
