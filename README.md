@@ -16,7 +16,7 @@ Modern applications of the EPANET solver, such as monte-carlo simulations, leak 
 
 `epanet-rs` is a modern reimplementation of the EPANET2 hydraulic solver written in Rust, designed to preserve the original algorithms and numerical behavior while enabling safer memory management, improved maintainability, and performance optimizations through multi-threading and SIMD acceleration.  
 
-`epanet-rs` runs about twice as fast as the original EPANET2_3 solver in sequential mode, and up to 5 times faster in parallel mode for extended period simulations for supported networks (no tanks/controls)!
+`epanet-rs` runs about as fast as the original EPANET2_3 solver in sequential mode, and up to 5 times faster in parallel mode for extended period simulations for supported networks (no tanks/controls)!
 
 ## Design Goals
 
@@ -26,25 +26,6 @@ Modern applications of the EPANET solver, such as monte-carlo simulations, leak 
 - **Memory Safety** through Rust's ownership and borrowing system
 - **Modern API** with a focus on ease of use and parallelization
 - **Backwards Compatibility** with EPANET2_3 network API methods
-
-## Benchmarks
-
-Example of a large network with 25742 nodes and 26683 links, run on an AWS `c5.12xlarge` instance using the latest version of EPANET ([2.3.5](https://github.com/OpenWaterAnalytics/EPANET/releases/tag/v2.3.5)) and EPANET-RS (0.2.0).
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/benchmark-dark.svg">
-  <img alt="Benchmark comparison" src="benchmarks/benchmark.svg">
-</picture>
-
-```bash
-hyperfine --warmup 3 'runepanet benchmark.inp /dev/null' 'epanet-rs run benchmark.inp --quiet' 'epanet-rs run benchmark.inp --quiet --parallel'
-```
-
-| Command                                          | Mean [s]      | Min [s] | Max [s] | Relative    |
-| ------------------------------------------------ | ------------- | ------- | ------- | ----------- |
-| `runepanet benchmark.inp /dev/null`                   | 2.138 ± 0.020 | 2.116   | 2.191   | 5.82 ± 0.07 |
-| `epanet-rs run benchmark.inp --quiet`                 | 1.213 ± 0.005 | 1.202   | 1.218   | 3.30 ± 0.03 |
-| `epanet-rs run benchmark.inp --quiet --parallel`      | 0.368 ± 0.003 | 0.361   | 0.371   | 1.00        |
 
 ## Usage
 
