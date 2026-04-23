@@ -1,0 +1,154 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name to create/use (e.g. v0.2.1)'
+        required: true
+        type: string
+      draft:
+        description: 'Create as draft release'
+        required: false
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+            asset: epanet-rs-linux-x86_64.tar.gz
+            bin: epanet-rs
+            lib_glob: libepanet_rs.so
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+            asset: epanet-rs-macos-aarch64.tar.gz
+            bin: epanet-rs
+            lib_glob: libepanet_rs.dylib
+          - os: macos-13
+            target: x86_64-apple-darwin
+            archive: tar.gz
+            asset: epanet-rs-macos-x86_64.tar.gz
+            bin: epanet-rs
+            lib_glob: libepanet_rs.dylib
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            asset: epanet-rs-windows-x86_64.zip
+            bin: epanet-rs.exe
+            lib_glob: epanet_rs.dll
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry + build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }} --locked
+
+      - name: Package (Unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          set -euo pipefail
+          STAGE="epanet-rs"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE"
+
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$STAGE/"
+          if [ -f "target/${{ matrix.target }}/release/${{ matrix.lib_glob }}" ]; then
+            cp "target/${{ matrix.target }}/release/${{ matrix.lib_glob }}" "$STAGE/"
+          fi
+          cp README.md LICENSE-MIT LICENSE-APACHE "$STAGE/"
+
+          tar -czvf "${{ matrix.asset }}" "$STAGE"
+
+      - name: Package (Windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = 'epanet-rs'
+          if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bin }}" $stage
+          $dll = "target/${{ matrix.target }}/release/${{ matrix.lib_glob }}"
+          if (Test-Path $dll) { Copy-Item $dll $stage }
+          $implib = "target/${{ matrix.target }}/release/epanet_rs.dll.lib"
+          if (Test-Path $implib) { Copy-Item $implib $stage }
+
+          Copy-Item README.md,LICENSE-MIT,LICENSE-APACHE $stage
+
+          Compress-Archive -Path "$stage/*" -DestinationPath "${{ matrix.asset }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "draft=${{ github.event.inputs.draft }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "draft=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          draft: ${{ steps.tag.outputs.draft == 'true' }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/epanet-rs-linux-x86_64.tar.gz
+            artifacts/epanet-rs-macos-aarch64.tar.gz
+            artifacts/epanet-rs-macos-x86_64.tar.gz
+            artifacts/epanet-rs-windows-x86_64.zip
