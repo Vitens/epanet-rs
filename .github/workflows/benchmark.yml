@@ -17,12 +17,17 @@ jobs:
     - name: Build epanet-rs (release)
       run: cargo build --release
 
-    - name: Build EPANET from source
+    - name: Install EPANET 2.3.5 (prebuilt release)
       run: |
-        git clone --depth 1 https://github.com/OpenWaterAnalytics/EPANET.git /tmp/epanet
-        cmake -S /tmp/epanet -B /tmp/epanet/build -DCMAKE_BUILD_TYPE=Release
-        cmake --build /tmp/epanet/build --config Release
-        sudo cp /tmp/epanet/build/bin/runepanet /usr/local/bin/
+        wget -q https://github.com/OpenWaterAnalytics/EPANET/releases/download/v2.3.5/EPANET_2_3_5_LINUX_x86_64.zip -O /tmp/epanet.zip
+        unzip -q /tmp/epanet.zip -d /tmp/epanet
+        binary=$(find /tmp/epanet -type f -name 'runepanet' | head -n1)
+        if [ -z "$binary" ]; then
+          echo "runepanet binary not found in release archive" >&2
+          find /tmp/epanet -maxdepth 3 -type f
+          exit 1
+        fi
+        sudo install -m 0755 "$binary" /usr/local/bin/runepanet
 
     - name: Install hyperfine
       run: |
