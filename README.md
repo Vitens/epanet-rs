@@ -29,7 +29,7 @@ Modern applications of the EPANET solver, such as monte-carlo simulations, leak 
 
 ## Benchmarks
 
-Example of a large network with 25742 nodes and 26683 links, run on an AWS `c5.12xlarge` instance using the latest version of EPANET (2.3.5) and EPANET-RS (0.2.0).
+Example of a large network with 25742 nodes and 26683 links, run on an AWS `c5.12xlarge` instance using the latest version of EPANET ([2.3.5](https://github.com/OpenWaterAnalytics/EPANET/releases/tag/v2.3.5)) and EPANET-RS (0.2.0).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/benchmark-dark.svg">
