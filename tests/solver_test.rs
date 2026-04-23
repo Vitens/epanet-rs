@@ -208,3 +208,24 @@ fn test_solve_pda_network() {
 
   verify_heads_and_flows(&simulation.network, &result, &expected_heads, &expected_flows);
 }
+
+
+#[test]
+fn test_pump_speed_cv_network() {
+  let mut simulation = Simulation::from_file("tests/pump-cv.inp").expect("Failed to create simulation");
+  let result = simulation.solve_hydraulics(false).expect("Failed to solve hydraulics");
+
+  let expected_heads: Vec<(&str, f64)> = vec![
+    ("1", 0.00),
+    ("2", 3.21),
+    ("3", 10.00),
+    ("4", 0.00),
+  ];
+  let expected_flows: Vec<(&str, f64)> = vec![
+    ("1", 1.94),
+    ("2", 1.94),
+    ("3", 0.00)
+  ];
+
+  verify_heads_and_flows(&simulation.network, &result, &expected_heads, &expected_flows);
+}

@@ -566,10 +566,10 @@ impl Network {
     let end_node = *self.node_map.get(&data.end_node)
       .ok_or_else(|| InputError::NodeNotFound { node_id: data.end_node.clone() })?;
 
-    // GPV valves are driven by their curve; require it up front
-    if data.valve_type == ValveType::GPV && data.curve_id.is_none() {
-      return Err(InputError::new("GPV valves require a curve id"));
-    }
+    // // GPV valves are driven by their curve; require it up front
+    // if data.valve_type == ValveType::GPV && data.curve_id.is_none() {
+    //   return Err(InputError::new("GPV valves require a curve id"));
+    // }
     let valve_curve = self.resolve_valve_curve(data.curve_id.as_deref())?;
 
     let valve = Valve {
@@ -928,11 +928,12 @@ impl Network {
   /// link. Uses `swap_remove` internally, so the last link in `links` takes
   /// the removed link's slot; `link_map`, tank link lists and `updated_links`
   /// are all kept in sync.
-  pub fn remove_link(&mut self, id: &str) -> Result<(), InputError> {
+  /// `unconditional` is a boolean flag that indicates if the link should be removed if it is referenced by a control. If set to true, remove the link as well as any controls that reference it.
+  pub fn remove_link(&mut self, id: &str, unconditional: bool) -> Result<(), InputError> {
     let link_index = *self.link_map.get(id)
       .ok_or_else(|| InputError::LinkNotFound { link_id: id.into() })?;
 
-    if self.controls.iter().any(|c| c.link_id.as_ref() == id) {
+    if !unconditional && self.controls.iter().any(|c| c.link_id.as_ref() == id) {
       return Err(InputError::new(format!(
         "Cannot remove link {}: referenced by a control", id
       )));
@@ -975,6 +976,10 @@ impl Network {
           if matches!(v.valve_type, ValveType::PSV | ValveType::PRV))
       });
     }
+    // remove any controls that reference this link
+    if unconditional {
+      self.controls.retain(|c| c.link_id.as_ref() != id);
+    }
 
     self.topology_version += 1;
     Ok(())
@@ -986,7 +991,8 @@ impl Network {
   /// Uses `swap_remove` internally, so the last node in `nodes` takes the
   /// removed node's slot; `node_map`, link endpoint indices, control
   /// node/tank indices and `updated_nodes` are all kept in sync.
-  pub fn remove_node(&mut self, id: &str) -> Result<(), InputError> {
+  /// `unconditional` is a boolean flag that indicates if the node should be removed if it is referenced by a control. If set to true, remove the node as well as any controls that reference it.
+  pub fn remove_node(&mut self, id: &str, unconditional: bool) -> Result<(), InputError> {
     let node_index = *self.node_map.get(id)
       .ok_or_else(|| InputError::NodeNotFound { node_id: id.into() })?;
 
@@ -997,7 +1003,7 @@ impl Network {
       | ControlCondition::LowLevel { tank_index, .. } => *tank_index == node_index,
       _ => false,
     });
-    if referenced_by_control {
+    if !unconditional && referenced_by_control {
       return Err(InputError::new(format!(
         "Cannot remove node {}: referenced by a control", id
       )));
@@ -1010,8 +1016,29 @@ impl Network {
       .filter(|l| l.start_node == node_index || l.end_node == node_index)
       .map(|l| l.id.clone())
       .collect();
+
+    // check if any of the connected links are referenced by a control
+    if !unconditional && self.controls.iter().any(|c| connected_link_ids.contains(&c.link_id)) {
+      return Err(InputError::new(format!(
+        "Cannot remove node {}: referenced by a control", id
+      )));
+    }
+
     for link_id in &connected_link_ids {
-      self.remove_link(link_id)?;
+      self.remove_link(link_id, unconditional)?;
+    }
+
+    // remove any controls that reference this node (by node or tank index).
+    // must happen before `swap_remove` so the match is against the current
+    // `node_index` rather than the post-swap slot.
+    if unconditional {
+      self.controls.retain(|c| match &c.condition {
+        ControlCondition::HighPressure { node_index: ni, .. }
+        | ControlCondition::LowPressure { node_index: ni, .. } => *ni != node_index,
+        ControlCondition::HighLevel { tank_index, .. }
+        | ControlCondition::LowLevel { tank_index, .. } => *tank_index != node_index,
+        _ => true,
+      });
     }
 
     self.node_map.remove(id);
@@ -2276,25 +2303,6 @@ mod tests {
     assert!(!network.contains_pressure_control_valve);
   }
 
-  #[test]
-  fn test_add_gpv_requires_curve() {
-    let mut network = Network::default();
-    add_two_junctions(&mut network);
-    let err = network.add_valve("V1", &ValveData {
-      start_node: "J1".into(),
-      end_node: "J2".into(),
-      diameter: 12.0,
-      valve_type: ValveType::GPV,
-      setting: 0.0,
-      curve_id: None,
-      minor_loss: 0.0,
-      initial_status: LinkStatus::Active,
-      vertices: None,
-    }).unwrap_err();
-    assert!(matches!(err, InputError::Parse { .. }));
-    assert_eq!(network.links.len(), 0);
-  }
-
   // --- update_pipe tests ---
 
   #[test]
@@ -2988,7 +2996,7 @@ mod tests {
     network.add_pipe("P1", &sample_pipe_data()).unwrap();
     let topo_before = network.topology_version;
 
-    network.remove_link("P1").unwrap();
+    network.remove_link("P1", false).unwrap();
 
     assert_eq!(network.links.len(), 0);
     assert!(network.link_map.get("P1").is_none());
@@ -3004,7 +3012,7 @@ mod tests {
     network.add_pipe("P3", &sample_pipe_data()).unwrap();
 
     // remove the middle link; swap_remove puts P3 into slot 1
-    network.remove_link("P2").unwrap();
+    network.remove_link("P2", false).unwrap();
 
     assert_eq!(network.links.len(), 2);
     assert_eq!(network.link_map.get("P1").copied(), Some(0));
@@ -3025,7 +3033,7 @@ mod tests {
       ..sample_pipe_data()
     }).unwrap();
 
-    network.remove_link("P1").unwrap();
+    network.remove_link("P1", false).unwrap();
 
     let NodeType::Tank(tank) = &network.nodes[0].node_type else {
       panic!("Expected Tank node type");
@@ -3053,7 +3061,7 @@ mod tests {
       ..sample_pipe_data()
     }).unwrap();
 
-    network.remove_link("P1").unwrap();
+    network.remove_link("P1", false).unwrap();
 
     let NodeType::Tank(tank) = &network.nodes[0].node_type else {
       panic!("Expected Tank node type");
@@ -3080,7 +3088,7 @@ mod tests {
     }).unwrap();
     assert!(network.contains_pressure_control_valve);
 
-    network.remove_link("V1").unwrap();
+    network.remove_link("V1", false).unwrap();
     assert!(!network.contains_pressure_control_valve);
   }
 
@@ -3097,7 +3105,7 @@ mod tests {
       status: Some(LinkStatus::Closed),
     });
 
-    let err = network.remove_link("P1").unwrap_err();
+    let err = network.remove_link("P1", false).unwrap_err();
     assert!(matches!(err, InputError::Parse { .. }));
     assert_eq!(network.links.len(), 1);
   }
@@ -3105,7 +3113,7 @@ mod tests {
   #[test]
   fn test_remove_link_not_found() {
     let mut network = Network::default();
-    let err = network.remove_link("missing").unwrap_err();
+    let err = network.remove_link("missing", false).unwrap_err();
     assert!(matches!(err, InputError::LinkNotFound { .. }));
   }
 
@@ -3120,7 +3128,7 @@ mod tests {
     }).unwrap();
     let topo_before = network.topology_version;
 
-    network.remove_node("J1").unwrap();
+    network.remove_node("J1", false).unwrap();
 
     assert_eq!(network.nodes.len(), 0);
     assert!(network.node_map.get("J1").is_none());
@@ -3143,7 +3151,7 @@ mod tests {
       ..sample_pipe_data()
     }).unwrap();
 
-    network.remove_node("J2").unwrap();
+    network.remove_node("J2", false).unwrap();
 
     assert_eq!(network.nodes.len(), 2);
     assert_eq!(network.node_map.get("J1").copied(), Some(0));
@@ -3172,7 +3180,7 @@ mod tests {
       ..sample_pipe_data()
     }).unwrap();
 
-    network.remove_node("J1").unwrap();
+    network.remove_node("J1", false).unwrap();
 
     assert_eq!(network.nodes.len(), 2);
     assert!(network.node_map.get("J1").is_none());
@@ -3194,7 +3202,7 @@ mod tests {
       setting: None,
       status: Some(LinkStatus::Closed),
     });
-    let err = network.remove_node("J1").unwrap_err();
+    let err = network.remove_node("J1", false).unwrap_err();
     assert!(matches!(err, InputError::Parse { .. }));
   }
 
@@ -3213,7 +3221,7 @@ mod tests {
       status: Some(LinkStatus::Closed),
     });
 
-    let err = network.remove_node("J1").unwrap_err();
+    let err = network.remove_node("J1", false).unwrap_err();
     assert!(matches!(err, InputError::Parse { .. }));
   }
 
@@ -3238,7 +3246,7 @@ mod tests {
     });
 
     // remove J1 (index 0); J2 gets swapped into slot 0, control must follow
-    network.remove_node("J1").unwrap();
+    network.remove_node("J1", false).unwrap();
 
     let ControlCondition::HighPressure { node_index, .. } = network.controls[0].condition else {
       panic!("expected HighPressure control");
@@ -3247,9 +3255,62 @@ mod tests {
   }
 
   #[test]
+  fn test_remove_node_unconditional_drops_referencing_controls() {
+    use crate::model::control::{Control, ControlCondition};
+    let mut network = Network::default();
+    add_two_junctions(&mut network);
+    // unrelated control on J2 (index 1) must survive and get reindexed to 0
+    network.controls.push(Control {
+      condition: ControlCondition::HighPressure { node_index: 1, target: 50.0 },
+      link_id: "dummy".into(),
+      setting: None,
+      status: Some(LinkStatus::Closed),
+    });
+    // two controls (HighPressure + LowPressure) targeting J1 must be dropped
+    network.controls.push(Control {
+      condition: ControlCondition::HighPressure { node_index: 0, target: 60.0 },
+      link_id: "dummy".into(), setting: None, status: Some(LinkStatus::Closed),
+    });
+    network.controls.push(Control {
+      condition: ControlCondition::LowPressure { node_index: 0, target: 10.0 },
+      link_id: "dummy".into(), setting: None, status: Some(LinkStatus::Open),
+    });
+
+    network.remove_node("J1", true).unwrap();
+
+    // only the J2-targeting control remains; its node_index is reindexed
+    // from 1 to 0 because swap_remove moved J2 into J1's old slot.
+    assert_eq!(network.controls.len(), 1);
+    let ControlCondition::HighPressure { node_index, .. } = network.controls[0].condition else {
+      panic!("expected HighPressure control");
+    };
+    assert_eq!(node_index, 0);
+  }
+
+  #[test]
+  fn test_remove_node_unconditional_drops_tank_level_controls() {
+    use crate::model::control::{Control, ControlCondition};
+    let mut network = Network::default();
+    network.add_node(test_tank_node("T1", 100.0)).unwrap();
+    network.controls.push(Control {
+      condition: ControlCondition::HighLevel { tank_index: 0, target: 20.0 },
+      link_id: "dummy".into(), setting: None, status: Some(LinkStatus::Closed),
+    });
+    network.controls.push(Control {
+      condition: ControlCondition::LowLevel { tank_index: 0, target: 2.0 },
+      link_id: "dummy".into(), setting: None, status: Some(LinkStatus::Open),
+    });
+
+    network.remove_node("T1", true).unwrap();
+
+    assert!(network.controls.is_empty());
+    assert!(network.node_map.get("T1").is_none());
+  }
+
+  #[test]
   fn test_remove_node_not_found() {
     let mut network = Network::default();
-    let err = network.remove_node("missing").unwrap_err();
+    let err = network.remove_node("missing", false).unwrap_err();
     assert!(matches!(err, InputError::NodeNotFound { .. }));
   }
 

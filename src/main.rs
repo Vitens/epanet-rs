@@ -75,6 +75,7 @@ enum Commands {
 }
 
 fn main() -> Result<(), String> {
+
   let cli = Cli::parse();
 
   // Determine log level based on command

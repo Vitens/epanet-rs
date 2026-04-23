@@ -39,6 +39,9 @@
 - [ ] Network validation (connectivity, presence of tanks)
 - [ ] Identify and remove unconnected zones from the solver
 
+# API Methods
+- [ ] fix pattern removal (should disasocciate nodes from pattern)
+
 # Cleanup and refactoring
 - [ ] Refactor curves to use a combined x and y vector instead of separate vectors
 - [ ] Investigate performance degradation using HashMap for lookup of nodes, links, curves, patterns instead of Vec index

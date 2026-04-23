@@ -63,7 +63,7 @@ fn test_network_creation() {
   assert!((result.heads[0][1] - 105.50).abs() < 0.01);
 
   // remove node "7"
-  simulation.network.remove_node("7").unwrap();
+  simulation.network.remove_node("7", false).unwrap();
   // check that the network now has 7 nodes and 7 links
   assert_eq!(simulation.network.nodes.len(), 7);
   assert_eq!(simulation.network.links.len(), 7);
