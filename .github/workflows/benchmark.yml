@@ -16,10 +16,12 @@ jobs:
             epanet_url: https://github.com/OpenWaterAnalytics/EPANET/releases/download/v2.3.5/EPANET_2_3_5_LINUX_x86_64.zip
             hyperfine_deb: https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
             rs_binary: ./target/release/epanet-rs
+            epanet_rpt: /dev/null
           - os: windows-latest
             epanet_url: https://github.com/OpenWaterAnalytics/EPANET/releases/download/v2.3.5/EPANET_2_3_5_WIN_32_64.zip
             hyperfine_zip: https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine-v1.18.0-x86_64-pc-windows-msvc.zip
             rs_binary: ./target/release/epanet-rs.exe
+            epanet_rpt: nul
 
     runs-on: ${{ matrix.os }}
     defaults:
@@ -129,21 +131,25 @@ jobs:
         RESULTS_DIR="benchmark-results"
         mkdir -p "$RESULTS_DIR"
 
-        # Use a real file as EPANET's report output so the same command works on
-        # both Linux and Windows (Windows has no /dev/null).
-        EPANET_RPT="$RESULTS_DIR/epanet.rpt"
+        # Discard EPANET's report output: /dev/null on Linux, nul on Windows.
+        # Both are recognised as null-devices by their respective file APIs.
+        EPANET_RPT="${{ matrix.epanet_rpt }}"
 
+        # --shell=none makes hyperfine split and execute commands directly
+        # (no cmd.exe / sh wrapping), so quoting works the same way on Linux
+        # and Windows.
         hyperfine \
+          --shell=none \
           --warmup 2 \
           --min-runs 5 \
           --export-json "$RESULTS_DIR/benchmark.json" \
           --export-markdown "$RESULTS_DIR/benchmark.md" \
           --command-name "EPANET" \
-            "runepanet '$INP' '$EPANET_RPT'" \
+            "runepanet $INP $EPANET_RPT" \
           --command-name "EPANET-RS" \
-            "$RS_BIN run '$INP' --quiet" \
+            "$RS_BIN run $INP --quiet" \
           --command-name "EPANET-RS-parallel" \
-            "$RS_BIN run '$INP' --quiet --parallel"
+            "$RS_BIN run $INP --quiet --parallel"
 
         epanet_ms=$(jq '.results[] | select(.command == "EPANET") | .mean * 1000' "$RESULTS_DIR/benchmark.json")
         rs_ms=$(jq '.results[] | select(.command == "EPANET-RS") | .mean * 1000' "$RESULTS_DIR/benchmark.json")
