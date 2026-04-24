@@ -1,5 +1,32 @@
 //! High-level extended-period simulation driver for sequential and parallel hydraulic solves.
 
+/*!
+The simulation driver is responsible for managing the simulation workflow for sequential and parallel solving of hydraulic networks and collecting results at each report step.
+
+The simulation driver updates the network state with the changes to the network, applies patterns and controls, updates tank levels and advances the time step until the simulation is complete.
+
+Example:
+```rust no_run
+use epanet_rs::simulation::Simulation;
+use epanet_rs::model::network::modify::PipeUpdate;
+
+# fn main() -> Result<(), Box<dyn std::error::Error>> {
+// load the network from a file
+let mut simulation = Simulation::from_file("tests/pump.inp")?;
+// run a complete simulation
+simulation.solve_hydraulics(false)?;
+// modify the network
+simulation.network.update_pipe("P1", &PipeUpdate {
+  roughness: Some(0.2),
+  ..Default::default()
+})?;
+// run the simulation again
+simulation.solve_hydraulics(false)?;
+# Ok(())
+# }
+```
+ */
+
 use rayon::prelude::*;
 
 use simplelog::{debug, warn};
