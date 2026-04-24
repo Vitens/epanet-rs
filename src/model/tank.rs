@@ -1,3 +1,5 @@
+//! `Tank` node: cylindrical or volume-curve-based storage with level tracking over time.
+
 use crate::model::units::UnitConversion;
 use crate::model::units::{Cfs, Ft, Ft3};
 use crate::model::options::SimulationOptions;

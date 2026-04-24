@@ -1,3 +1,5 @@
+//! Generic `Link` type, `LinkTrait` and the `LinkType` variant for pipes, pumps and valves.
+
 use crate::model::pipe::Pipe;
 use crate::model::pump::Pump;
 use crate::model::valve::Valve;
@@ -51,6 +53,13 @@ pub enum LinkStatus {
   XPressure,     // valve cannot supply pressure
   FixedOpen,     // fixed open 
   FixedClosed,   // fixed closed
+}
+
+impl Default for LinkStatus {
+  // Default to open
+  fn default() -> Self {
+    LinkStatus::Open
+  }
 }
 
 impl std::fmt::Display for LinkStatus {

@@ -1,3 +1,5 @@
+//! `Pipe` link: resistance, headloss and coefficients for Darcy-Weisbach, Hazen-Williams and Chezy-Manning.
+
 use crate::model::link::{LinkTrait, LinkCoefficients};
 use crate::model::options::{HeadlossFormula, SimulationOptions};
 use crate::model::units::{Ft, Cfs, UnitSystem, UnitConversion};

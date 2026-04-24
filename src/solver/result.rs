@@ -1,3 +1,5 @@
+//! Container for per-report-step solver results (flows, heads, demands) in user units.
+
 use crate::solver::state::SolverState;
 use crate::model::units::{Ft, Cfs, FlowUnits, UnitSystem};
 use serde::Serialize;

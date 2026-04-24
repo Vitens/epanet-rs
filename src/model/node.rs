@@ -1,3 +1,5 @@
+//! Generic `Node` type with a `NodeType` variant for junctions, tanks and reservoirs.
+
 use crate::model::reservoir::Reservoir;
 use crate::model::tank::Tank;
 use crate::model::junction::Junction;

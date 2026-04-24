@@ -1,3 +1,5 @@
+//! The `Network` type: the central container for nodes, links, patterns, curves, controls and options.
+
 use hashbrown::{HashMap, HashSet};
 
 use crate::model::link::{Link, LinkType};

@@ -1,3 +1,5 @@
+//! FFI water-quality-solver stubs: `EN_openQ`, `EN_initQ`, `EN_runQ`, `EN_nextQ`, `EN_closeQ`.
+
 use crate::ffi::error_codes::ErrorCode;
 use std::os::raw::{c_int, c_long};
 

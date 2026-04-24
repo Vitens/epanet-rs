@@ -1,3 +1,5 @@
+//! `Reservoir` node: a fixed-head source with an optional head pattern.
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

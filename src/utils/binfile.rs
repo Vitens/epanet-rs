@@ -1,3 +1,5 @@
+//! Reader for EPANET binary `.out` result files.
+
 use std::fs;
 const MAGIC_NUMBER: u32 = 516114521;
 
@@ -16,7 +18,7 @@ fn read_fixed_string(bytes: &[u8]) -> String {
 }
 
 /// Read an EPANET outfile and return the results
-/// Outfile format: http://wateranalytics.org/EPANET/_out_file.html
+/// Outfile format: <http://wateranalytics.org/EPANET/_out_file.html>
 pub fn read_outfile(filename: &str) -> EPANETResults {
 
   let data = fs::read(filename).unwrap();

@@ -1,3 +1,5 @@
+//! Sparsity pattern, CSC indexing and AMD ordering helpers for the Jacobian matrix.
+
 use faer::sparse::{SymbolicSparseColMat, SparseColMat, Triplet};
 use faer::sparse::linalg::amd;
 use faer::dyn_stack::{MemBuffer, MemStack};

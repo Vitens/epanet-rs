@@ -1,3 +1,5 @@
+//! Serializer that writes a [`Network`] back out as an EPANET `.inp` text file.
+
 use std::io::{BufWriter, Write};
 use std::fs::File;
 

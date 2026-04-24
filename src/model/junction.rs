@@ -1,3 +1,5 @@
+//! `Junction` node: a demand point with optional emitter and pressure-dependent demand coefficients.
+
 use crate::model::units::{Cfs, UnitConversion, UnitSystem};
 use crate::model::options::SimulationOptions;
 use crate::constants::{SMALL_VALUE, RQ_TOL, PSIperFT, MperFT, BIG_VALUE};

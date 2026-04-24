@@ -1,3 +1,5 @@
+//! Test helpers that run the reference EPANET2 binary and compare its output against `epanet-rs`.
+
 use std::env;
 use std::path::PathBuf;
 

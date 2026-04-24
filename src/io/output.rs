@@ -1,3 +1,5 @@
+//! Serializers for simulation results to JSON and MessagePack.
+
 use std::fs::File;
 use std::io::BufWriter;
 

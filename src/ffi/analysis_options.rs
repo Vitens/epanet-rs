@@ -1,3 +1,5 @@
+//! FFI analysis-options accessors: `EN_gettimeparam`, `EN_setoption`, `EN_setdemandmodel`, etc.
+
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation_mut};
 

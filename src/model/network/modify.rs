@@ -1,3 +1,40 @@
+//! `*Data` and `*Update` structs and methods for adding, modifying and removing network elements.
+/*!
+
+Modifying a network *must* be done using the update_* and add_* methods, as those will update all related properties, handle unit conversion and update the change tracking flags.
+
+Updating a network element uses an update struct with default None values for the fields that are not being updated. Sometimes a field needs to be set to None to clear an existing value, for example when clearing a pattern or curve, in which case the Some(None) variant is used.
+
+Example:
+
+```rust
+# use epanet_rs::model::network::{Network, JunctionUpdate, JunctionData, PatternData};
+# use epanet_rs::model::units::FlowUnits;
+# use epanet_rs::model::options::HeadlossFormula;
+let mut network = Network::new(FlowUnits::CFS, HeadlossFormula::DarcyWeisbach);
+
+network.add_pattern("P1", &PatternData {
+  multipliers: vec![1.0],
+}).unwrap();
+
+network.add_junction("J1", &JunctionData {
+  elevation: 100.0,
+  basedemand: 10.0,
+  emitter_coefficient: 0.0,
+  pattern: Some("P1".into()),
+  coordinates: Some((100.0, 200.0)),
+}).unwrap();
+
+// update the junciton by setting the elevation to 50.0 and clearing the pattern
+network.update_junction("J1", &JunctionUpdate {
+  elevation: Some(50.0),
+  basedemand: None,
+  emitter_coefficient: None,
+  pattern: Some(None),
+  coordinates: None,
+});
+*/
+
 use crate::error::InputError;
 use crate::model::control::ControlCondition;
 use crate::model::curve::{Curve, HeadCurve, ValveCurve};
@@ -13,6 +50,7 @@ use crate::model::tank::Tank;
 use crate::model::units::UnitConversion;
 use crate::model::valve::{Valve, ValveType};
 
+/// Data for adding a new junction to the network.
 #[derive(Default)]
 pub struct JunctionData {
   pub elevation: f64,
@@ -22,6 +60,7 @@ pub struct JunctionData {
   pub coordinates: Option<(f64, f64)>,
 }
 
+/// Data for updating an existing junction.
 #[derive(Default)]
 pub struct JunctionUpdate {
   pub elevation: Option<f64>,
@@ -88,6 +127,7 @@ pub struct NodeUpdate {
 /// Data for adding a pipe. All fields are in the user's unit system.
 /// `minor_loss` is the dimensionless user-facing minor-loss coefficient (K).
 /// The headloss formula is derived from the network's configured options.
+#[derive(Default)]
 pub struct PipeData {
   pub start_node: Box<str>,
   pub end_node: Box<str>,
@@ -99,7 +139,6 @@ pub struct PipeData {
   pub initial_status: LinkStatus,
   pub vertices: Option<Vec<(f64, f64)>>,
 }
-
 /// Data for updating a pipe.
 /// All units are in the user's unit system.
 #[derive(Default)]
@@ -824,7 +863,7 @@ impl Network {
 
   /// Update the topology/display properties of any link: endpoints, vertices
   /// and initial status. Type-specific properties must be edited via
-  /// [`update_pipe`], [`update_pump`] or [`update_valve`].
+  /// [update_pipe], [update_pump] or [update_valve].
   pub fn update_link(&mut self, id: &str, update: &LinkUpdate) -> Result<(), InputError> {
     let link_index = *self.link_map.get(id)
       .ok_or_else(|| InputError::LinkNotFound { link_id: id.into() })?;
