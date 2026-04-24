@@ -1,3 +1,5 @@
+//! Pump head/efficiency, valve and volume curves
+
 use serde::{Deserialize, Serialize};
 use crate::constants::*;
 use crate::model::units::{Ft, Cfs, FlowUnits, UnitSystem};

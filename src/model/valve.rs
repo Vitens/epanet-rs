@@ -1,3 +1,5 @@
+//! `Valve` link and `ValveType` variants (PRV, PSV, PBV, FCV, TCV, GPV) with their control logic.
+
 use crate::model::link::{LinkTrait, LinkStatus, LinkCoefficients, NodeModification};
 use crate::model::curve::{ValveCurve};
 use crate::model::units::{UnitSystem, UnitConversion, Ft};

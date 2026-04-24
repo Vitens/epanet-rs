@@ -1,3 +1,5 @@
+//! FFI node accessors: `EN_addnode`, `EN_getnodevalue`, `EN_setnodevalue`, etc.
+
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation, get_simulation_mut};
 use crate::ffi::enums::NodeProperty;

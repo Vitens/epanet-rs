@@ -1,22 +1,13 @@
-//! C-compatible FFI layer implementing the EPANET 2.3 toolkit API.
-//!
-//! Equivalent C header:
-//! ```c
-//! typedef struct Project *EN_Project;
-//!
-//! int EN_createproject(EN_Project *ph);
-//! int EN_deleteproject(EN_Project ph);
-//! int EN_open(EN_Project ph, const char *inpFile, const char *rptFile, const char *outFile);
-//! ```
+//! C-compatible FFI layer implementing a subset of the EPANET 2.3 toolkit API.
 
-mod project;
-mod report;
-mod nodes;
-mod links;
-mod curves;
-mod patterns;
-mod error_codes;
-mod analysis_options;
-mod hydraulic_solver;
-mod quality_solver;
+pub mod project;
+pub mod report;
+pub mod nodes;
+pub mod links;
+pub mod curves;
+pub mod patterns;
+pub mod error_codes;
+pub mod analysis_options;
+pub mod hydraulic_solver;
+pub mod quality_solver;
 pub mod enums;

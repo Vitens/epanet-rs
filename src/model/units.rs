@@ -1,3 +1,5 @@
+//! Unit systems, flow/pressure units and the `UnitConversion` trait used throughout the crate.
+
 use std::str::FromStr;
 
 use crate::constants::*;

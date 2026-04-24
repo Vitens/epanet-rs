@@ -1,3 +1,5 @@
+//! Hydraulic solver based on the Global Gradient Algorithm (Todini & Pilati, 1987).
+
 use faer::sparse::{SparseColMat, SymbolicSparseColMat};
 use faer::sparse::linalg::LltError;
 use faer::linalg::cholesky::llt::factor::LltError::NonPositivePivot;
@@ -22,6 +24,7 @@ use crate::model::valve::ValveType;
 use crate::model::control::ControlCondition;
 use crate::model::options::{SimulationOptions, DemandModel};
 
+/// Flow balance structure containing the total demand, total supply and error
 pub struct FlowBalance {
   pub total_demand: Cfs,
   pub total_supply: Cfs,
@@ -29,6 +32,7 @@ pub struct FlowBalance {
 }
 
 
+/// Iteration statistics structure containing the sum of the flow changes, the sum of the flows, the maximum flow change and the index of the link with the maximum flow change
 #[derive(Default)]
 pub struct IterationStatistics {
   pub sum_dq: Cfs,
@@ -51,6 +55,7 @@ impl IterationStatistics {
   }
 }
 
+/// The main hydraulic solver struct
 pub struct HydraulicSolver {
   /// global unknown-numbering map: node_to_unknown[node_index] = unknown_index
   pub node_to_unknown: Vec<Option<usize>>,

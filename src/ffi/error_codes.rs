@@ -1,3 +1,5 @@
+//! EPANET toolkit numeric error and warning codes mapped to a strongly-typed [`ErrorCode`] enum.
+
 use strum::FromRepr;
 use thiserror::Error;
 

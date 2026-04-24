@@ -1,3 +1,5 @@
+//! `SimulationOptions`: headloss formula, demand model, time options, tolerances and units.
+
 use crate::model::units::{FlowUnits, PressureUnits, UnitSystem};
 use serde::{Deserialize, Serialize};
 

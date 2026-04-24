@@ -1,3 +1,5 @@
+//! Parser for EPANET `.inp` text files into a [`Network`].
+
 use std::fs::File;
 use std::io::{BufReader, BufRead};
 use std::str::FromStr;

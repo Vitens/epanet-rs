@@ -1,3 +1,5 @@
+//! `Pump` link: head-flow behaviour derived from a head curve or a fixed design point.
+
 use crate::model::link::{LinkTrait, LinkStatus, LinkCoefficients};
 use crate::model::curve::{HeadCurve};
 use crate::model::units::UnitConversion;

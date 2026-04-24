@@ -1,3 +1,5 @@
+//! Simple `Control` rules that open/close links based on time, tank level or nodal pressure.
+
 use serde::{Deserialize, Serialize};
 use crate::model::link::LinkStatus;
 use crate::constants::{PSIperFT, H_TOL};

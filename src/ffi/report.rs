@@ -1,3 +1,5 @@
+//! FFI reporting and count functions: `EN_getcount`, `EN_getnodetype`, etc.
+
 use crate::ffi::enums::CountType;
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation};

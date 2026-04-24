@@ -1,3 +1,5 @@
+//! Assembly of the Jacobian matrix and right-hand side vector for the GGA system.
+
 use crate::solver::hydraulicsolver::HydraulicSolver;
 use crate::solver::state::SolverState;
 use crate::solver::matrix::ResistanceCoefficients;

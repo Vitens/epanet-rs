@@ -1,3 +1,5 @@
+//! FFI project lifecycle: `EN_createproject`, `EN_deleteproject`, `EN_open`, `EN_close`, etc.
+
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
 

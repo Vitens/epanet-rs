@@ -1,3 +1,5 @@
+//! FFI hydraulic-solver workflow: `EN_openH`, `EN_initH`, `EN_runH`, `EN_nextH`, `EN_solveH`, `EN_closeH`.
+
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation_mut};
 use crate::solver::state::SolverState;

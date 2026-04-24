@@ -1,3 +1,5 @@
+//! Time-varying multiplier `Pattern`s applied to demands, reservoir heads and pump speeds.
+
 use serde::{Deserialize, Serialize};
 
 /// Pattern struct

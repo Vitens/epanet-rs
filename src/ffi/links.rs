@@ -1,3 +1,5 @@
+//! FFI link accessors: `EN_addlink`, `EN_getlinkvalue`, `EN_setlinkvalue`, etc.
+
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation, get_simulation_mut};
 use crate::model::link::LinkType;

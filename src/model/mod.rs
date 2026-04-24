@@ -1,3 +1,6 @@
+//! Data structures for representing and modifying a hydraulic network (nodes, links,
+//! patterns, curves, controls and options).
+
 pub mod network;
 pub mod node;
 pub mod link;

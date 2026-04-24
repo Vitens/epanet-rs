@@ -1,3 +1,5 @@
+//! High-level extended-period simulation driver for sequential and parallel hydraulic solves.
+
 use rayon::prelude::*;
 
 use simplelog::{debug, warn};

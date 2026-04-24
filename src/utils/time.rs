@@ -1,3 +1,5 @@
+//! Parsers and formatters for EPANET time strings (`HH:MM`, `HH:MM:SS`, unit suffixes).
+
 use crate::error::InputError;
 
 /// Parse a time string with optional time unit suffix.

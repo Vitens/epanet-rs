@@ -1,3 +1,5 @@
+//! FFI curve accessors: `EN_addcurve`, `EN_getcurvevalue`, `EN_setcurvevalue`, etc.
+
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation, get_simulation_mut};
 

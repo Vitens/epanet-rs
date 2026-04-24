@@ -1,3 +1,5 @@
+//! Per-step mutable solver state (flows, heads, demands, statuses, settings, resistances).
+
 use crate::model::link::{LinkTrait, LinkStatus};
 use crate::model::network::Network;
 use crate::model::node::NodeType;
