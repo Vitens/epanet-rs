@@ -86,16 +86,16 @@ cargo test --test solver_test
 
 ## Supported Features and To-Do
 
-- INP file support
-- Parallel Hydraulic Solver for extended period simulations
-- (Partial) Backwards compatibility with EPANET2_3 network API methods
-- Pressure dependent demand simulation
-- CONTROLS
-- EMITTERS
-- LEAKAGE
-- RULES
-- ENERGY
-- Quality simulation
+- [x] INP file support
+- [x] Parallel Hydraulic Solver for extended period simulations
+- [x] (Partial) Backwards compatibility with EPANET2_3 network API methods
+- [x] Pressure dependent demand simulation
+- [x] CONTROLS
+- [x] EMITTERS
+- [ ] LEAKAGE
+- [ ] RULES
+- [ ] ENERGY
+- [ ] Quality simulation
 
 ## Dependencies
 
