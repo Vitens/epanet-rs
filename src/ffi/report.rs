@@ -11,26 +11,30 @@ use std::os::raw::{c_char, c_int};
 /// Retrieves the number of objects of a given type in a project.
 #[unsafe(no_mangle)]
 pub extern "C" fn EN_getcount(ph: *mut Project, object: c_int, out_count: *mut c_int) -> ErrorCode {
-  let simulation = get_simulation!(ph);
+    let simulation = get_simulation!(ph);
 
-  let count_type = match CountType::from_repr(object) {
-    Some(ct) => ct,
-    None => return ErrorCode::InvalidParameterCode,
-  };
+    let count_type = match CountType::from_repr(object) {
+        Some(ct) => ct,
+        None => return ErrorCode::InvalidParameterCode,
+    };
 
-  let net = &simulation.network;
-  let count = match count_type {
-    CountType::NodeCount    => net.nodes.len(),
-    CountType::TankCount    => net.nodes.iter().filter(|n| matches!(n.node_type, NodeType::Tank(_) | NodeType::Reservoir(_))).count(),
-    CountType::LinkCount    => net.links.len(),
-    CountType::PatCount     => net.patterns.len(),
-    CountType::CurveCount   => net.curves.len(),
-    CountType::ControlCount => net.controls.len(),
-    CountType::RuleCount    => 0, // TODO: implement rule counting
-  };
+    let net = &simulation.network;
+    let count = match count_type {
+        CountType::NodeCount => net.nodes.len(),
+        CountType::TankCount => net
+            .nodes
+            .iter()
+            .filter(|n| matches!(n.node_type, NodeType::Tank(_) | NodeType::Reservoir(_)))
+            .count(),
+        CountType::LinkCount => net.links.len(),
+        CountType::PatCount => net.patterns.len(),
+        CountType::CurveCount => net.curves.len(),
+        CountType::ControlCount => net.controls.len(),
+        CountType::RuleCount => 0, // TODO: implement rule counting
+    };
 
-  unsafe { *out_count = count as c_int };
-  ErrorCode::Ok
+    unsafe { *out_count = count as c_int };
+    ErrorCode::Ok
 }
 
 /// Retrieves the text of an error message given its error code.

@@ -5,19 +5,19 @@ use std::os::raw::{c_char, c_int};
 
 use crate::error::InputError;
 
-use crate::simulation::Simulation;
-use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::enums::{FlowUnits as ENFlowUnits, HeadLossType as ENHeadLossType};
+use crate::ffi::error_codes::ErrorCode;
+use crate::simulation::Simulation;
 
-use crate::model::units::FlowUnits;
 use crate::model::options::HeadlossFormula;
+use crate::model::units::FlowUnits;
 
 /// Opaque EPANET project handle wrapping an optional [`Simulation`].
 ///
 /// - After [`EN_createproject`] the handle exists but is empty (`None`).
 /// - After [`EN_open`] it contains a ready-to-run `Simulation`.
-pub struct Project{
-  pub(crate) simulation: Option<Simulation>,
+pub struct Project {
+    pub(crate) simulation: Option<Simulation>,
 }
 
 /// Macro to get the simulation from a project handle.
@@ -70,48 +70,53 @@ pub extern "C" fn EN_deleteproject(ph: *mut Project) -> ErrorCode {
 }
 /// Initializes a project with a new network.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_init(ph: *mut Project, _rpt_file: *const c_char, _out_file: *const c_char, flow_units: c_int, headloss_type: c_int) -> ErrorCode {
+pub extern "C" fn EN_init(
+    ph: *mut Project,
+    _rpt_file: *const c_char,
+    _out_file: *const c_char,
+    flow_units: c_int,
+    headloss_type: c_int,
+) -> ErrorCode {
+    if ph.is_null() {
+        return ErrorCode::InvalidHandle;
+    }
 
-  if ph.is_null() {
-    return ErrorCode::InvalidHandle;
-  }
+    let flow_units = match ENFlowUnits::from_repr(flow_units) {
+        Some(flow_units) => flow_units,
+        None => return ErrorCode::InvalidParameterCode,
+    };
+    let headloss_type = match ENHeadLossType::from_repr(headloss_type) {
+        Some(headloss_formula) => headloss_formula,
+        None => return ErrorCode::InvalidParameterCode,
+    };
 
-  let flow_units = match ENFlowUnits::from_repr(flow_units) {
-    Some(flow_units) => flow_units,
-    None => return ErrorCode::InvalidParameterCode,
-  };
-  let headloss_type = match ENHeadLossType::from_repr(headloss_type) {
-    Some(headloss_formula) => headloss_formula,
-    None => return ErrorCode::InvalidParameterCode,
-  };
+    // map flow_units to FlowUnits (rust enum)
+    let flow_units = match flow_units {
+        ENFlowUnits::Cfs => FlowUnits::CFS,
+        ENFlowUnits::Gpm => FlowUnits::GPM,
+        ENFlowUnits::Mgd => FlowUnits::MGD,
+        ENFlowUnits::Imgd => FlowUnits::IMGD,
+        ENFlowUnits::Afd => FlowUnits::AFD,
+        ENFlowUnits::Lps => FlowUnits::LPS,
+        ENFlowUnits::Lpm => FlowUnits::LPM,
+        ENFlowUnits::Mld => FlowUnits::MLD,
+        ENFlowUnits::Cmh => FlowUnits::CMH,
+        ENFlowUnits::Cmd => FlowUnits::CMD,
+        ENFlowUnits::Cms => FlowUnits::CMS,
+    };
 
-  // map flow_units to FlowUnits (rust enum)
-  let flow_units = match flow_units {
-    ENFlowUnits::Cfs => FlowUnits::CFS,
-    ENFlowUnits::Gpm => FlowUnits::GPM,
-    ENFlowUnits::Mgd => FlowUnits::MGD,
-    ENFlowUnits::Imgd => FlowUnits::IMGD,
-    ENFlowUnits::Afd => FlowUnits::AFD,
-    ENFlowUnits::Lps => FlowUnits::LPS,
-    ENFlowUnits::Lpm => FlowUnits::LPM,
-    ENFlowUnits::Mld => FlowUnits::MLD,
-    ENFlowUnits::Cmh => FlowUnits::CMH,
-    ENFlowUnits::Cmd => FlowUnits::CMD,
-    ENFlowUnits::Cms => FlowUnits::CMS,
-  };
+    let headloss_formula = match headloss_type {
+        ENHeadLossType::HW => HeadlossFormula::HazenWilliams,
+        ENHeadLossType::DW => HeadlossFormula::DarcyWeisbach,
+        ENHeadLossType::CM => HeadlossFormula::ChezyManning,
+    };
 
-  let headloss_formula = match headloss_type {
-    ENHeadLossType::HW => HeadlossFormula::HazenWilliams,
-    ENHeadLossType::DW => HeadlossFormula::DarcyWeisbach,
-    ENHeadLossType::CM => HeadlossFormula::ChezyManning,
-  };
+    let simulation = Simulation::init(flow_units, headloss_formula);
 
-  let simulation = Simulation::init(flow_units, headloss_formula);
+    let project = unsafe { &mut *ph };
+    project.simulation = Some(simulation);
 
-  let project = unsafe { &mut *ph };
-  project.simulation = Some(simulation);
-
-  ErrorCode::Ok
+    ErrorCode::Ok
 }
 
 /// Opens an EPANET input file, reads in the network data, and initializes
@@ -125,9 +130,8 @@ pub extern "C" fn EN_open(
     _rpt_file: *const c_char,
     _out_file: *const c_char,
 ) -> ErrorCode {
-
     if ph.is_null() {
-      return ErrorCode::InvalidHandle;
+        return ErrorCode::InvalidHandle;
     }
 
     if inp_file.is_null() {
@@ -143,14 +147,18 @@ pub extern "C" fn EN_open(
 
     let simulation = match Simulation::from_file(path) {
         Ok(s) => s,
-        Err(e) => return match e {
-            InputError::FileOpen { .. } | InputError::FileRead(_) => ErrorCode::CannotOpenInputFile,
-            InputError::Parse { .. } => ErrorCode::InputError,
-            InputError::NodeExists { .. } => ErrorCode::DuplicateId,
-            InputError::LinkExists { .. } => ErrorCode::DuplicateId,
-            InputError::PatternNotFound { .. } => ErrorCode::UndefinedPattern,
-            _ => ErrorCode::InputError,
-        },
+        Err(e) => {
+            return match e {
+                InputError::FileOpen { .. } | InputError::FileRead(_) => {
+                    ErrorCode::CannotOpenInputFile
+                }
+                InputError::Parse { .. } => ErrorCode::InputError,
+                InputError::NodeExists { .. } => ErrorCode::DuplicateId,
+                InputError::LinkExists { .. } => ErrorCode::DuplicateId,
+                InputError::PatternNotFound { .. } => ErrorCode::UndefinedPattern,
+                _ => ErrorCode::InputError,
+            };
+        }
     };
 
     let project = unsafe { &mut *ph };
@@ -160,18 +168,18 @@ pub extern "C" fn EN_open(
 
 #[unsafe(no_mangle)]
 pub extern "C" fn EN_saveinpfile(ph: *mut Project, inp_file: *const c_char) -> ErrorCode {
-  let simulation = get_simulation_mut!(ph);
+    let simulation = get_simulation_mut!(ph);
 
-  let c_str = unsafe { CStr::from_ptr(inp_file) };
-  let path = match c_str.to_str() {
-    Ok(s) => s,
-    Err(_) => return ErrorCode::CannotOpenInputFile,
-  };
+    let c_str = unsafe { CStr::from_ptr(inp_file) };
+    let path = match c_str.to_str() {
+        Ok(s) => s,
+        Err(_) => return ErrorCode::CannotOpenInputFile,
+    };
 
-  let result = simulation.network.save_network(path);
-  if result.is_err() {
-    return ErrorCode::CannotOpenInputFile;
-  }
+    let result = simulation.network.save_network(path);
+    if result.is_err() {
+        return ErrorCode::CannotOpenInputFile;
+    }
 
-  ErrorCode::Ok
+    ErrorCode::Ok
 }
