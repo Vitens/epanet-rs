@@ -21,12 +21,12 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - name: Build
-        run: cargo build --verbose
+        run: cargo build --locked --verbose
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --locked --verbose

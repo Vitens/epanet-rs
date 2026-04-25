@@ -33,7 +33,7 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Build epanet-rs (release)
-      run: cargo build --release
+      run: cargo build --locked --release
 
     # --- Install EPANET --------------------------------------------------------
 
