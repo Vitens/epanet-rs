@@ -33,7 +33,7 @@ impl Junction {
 
         // use a large value for the gradient and headloss to prevent negative demand
         if factor <= 0.0 {
-            return (1.0 / BIG_VALUE, BIG_VALUE * demand);
+            (1.0 / BIG_VALUE, BIG_VALUE * demand)
         } else if factor < 1.0 {
             let hgrad = n * dp * factor.powf(n - 1.0) / demand_full;
             // use a linear function for very small gradient
@@ -42,10 +42,10 @@ impl Junction {
             }
 
             let y = hgrad * demand / n;
-            return (1.0 / hgrad, y);
+            (1.0 / hgrad, y)
         } else {
             // use a large value for the gradient and headloss to prevent demand above full value
-            return (1.0 / BIG_VALUE, dp + BIG_VALUE * (demand - demand_full));
+            (1.0 / BIG_VALUE, dp + BIG_VALUE * (demand - demand_full))
         }
     }
     /// Compute the coefficients for the emitter function
@@ -65,13 +65,13 @@ impl Junction {
 
         let y = hgrad * q / q_exp;
 
-        return (1.0 / hgrad, y);
+        (1.0 / hgrad, y)
     }
 }
 
 impl UnitConversion for Junction {
     fn convert_to_standard(&mut self, options: &SimulationOptions) {
-        self.basedemand = self.basedemand / options.flow_units.per_cfs();
+        self.basedemand /= options.flow_units.per_cfs();
         // convert the emitter coefficient to the standard unit system
         if self.emitter_coefficient > 0.0 {
             let pressure_factor = if options.unit_system == UnitSystem::US {
@@ -87,7 +87,7 @@ impl UnitConversion for Junction {
         }
     }
     fn convert_from_standard(&mut self, options: &SimulationOptions) {
-        self.basedemand = self.basedemand * options.flow_units.per_cfs();
+        self.basedemand *= options.flow_units.per_cfs();
         // convert the emitter coefficient from the standard unit system
         if self.emitter_coefficient > 0.0 {
             let pressure_factor = if options.unit_system == UnitSystem::US {

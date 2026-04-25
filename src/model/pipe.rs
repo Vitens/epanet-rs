@@ -10,12 +10,12 @@ use fastapprox;
 use serde::{Deserialize, Serialize};
 
 // Constants used for computing Darcy-Weisbach friction factor (src: hydcoefs.c from EPANET 2.3)
-const A1: f64 = 3.14159265358979323850e+03; // 1000*PI
-const A2: f64 = 1.57079632679489661930e+03; // 500*PI
-const A8: f64 = 4.61841319859066668690e+00; // 5.74*(PI/4)^.9
-const A9: f64 = -8.68588963806503655300e-01; // -2/ln(10)
-const AB: f64 = 3.28895476345399058690e-03; // 5.74/(4000^.9)
-const AC: f64 = -5.14214965799093883760e-03; // AA*AB
+const A1: f64 = 3.141_592_653_589_793_4e3; // 1000*PI
+const A2: f64 = 1.570_796_326_794_896_7e3; // 500*PI
+const A8: f64 = 4.618_413_198_590_667; // 5.74*(PI/4)^.9
+const A9: f64 = -8.685_889_638_065_036e-1; // -2/ln(10)
+const AB: f64 = 3.288_954_763_453_990_7e-3; // 5.74/(4000^.9)
+const AC: f64 = -5.142_149_657_990_939e-3; // AA*AB
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Pipe {
@@ -113,7 +113,7 @@ impl LinkTrait for Pipe {
         if status == LinkStatus::TempClosed {
             return Some(LinkStatus::Open); // reopen the pipe if it was temporarily closed
         }
-        return None;
+        None
     }
 
     fn initial_flow(&self) -> f64 {

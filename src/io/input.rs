@@ -54,7 +54,7 @@ impl Network {
     }
 
     pub fn read_file(&mut self, file: &str) -> Result<(), InputError> {
-        let file_extension = file.split('.').last().ok_or_else(|| {
+        let file_extension = file.split('.').next_back().ok_or_else(|| {
             InputError::new(format!("Cannot determine file extension for: {}", file))
         })?;
 
@@ -248,41 +248,38 @@ impl Network {
             };
             let link = &self.links[link_index];
 
-            match &link.link_type {
-                LinkType::Valve(valve) => match valve.valve_type {
-                    ValveType::PRV => {
-                        let mut s = setting;
-                        if *unit_system == UnitSystem::US {
-                            s /= PSIperFT;
-                        }
-                        s /= unit_system.per_feet();
-                        s += self.nodes[link.end_node].elevation;
-                        control.setting = Some(s);
+            if let LinkType::Valve(valve) = &link.link_type { match valve.valve_type {
+                ValveType::PRV => {
+                    let mut s = setting;
+                    if *unit_system == UnitSystem::US {
+                        s /= PSIperFT;
                     }
-                    ValveType::PSV => {
-                        let mut s = setting;
-                        if *unit_system == UnitSystem::US {
-                            s /= PSIperFT;
-                        }
-                        s /= unit_system.per_feet();
-                        s += self.nodes[link.start_node].elevation;
-                        control.setting = Some(s);
+                    s /= unit_system.per_feet();
+                    s += self.nodes[link.end_node].elevation;
+                    control.setting = Some(s);
+                }
+                ValveType::PSV => {
+                    let mut s = setting;
+                    if *unit_system == UnitSystem::US {
+                        s /= PSIperFT;
                     }
-                    ValveType::PBV => {
-                        let mut s = setting;
-                        if *unit_system == UnitSystem::US {
-                            s /= PSIperFT;
-                        }
-                        s /= unit_system.per_feet();
-                        control.setting = Some(s);
+                    s /= unit_system.per_feet();
+                    s += self.nodes[link.start_node].elevation;
+                    control.setting = Some(s);
+                }
+                ValveType::PBV => {
+                    let mut s = setting;
+                    if *unit_system == UnitSystem::US {
+                        s /= PSIperFT;
                     }
-                    ValveType::FCV => {
-                        control.setting = Some(setting / flow_units.per_cfs());
-                    }
-                    _ => {}
-                },
+                    s /= unit_system.per_feet();
+                    control.setting = Some(s);
+                }
+                ValveType::FCV => {
+                    control.setting = Some(setting / flow_units.per_cfs());
+                }
                 _ => {}
-            }
+            } }
         }
     }
 
@@ -652,14 +649,13 @@ impl Network {
 
         if let Some(&index) = self.curve_map.get(&id) {
             let curve = &mut self.curves[index];
-            if let Some(last_x) = curve.x.last() {
-                if x < *last_x {
+            if let Some(last_x) = curve.x.last()
+                && x < *last_x {
                     return Err(InputError::new(format!(
                         "X values must be in ascending order for curve '{}': {} < {}",
                         id, x, last_x
                     )));
                 }
-            }
             curve.x.push(x);
             curve.y.push(y);
         } else {
@@ -843,18 +839,16 @@ impl Network {
                 // Handle "Pressure Exponent" as a separate option (skip if not a valid pressure unit)
                 if let Ok(units) = PressureUnits::from_str(value) {
                     self.options.pressure_units = units;
+                } else if value.trim().to_uppercase() == "EXPONENT" {
+                    self.options.pressure_exponent = parts
+                        .next()
+                        .ok_or_missing("pressure exponent value")?
+                        .parse_field::<f64>("pressure exponent")?;
                 } else {
-                    if value.trim().to_uppercase() == "EXPONENT" {
-                        self.options.pressure_exponent = parts
-                            .next()
-                            .ok_or_missing("pressure exponent value")?
-                            .parse_field::<f64>("pressure exponent")?;
-                    } else {
-                        return Err(InputError::new(format!(
-                            "Invalid pressure option: {}",
-                            value
-                        )));
-                    }
+                    return Err(InputError::new(format!(
+                        "Invalid pressure option: {}",
+                        value
+                    )));
                 }
                 // Otherwise it's likely "Pressure Exponent" or similar - ignore
             }
@@ -992,7 +986,9 @@ impl Network {
                 let node = &self.nodes[node_index];
                 let is_tank = matches!(node.node_type, NodeType::Tank(_));
 
-                let condition = match (is_tank, above) {
+                
+
+                match (is_tank, above) {
                     (true, true) => ControlCondition::HighLevel {
                         tank_index: node_index,
                         target: value,
@@ -1002,16 +998,14 @@ impl Network {
                         target: value,
                     },
                     (false, true) => ControlCondition::HighPressure {
-                        node_index: node_index,
+                        node_index,
                         target: value,
                     },
                     (false, false) => ControlCondition::LowPressure {
-                        node_index: node_index,
+                        node_index,
                         target: value,
                     },
-                };
-
-                condition
+                }
             }
             "TIME" => {
                 let time_str = parts.next().ok_or_missing("time value")?;
@@ -1121,7 +1115,6 @@ fn parse_line(line: &str) -> std::str::SplitWhitespace<'_> {
     line.split(';')
         .next()
         .unwrap_or("")
-        .trim()
         .split_whitespace()
 }
 

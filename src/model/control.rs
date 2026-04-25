@@ -80,6 +80,6 @@ impl Control {
             state.settings[*link_index] = setting;
             return changed;
         }
-        return false;
+        false
     }
 }

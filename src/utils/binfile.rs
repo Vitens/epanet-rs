@@ -83,11 +83,11 @@ pub fn read_outfile(filename: &str) -> EPANETResults {
         }
     }
 
-    return EPANETResults {
+    EPANETResults {
         node_ids,
         link_ids,
         flows,
         heads,
         demands,
-    };
+    }
 }

@@ -377,49 +377,49 @@ pub extern "C" fn EN_setnodevalue(
         NodeProperty::Elevation => network.update_node(
             &node_id,
             &NodeUpdate {
-                elevation: Some(value as f64),
+                elevation: Some(value),
                 ..Default::default()
             },
         ),
         NodeProperty::BaseDemand => network.update_junction(
             &node_id,
             &JunctionUpdate {
-                basedemand: Some(value as f64),
+                basedemand: Some(value),
                 ..Default::default()
             },
         ),
         NodeProperty::Emitter => network.update_junction(
             &node_id,
             &JunctionUpdate {
-                emitter_coefficient: Some(value as f64),
+                emitter_coefficient: Some(value),
                 ..Default::default()
             },
         ),
         NodeProperty::TankDiam => network.update_tank(
             &node_id,
             &TankUpdate {
-                diameter: Some(value as f64),
+                diameter: Some(value),
                 ..Default::default()
             },
         ),
         NodeProperty::MinLevel => network.update_tank(
             &node_id,
             &TankUpdate {
-                min_level: Some(value as f64),
+                min_level: Some(value),
                 ..Default::default()
             },
         ),
         NodeProperty::MaxLevel => network.update_tank(
             &node_id,
             &TankUpdate {
-                max_level: Some(value as f64),
+                max_level: Some(value),
                 ..Default::default()
             },
         ),
         NodeProperty::TankLevel => network.update_tank(
             &node_id,
             &TankUpdate {
-                initial_level: Some(value as f64),
+                initial_level: Some(value),
                 ..Default::default()
             },
         ),
@@ -490,7 +490,7 @@ pub extern "C" fn EN_setcoord(
         Some(node) => node,
         None => return ErrorCode::UndefinedNode,
     };
-    node.coordinates = Some((x as f64, y as f64));
+    node.coordinates = Some((x, y));
     ErrorCode::Ok
 }
 

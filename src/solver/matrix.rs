@@ -69,9 +69,9 @@ pub fn build_sparsity_pattern(
     }
     let sparsity_matrix =
         SparseColMat::try_new_from_triplets(n_unknowns, n_unknowns, &triplets).unwrap();
-    let symbolic = sparsity_matrix.symbolic().to_owned().unwrap();
+    
 
-    symbolic
+    sparsity_matrix.symbolic().to_owned().unwrap()
 }
 
 /// Build global unknown-numbering map

@@ -133,7 +133,7 @@ impl Simulation {
         }
         let remaining = duration - self.time;
         let timestep =
-            Self::calculate_time_step(&self.network, &state, self.time, self.skip_timesteps)
+            Self::calculate_time_step(&self.network, state, self.time, self.skip_timesteps)
                 .min(remaining);
         state.update_tanks(&self.network, timestep);
         self.time += timestep;

@@ -361,8 +361,8 @@ impl HydraulicSolver {
         stats: &mut IterationStatistics,
     ) {
         for (i, node) in network.nodes.iter().enumerate() {
-            if let NodeType::Junction(junction) = &node.node_type {
-                if junction.emitter_coefficient > 0.0 {
+            if let NodeType::Junction(junction) = &node.node_type
+                && junction.emitter_coefficient > 0.0 {
                     let dh = state.heads[i] - node.elevation;
                     let (g_inv, y) = junction.emitter_coefficients(
                         state.emitter_flows[i],
@@ -376,7 +376,6 @@ impl HydraulicSolver {
                         stats.max_dq = dq.abs();
                     }
                 }
-            }
         }
     }
 
@@ -393,8 +392,8 @@ impl HydraulicSolver {
         let n = 1.0 / options.pressure_exponent;
 
         for (i, node) in network.nodes.iter().enumerate() {
-            if let NodeType::Junction(junction) = &node.node_type {
-                if state.demands[i] > 0.0 {
+            if let NodeType::Junction(junction) = &node.node_type
+                && state.demands[i] > 0.0 {
                     let (g_inv, y) = junction.demand_coefficients(
                         state.demand_flows[i],
                         state.demands[i],
@@ -412,7 +411,6 @@ impl HydraulicSolver {
                         stats.max_dq = dq.abs();
                     }
                 }
-            }
         }
     }
 
@@ -477,15 +475,13 @@ impl HydraulicSolver {
             if link.start_node != node_index && link.end_node != node_index {
                 continue;
             }
-            if let LinkType::Valve(valve) = &link.link_type {
-                if valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV {
-                    if statuses[i] == LinkStatus::Active {
+            if let LinkType::Valve(valve) = &link.link_type
+                && (valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV)
+                    && statuses[i] == LinkStatus::Active {
                         debug!("Fixing bad valve for node index: {}", node_index);
                         statuses[i] = LinkStatus::XPressure;
                         return true;
                     }
-                }
-            }
         }
         false
     }
@@ -510,10 +506,10 @@ impl HydraulicSolver {
             }
         }
         let error = sum_demand - sum_supply;
-        return FlowBalance {
+        FlowBalance {
             total_demand: sum_demand,
             total_supply: sum_supply,
-            error: error,
-        };
+            error,
+        }
     }
 }

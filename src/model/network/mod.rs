@@ -93,7 +93,7 @@ impl Network {
         })
     }
     pub fn has_quality(&self) -> bool {
-        return false;
+        false
     }
 
     /// Resolves pattern name references to cached vector indices on each node.
@@ -170,11 +170,10 @@ impl<'de> Deserialize<'de> for Network {
         for link in data.links.iter_mut() {
             link.start_node = *node_map.get(&link.start_node_id).unwrap();
             link.end_node = *node_map.get(&link.end_node_id).unwrap();
-            if let LinkType::Valve(valve) = &mut link.link_type {
-                if valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV {
+            if let LinkType::Valve(valve) = &mut link.link_type
+                && (valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV) {
                     contains_pressure_control_valve = true;
                 }
-            }
         }
 
         let mut network = Network {

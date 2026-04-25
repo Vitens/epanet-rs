@@ -1,7 +1,6 @@
 //! Test helpers that run the reference EPANET2 binary and compare its output against `epanet-rs`.
 
 use std::env;
-use std::path::PathBuf;
 
 use std::process::Command;
 use std::process::Stdio;
@@ -44,7 +43,7 @@ pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bo
     // null file for EPANET output (NUL on Windows, /dev/null on Unix)
     let null_file = if cfg!(windows) { "NUL" } else { "/dev/null" };
     // temporary file for EPANET output
-    let temp_file = PathBuf::from(env::temp_dir()).join("validate.out");
+    let temp_file = env::temp_dir().join("validate.out");
     let temp_file_str = temp_file.to_str().unwrap();
 
     let mut epanet_process = match Command::new("runepanet")
@@ -166,10 +165,10 @@ pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bo
             "Validation <on-red><b> FAILED </> : {} head mismatches, {} flow mismatches, {} demand mismatches",
             head_mismatches, flow_mismatches, demand_mismatches
         );
-        return false;
+        false
     } else {
         info!("Validation <on-green><b> PASSED! </>");
-        return true;
+        true
     }
 }
 

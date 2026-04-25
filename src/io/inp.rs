@@ -13,7 +13,7 @@ use crate::utils::time::seconds_to_hhmm;
 
 fn write_line(buffer: &mut String, line: &str) {
     buffer.push_str(line);
-    buffer.push_str("\n");
+    buffer.push('\n');
 }
 
 fn write_section(buffer: &mut String, section: &str, columns: &[(&str, usize)]) {
@@ -265,14 +265,13 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
         &[("Junction", 10), ("Coefficient", 12)],
     );
     for node in network.nodes.iter() {
-        if let NodeType::Junction(junction) = &node.node_type {
-            if junction.emitter_coefficient > 0.0 {
+        if let NodeType::Junction(junction) = &node.node_type
+            && junction.emitter_coefficient > 0.0 {
                 write_line(
                     &mut buffer,
                     &format!("{:<10} {:<12}", node.id, junction.emitter_coefficient),
                 );
             }
-        }
     }
 
     // write curves
@@ -307,7 +306,7 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
     write_line(&mut buffer, "\n[CONTROLS]");
 
     for control in network.controls.iter() {
-        let mut control_str = String::from(format!("LINK {}", control.link_id));
+        let mut control_str = format!("LINK {}", control.link_id);
 
         if let Some(status) = control.status {
             control_str.push_str(&format!(" {}", status));

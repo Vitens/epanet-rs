@@ -32,11 +32,10 @@ impl Node {
         matches!(self.node_type, NodeType::Reservoir(_) | NodeType::Tank(_))
     }
     pub fn head_pattern(&self) -> Option<&str> {
-        if let NodeType::Reservoir(reservoir) = &self.node_type {
-            if reservoir.head_pattern.is_some() {
+        if let NodeType::Reservoir(reservoir) = &self.node_type
+            && reservoir.head_pattern.is_some() {
                 return Some(reservoir.head_pattern.as_ref().unwrap());
             }
-        }
         None
     }
     pub fn initial_head(&self) -> f64 {
@@ -46,14 +45,14 @@ impl Node {
             }
             return self.elevation;
         }
-        return 0.0;
+        0.0
     }
 }
 
 impl UnitConversion for Node {
     fn convert_to_standard(&mut self, options: &SimulationOptions) {
         // convert elevation to Feet
-        self.elevation = self.elevation / options.unit_system.per_feet();
+        self.elevation /= options.unit_system.per_feet();
 
         match &mut self.node_type {
             NodeType::Reservoir(_reservoir) => (),
@@ -64,7 +63,7 @@ impl UnitConversion for Node {
 
     fn convert_from_standard(&mut self, options: &SimulationOptions) {
         // convert elevation from Feet to the given unit system
-        self.elevation = self.elevation * options.unit_system.per_feet();
+        self.elevation *= options.unit_system.per_feet();
 
         match &mut self.node_type {
             NodeType::Reservoir(_reservoir) => (),

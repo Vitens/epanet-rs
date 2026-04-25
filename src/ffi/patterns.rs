@@ -134,7 +134,7 @@ pub extern "C" fn EN_setpatternid(ph: *mut Project, index: c_int, id: *const c_c
     simulation
         .network
         .pattern_map
-        .insert(new_pattern_id.into(), index as usize);
+        .insert(new_pattern_id.into(), index);
 
     // update all nodes that point to the old pattern id to point to the new pattern id
     for node in simulation.network.nodes.iter_mut() {

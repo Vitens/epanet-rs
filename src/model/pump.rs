@@ -96,7 +96,7 @@ impl LinkTrait for Pump {
         if status == LinkStatus::Xhead {
             return Some(LinkStatus::Open); // reopen the pipe if it was temporarily closed
         }
-        return None;
+        None
     }
 
     fn initial_flow(&self) -> f64 {
@@ -104,9 +104,9 @@ impl LinkTrait for Pump {
             return Q_ZERO;
         }
         if let Some(head_curve) = &self.head_curve {
-            return head_curve.statistics.q_initial * self.speed;
+            head_curve.statistics.q_initial * self.speed
         } else {
-            return 1.0; // constant power pump
+            1.0// constant power pump
         }
     }
 }
@@ -114,11 +114,11 @@ impl LinkTrait for Pump {
 impl UnitConversion for Pump {
     fn convert_to_standard(&mut self, options: &SimulationOptions) {
         // convert the power from the given unit system to horsepower
-        self.power = self.power / options.unit_system.per_horsepower();
+        self.power /= options.unit_system.per_horsepower();
     }
 
     fn convert_from_standard(&mut self, options: &SimulationOptions) {
         // convert the power from horsepower to the given unit system
-        self.power = self.power * options.unit_system.per_horsepower();
+        self.power *= options.unit_system.per_horsepower();
     }
 }

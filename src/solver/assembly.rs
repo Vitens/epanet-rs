@@ -45,11 +45,10 @@ impl HydraulicSolver {
     /// non-singular for disconnected or ill-conditioned sub-networks.
     fn grounded_node_contributions(&self, values: &mut Vec<f64>, grounded_nodes: &[bool]) {
         for (i, &grounded) in grounded_nodes.iter().enumerate() {
-            if grounded {
-                if let Some(row) = self.node_rows[i] {
+            if grounded
+                && let Some(row) = self.node_rows[i] {
                     values[row] += SMALL_VALUE;
                 }
-            }
         }
     }
 
@@ -140,8 +139,8 @@ impl HydraulicSolver {
     ) {
         // iterate over emitters
         for (i, node) in network.nodes.iter().enumerate() {
-            if let NodeType::Junction(junction) = &node.node_type {
-                if junction.emitter_coefficient > 0.0 {
+            if let NodeType::Junction(junction) = &node.node_type
+                && junction.emitter_coefficient > 0.0 {
                     // get the index for the diagonal entry in the Jacobian matrix
                     let row = self.node_rows[i].unwrap();
                     // get the index for the unknown node in the RHS vector
@@ -156,7 +155,6 @@ impl HydraulicSolver {
                     // update matrix diagonal
                     values[row] += g_inv;
                 }
-            }
         }
     }
 

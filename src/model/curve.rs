@@ -122,10 +122,10 @@ impl HeadCurve {
         };
 
         Ok(Self {
-            flows: flows,
-            heads: heads,
-            curve_type: curve_type,
-            statistics: statistics,
+            flows,
+            heads,
+            curve_type,
+            statistics,
         })
     }
     pub fn coefficients(&self, q: Cfs) -> (Ft, f64) {
@@ -157,14 +157,14 @@ impl HeadCurve {
             let a = h * 4.0 / 3.0; // maximum head / shutoff head
             let b = (a - h) / (q * q); // flow coefficient 
 
-            return Ok(HeadCurveStatistics {
+            Ok(HeadCurveStatistics {
                 h_max: a,
                 h_shutoff: a,
                 q_max: q * 2.0,
                 q_initial: q,
                 r: b,
                 n: 2.0,
-            });
+            })
         }
         // three point curve with shutoff head at zero
         else if flows.len() == 3 && flows[0] == 0.0 {
@@ -190,18 +190,18 @@ impl HeadCurve {
             valid &= b < 0.0;
 
             if valid {
-                return Ok(HeadCurveStatistics {
+                Ok(HeadCurveStatistics {
                     h_max: h0,
                     h_shutoff: h0,
                     q_max: q2,
                     q_initial: q1,
                     r: -b,
                     n: c,
-                });
+                })
             } else {
-                return Err(InputError::new(
+                Err(InputError::new(
                     "Invalid head curve: Head curve statistics could not be calculated",
-                ));
+                ))
             }
         } else {
             // return head curve statistics for a custom curve
@@ -209,14 +209,14 @@ impl HeadCurve {
             let q_initial = (flows[0] + q_max) / 2.0;
             let h_max = heads[0];
 
-            return Ok(HeadCurveStatistics {
-                h_max: h_max,
+            Ok(HeadCurveStatistics {
+                h_max,
                 h_shutoff: h_max,
-                q_max: q_max,
-                q_initial: q_initial,
+                q_max,
+                q_initial,
                 r: 0.0,
                 n: 1.0,
-            });
+            })
         }
     }
     /// Validate the curve to ensure the head is decreasing and the flow is increasing monotonically
@@ -256,7 +256,7 @@ impl HeadCurve {
     pub fn curve_coefficients(&self, q: Cfs, speed: f64) -> (f64, f64) {
         // for a custom curve, find the slope and intercept of the curve segment that contains the speed adjusted flow
         if self.curve_type == HeadCurveType::Custom {
-            return self.custom_curve_coefficients(q, speed);
+            self.custom_curve_coefficients(q, speed)
         } else {
             // for single point and three point with shutoff curves, use the same formula as EPANET
             // shutoff head is negative to represent head gain

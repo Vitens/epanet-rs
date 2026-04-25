@@ -31,7 +31,7 @@ fn round_to_digits(value: f64, digits: usize) -> f64 {
 impl Network {
     pub fn write_results(&self, results: &SolverResult, file: &str) -> Result<(), String> {
         // get file extension
-        let file_extension = file.split('.').last().unwrap();
+        let file_extension = file.split('.').next_back().unwrap();
 
         let file =
             File::create(file).map_err(|e| format!("Failed to create output file: {}", e))?;
@@ -85,7 +85,7 @@ impl Network {
         }
         network.options.convert_from_standard();
 
-        let file_extension = file.split('.').last().unwrap();
+        let file_extension = file.split('.').next_back().unwrap();
         let file =
             File::create(file).map_err(|e| format!("Failed to create network file: {}", e))?;
         let writer = BufWriter::new(file);

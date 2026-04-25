@@ -170,8 +170,8 @@ pub extern "C" fn EN_getcurvevalue(
         return ErrorCode::UndefinedCurve;
     }
 
-    let x = curve.x[point_index as usize];
-    let y = curve.y[point_index as usize];
+    let x = curve.x[point_index];
+    let y = curve.y[point_index];
 
     unsafe { *out_x = x as c_double };
     unsafe { *out_y = y as c_double };
