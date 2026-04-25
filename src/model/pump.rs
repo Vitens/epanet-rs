@@ -106,7 +106,7 @@ impl LinkTrait for Pump {
         if let Some(head_curve) = &self.head_curve {
             head_curve.statistics.q_initial * self.speed
         } else {
-            1.0// constant power pump
+            1.0 // constant power pump
         }
     }
 }

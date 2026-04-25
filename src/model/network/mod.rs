@@ -71,9 +71,10 @@ pub struct Network {
 
 impl Network {
     pub fn new(flow_units: FlowUnits, headloss_formula: HeadlossFormula) -> Self {
-        let mut network = Self::default();
-        network.options = SimulationOptions::new(flow_units, headloss_formula);
-        network
+        Self {
+            options: SimulationOptions::new(flow_units, headloss_formula),
+            ..Self::default()
+        }
     }
 }
 
@@ -171,9 +172,10 @@ impl<'de> Deserialize<'de> for Network {
             link.start_node = *node_map.get(&link.start_node_id).unwrap();
             link.end_node = *node_map.get(&link.end_node_id).unwrap();
             if let LinkType::Valve(valve) = &mut link.link_type
-                && (valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV) {
-                    contains_pressure_control_valve = true;
-                }
+                && (valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV)
+            {
+                contains_pressure_control_valve = true;
+            }
         }
 
         let mut network = Network {

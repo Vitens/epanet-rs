@@ -16,7 +16,7 @@ fn verify_heads_and_flows(
         let idx = *network
             .node_map
             .get(*node_id)
-            .expect(&format!("Node {} not found", node_id));
+            .unwrap_or_else(|| panic!("Node {} not found", node_id));
         let actual_head = result.heads[result_length - 1][idx];
         assert!(
             (actual_head - expected_head).abs() < 0.01,
@@ -32,7 +32,7 @@ fn verify_heads_and_flows(
         let idx = *network
             .link_map
             .get(*link_id)
-            .expect(&format!("Link {} not found", link_id));
+            .unwrap_or_else(|| panic!("Link {} not found", link_id));
         let actual_flow = result.flows[result_length - 1][idx];
         assert!(
             (actual_flow - expected_flow).abs() < 0.01,

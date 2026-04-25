@@ -62,8 +62,7 @@ impl Tank {
             return usize::MAX;
         }
 
-        self
-            .time_to_reach_level(current_level, self.max_level, flow)
+        self.time_to_reach_level(current_level, self.max_level, flow)
             .min(self.time_to_reach_level(current_level, self.min_level, flow))
     }
 

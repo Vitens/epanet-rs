@@ -102,8 +102,16 @@ impl HeadCurve {
         system: &UnitSystem,
     ) -> Result<Self, InputError> {
         // convert the flow and head values to the standard units (CFS and Feet)
-        let flows = curve.x.iter().map(|x| x / flow_units.per_cfs()).collect();
-        let heads = curve.y.iter().map(|y| y / system.per_feet()).collect();
+        let flows = curve
+            .x
+            .iter()
+            .map(|x| x / flow_units.per_cfs())
+            .collect::<Vec<f64>>();
+        let heads = curve
+            .y
+            .iter()
+            .map(|y| y / system.per_feet())
+            .collect::<Vec<f64>>();
 
         // validate the curve to ensure the head is decreasing and the flow is increasing monotonically
         if !Self::validate_curve(&flows, &heads) {
@@ -146,8 +154,8 @@ impl HeadCurve {
 
     // Calculate the maximum head, minimum head, and maximum flow from the curve
     pub fn compute_curve_statistics(
-        flows: &Vec<Cfs>,
-        heads: &Vec<Ft>,
+        flows: &[Cfs],
+        heads: &[Ft],
     ) -> Result<HeadCurveStatistics, InputError> {
         if flows.len() == 1 {
             let q = flows[0];
@@ -155,7 +163,7 @@ impl HeadCurve {
 
             // compute the coefficients for the head curve
             let a = h * 4.0 / 3.0; // maximum head / shutoff head
-            let b = (a - h) / (q * q); // flow coefficient 
+            let b = (a - h) / (q * q); // flow coefficient
 
             Ok(HeadCurveStatistics {
                 h_max: a,
@@ -220,7 +228,7 @@ impl HeadCurve {
         }
     }
     /// Validate the curve to ensure the head is decreasing and the flow is increasing monotonically
-    pub fn validate_curve(flows: &Vec<Cfs>, heads: &Vec<Ft>) -> bool {
+    pub fn validate_curve(flows: &[Cfs], heads: &[Ft]) -> bool {
         for i in 1..heads.len() {
             if flows[i] <= flows[i - 1] || heads[i] >= heads[i - 1] {
                 return false;

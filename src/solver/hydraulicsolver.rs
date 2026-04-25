@@ -280,7 +280,7 @@ impl HydraulicSolver {
         &self,
         network: &Network,
         state: &SolverState,
-        excess_flows: &mut Vec<Cfs>,
+        excess_flows: &mut [Cfs],
     ) {
         for (i, emitter_flow) in state.emitter_flows.iter().enumerate() {
             excess_flows[i] = -emitter_flow;
@@ -362,20 +362,19 @@ impl HydraulicSolver {
     ) {
         for (i, node) in network.nodes.iter().enumerate() {
             if let NodeType::Junction(junction) = &node.node_type
-                && junction.emitter_coefficient > 0.0 {
-                    let dh = state.heads[i] - node.elevation;
-                    let (g_inv, y) = junction.emitter_coefficients(
-                        state.emitter_flows[i],
-                        network.options.emitter_exponent,
-                    );
-                    let dq = (y - dh) * g_inv;
-                    state.emitter_flows[i] -= dq;
-                    stats.sum_dq += dq.abs();
-                    stats.sum_q += state.emitter_flows[i].abs();
-                    if dq.abs() > stats.max_dq {
-                        stats.max_dq = dq.abs();
-                    }
+                && junction.emitter_coefficient > 0.0
+            {
+                let dh = state.heads[i] - node.elevation;
+                let (g_inv, y) = junction
+                    .emitter_coefficients(state.emitter_flows[i], network.options.emitter_exponent);
+                let dq = (y - dh) * g_inv;
+                state.emitter_flows[i] -= dq;
+                stats.sum_dq += dq.abs();
+                stats.sum_q += state.emitter_flows[i].abs();
+                if dq.abs() > stats.max_dq {
+                    stats.max_dq = dq.abs();
                 }
+            }
         }
     }
 
@@ -393,24 +392,21 @@ impl HydraulicSolver {
 
         for (i, node) in network.nodes.iter().enumerate() {
             if let NodeType::Junction(junction) = &node.node_type
-                && state.demands[i] > 0.0 {
-                    let (g_inv, y) = junction.demand_coefficients(
-                        state.demand_flows[i],
-                        state.demands[i],
-                        dp,
-                        n,
-                    );
+                && state.demands[i] > 0.0
+            {
+                let (g_inv, y) =
+                    junction.demand_coefficients(state.demand_flows[i], state.demands[i], dp, n);
 
-                    let dh = state.heads[i] - node.elevation - options.minimum_pressure;
-                    let dq = (y - dh) * g_inv;
+                let dh = state.heads[i] - node.elevation - options.minimum_pressure;
+                let dq = (y - dh) * g_inv;
 
-                    state.demand_flows[i] -= dq;
-                    stats.sum_dq += dq.abs();
-                    stats.sum_q += state.demand_flows[i].abs();
-                    if dq.abs() > stats.max_dq {
-                        stats.max_dq = dq.abs();
-                    }
+                state.demand_flows[i] -= dq;
+                stats.sum_dq += dq.abs();
+                stats.sum_q += state.demand_flows[i].abs();
+                if dq.abs() > stats.max_dq {
+                    stats.max_dq = dq.abs();
                 }
+            }
         }
     }
 
@@ -469,7 +465,7 @@ impl HydraulicSolver {
         &self,
         network: &Network,
         node_index: usize,
-        statuses: &mut Vec<LinkStatus>,
+        statuses: &mut [LinkStatus],
     ) -> bool {
         for (i, link) in network.links.iter().enumerate() {
             if link.start_node != node_index && link.end_node != node_index {
@@ -477,17 +473,18 @@ impl HydraulicSolver {
             }
             if let LinkType::Valve(valve) = &link.link_type
                 && (valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV)
-                    && statuses[i] == LinkStatus::Active {
-                        debug!("Fixing bad valve for node index: {}", node_index);
-                        statuses[i] = LinkStatus::XPressure;
-                        return true;
-                    }
+                && statuses[i] == LinkStatus::Active
+            {
+                debug!("Fixing bad valve for node index: {}", node_index);
+                statuses[i] = LinkStatus::XPressure;
+                return true;
+            }
         }
         false
     }
 
     /// Calculate the flow balance error
-    fn flow_balance(&self, network: &Network, demands: &Vec<Cfs>, flows: &Vec<Cfs>) -> FlowBalance {
+    fn flow_balance(&self, network: &Network, demands: &[Cfs], flows: &[Cfs]) -> FlowBalance {
         let sum_demand: Cfs = demands.iter().sum();
 
         let mut sum_supply: Cfs = 0.0;

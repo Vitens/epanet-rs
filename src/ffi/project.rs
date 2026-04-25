@@ -56,21 +56,44 @@ pub(crate) use get_simulation_mut;
 ///
 /// Allocates a new project handle via `*ph` that must be passed to all
 /// subsequent API calls and eventually freed with [`EN_deleteproject`].
+///
+/// # Safety
+///
+/// `ph` must be a valid, non-null pointer to writable memory for one
+/// `*mut Project`.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_createproject(ph: *mut *mut Project) -> ErrorCode {
+pub unsafe extern "C" fn EN_createproject(ph: *mut *mut Project) -> ErrorCode {
+    if ph.is_null() {
+        return ErrorCode::InvalidHandle;
+    }
+
     unsafe { *ph = Box::into_raw(Box::new(Project { simulation: None })) };
     ErrorCode::Ok
 }
 
 /// Deletes a project and frees all of its memory.
+///
+/// # Safety
+///
+/// `ph` must be a valid project handle returned by [`EN_createproject`], and it
+/// must not be used again after this call.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_deleteproject(ph: *mut Project) -> ErrorCode {
+pub unsafe extern "C" fn EN_deleteproject(ph: *mut Project) -> ErrorCode {
+    if ph.is_null() {
+        return ErrorCode::InvalidHandle;
+    }
+
     unsafe { drop(Box::from_raw(ph)) };
     ErrorCode::Ok
 }
 /// Initializes a project with a new network.
+///
+/// # Safety
+///
+/// `ph` must be a valid, non-null project handle created by
+/// [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_init(
+pub unsafe extern "C" fn EN_init(
     ph: *mut Project,
     _rpt_file: *const c_char,
     _out_file: *const c_char,
@@ -123,8 +146,13 @@ pub extern "C" fn EN_init(
 /// the hydraulic solver and state so the project is ready for simulation.
 ///
 /// `rptFile` and `outFile` are accepted for API compatibility but currently ignored.
+///
+/// # Safety
+///
+/// `ph` must be a valid, non-null project handle. `inp_file` must be a
+/// valid, non-null pointer to a NUL-terminated C string.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_open(
+pub unsafe extern "C" fn EN_open(
     ph: *mut Project,
     inp_file: *const c_char,
     _rpt_file: *const c_char,
@@ -167,8 +195,17 @@ pub extern "C" fn EN_open(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_saveinpfile(ph: *mut Project, inp_file: *const c_char) -> ErrorCode {
+///
+/// # Safety
+///
+/// `ph` must be a valid, non-null project handle. `inp_file` must be a
+/// valid, non-null pointer to a NUL-terminated C string.
+pub unsafe extern "C" fn EN_saveinpfile(ph: *mut Project, inp_file: *const c_char) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
+
+    if inp_file.is_null() {
+        return ErrorCode::CannotOpenInputFile;
+    }
 
     let c_str = unsafe { CStr::from_ptr(inp_file) };
     let path = match c_str.to_str() {

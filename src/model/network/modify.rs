@@ -292,11 +292,12 @@ impl Network {
     pub fn add_tank(&mut self, id: &str, data: &TankData) -> Result<(), InputError> {
         // validate the volume curve id (if provided) exists
         if let Some(curve_id) = &data.volume_curve_id
-            && !self.curve_map.contains_key(curve_id) {
-                return Err(InputError::CurveNotFound {
-                    curve_id: curve_id.clone(),
-                });
-            }
+            && !self.curve_map.contains_key(curve_id)
+        {
+            return Err(InputError::CurveNotFound {
+                curve_id: curve_id.clone(),
+            });
+        }
 
         let tank = Tank {
             elevation: data.elevation,
@@ -543,10 +544,11 @@ impl Network {
         }
 
         if let NodeType::Reservoir(reservoir) = &mut node.node_type
-            && let Some((new_pattern, new_index)) = pattern_change {
-                reservoir.head_pattern = new_pattern;
-                reservoir.head_pattern_index = new_index;
-            }
+            && let Some((new_pattern, new_index)) = pattern_change
+        {
+            reservoir.head_pattern = new_pattern;
+            reservoir.head_pattern_index = new_index;
+        }
 
         self.updated_nodes.insert(node_index);
         self.properties_version += 1;
@@ -742,10 +744,11 @@ impl Network {
 
         // re-normalize the minor-loss coefficient against the (possibly new) diameter
         if let LinkType::Pipe(pipe) = &mut link.link_type
-            && let Some(minor_loss) = update.minor_loss {
-                // update the minor loss coefficient (this has to be done using standard units!)
-                pipe.minor_loss = 0.02517 * minor_loss / pipe.diameter.powi(4);
-            }
+            && let Some(minor_loss) = update.minor_loss
+        {
+            // update the minor loss coefficient (this has to be done using standard units!)
+            pipe.minor_loss = 0.02517 * minor_loss / pipe.diameter.powi(4);
+        }
 
         self.updated_links.insert(link_index);
         self.properties_version += 1;
@@ -794,10 +797,11 @@ impl Network {
         link.convert_to_standard(&self.options);
 
         if let LinkType::Pump(pump) = &mut link.link_type
-            && let Some((new_curve_id, new_head_curve)) = curve_change {
-                pump.head_curve_id = new_curve_id;
-                pump.head_curve = new_head_curve;
-            }
+            && let Some((new_curve_id, new_head_curve)) = curve_change
+        {
+            pump.head_curve_id = new_curve_id;
+            pump.head_curve = new_head_curve;
+        }
 
         self.updated_links.insert(link_index);
         self.properties_version += 1;
@@ -1028,9 +1032,10 @@ impl Network {
 
             // keep PSV setting offset in sync with its start-node elevation
             if valve_type.as_ref() == Some(&ValveType::PSV)
-                && let LinkType::Valve(valve) = &mut link.link_type {
-                    valve.setting += new_elev - old_elev;
-                }
+                && let LinkType::Valve(valve) = &mut link.link_type
+            {
+                valve.setting += new_elev - old_elev;
+            }
             topology_changed = true;
         }
 
@@ -1055,9 +1060,10 @@ impl Network {
 
             // keep PRV setting offset in sync with its end-node elevation
             if valve_type.as_ref() == Some(&ValveType::PRV)
-                && let LinkType::Valve(valve) = &mut link.link_type {
-                    valve.setting += new_elev - old_elev;
-                }
+                && let LinkType::Valve(valve) = &mut link.link_type
+            {
+                valve.setting += new_elev - old_elev;
+            }
             topology_changed = true;
         }
 
@@ -1068,10 +1074,11 @@ impl Network {
 
         let mut properties_changed = false;
         if let Some(status) = update.initial_status
-            && link.initial_status != status {
-                link.initial_status = status;
-                properties_changed = true;
-            }
+            && link.initial_status != status
+        {
+            link.initial_status = status;
+            properties_changed = true;
+        }
 
         if topology_changed {
             self.topology_version += 1;

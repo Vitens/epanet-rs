@@ -248,38 +248,40 @@ impl Network {
             };
             let link = &self.links[link_index];
 
-            if let LinkType::Valve(valve) = &link.link_type { match valve.valve_type {
-                ValveType::PRV => {
-                    let mut s = setting;
-                    if *unit_system == UnitSystem::US {
-                        s /= PSIperFT;
+            if let LinkType::Valve(valve) = &link.link_type {
+                match valve.valve_type {
+                    ValveType::PRV => {
+                        let mut s = setting;
+                        if *unit_system == UnitSystem::US {
+                            s /= PSIperFT;
+                        }
+                        s /= unit_system.per_feet();
+                        s += self.nodes[link.end_node].elevation;
+                        control.setting = Some(s);
                     }
-                    s /= unit_system.per_feet();
-                    s += self.nodes[link.end_node].elevation;
-                    control.setting = Some(s);
-                }
-                ValveType::PSV => {
-                    let mut s = setting;
-                    if *unit_system == UnitSystem::US {
-                        s /= PSIperFT;
+                    ValveType::PSV => {
+                        let mut s = setting;
+                        if *unit_system == UnitSystem::US {
+                            s /= PSIperFT;
+                        }
+                        s /= unit_system.per_feet();
+                        s += self.nodes[link.start_node].elevation;
+                        control.setting = Some(s);
                     }
-                    s /= unit_system.per_feet();
-                    s += self.nodes[link.start_node].elevation;
-                    control.setting = Some(s);
-                }
-                ValveType::PBV => {
-                    let mut s = setting;
-                    if *unit_system == UnitSystem::US {
-                        s /= PSIperFT;
+                    ValveType::PBV => {
+                        let mut s = setting;
+                        if *unit_system == UnitSystem::US {
+                            s /= PSIperFT;
+                        }
+                        s /= unit_system.per_feet();
+                        control.setting = Some(s);
                     }
-                    s /= unit_system.per_feet();
-                    control.setting = Some(s);
+                    ValveType::FCV => {
+                        control.setting = Some(setting / flow_units.per_cfs());
+                    }
+                    _ => {}
                 }
-                ValveType::FCV => {
-                    control.setting = Some(setting / flow_units.per_cfs());
-                }
-                _ => {}
-            } }
+            }
         }
     }
 
@@ -650,12 +652,13 @@ impl Network {
         if let Some(&index) = self.curve_map.get(&id) {
             let curve = &mut self.curves[index];
             if let Some(last_x) = curve.x.last()
-                && x < *last_x {
-                    return Err(InputError::new(format!(
-                        "X values must be in ascending order for curve '{}': {} < {}",
-                        id, x, last_x
-                    )));
-                }
+                && x < *last_x
+            {
+                return Err(InputError::new(format!(
+                    "X values must be in ascending order for curve '{}': {} < {}",
+                    id, x, last_x
+                )));
+            }
             curve.x.push(x);
             curve.y.push(y);
         } else {
@@ -986,8 +989,6 @@ impl Network {
                 let node = &self.nodes[node_index];
                 let is_tank = matches!(node.node_type, NodeType::Tank(_));
 
-                
-
                 match (is_tank, above) {
                     (true, true) => ControlCondition::HighLevel {
                         tank_index: node_index,
@@ -1112,10 +1113,7 @@ impl Network {
 
 /// Strip comments (after ';') from a line and split into whitespace-separated parts
 fn parse_line(line: &str) -> std::str::SplitWhitespace<'_> {
-    line.split(';')
-        .next()
-        .unwrap_or("")
-        .split_whitespace()
+    line.split(';').next().unwrap_or("").split_whitespace()
 }
 
 #[cfg(test)]
@@ -1734,7 +1732,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(network.controls.len(), 1);
-        let control = network.controls.get(0).unwrap();
+        let control = network.controls.first().unwrap();
         assert_eq!(control.link_id, "L1".into());
         assert_eq!(control.setting, None);
         assert_eq!(control.status, Some(LinkStatus::Closed));
@@ -1752,7 +1750,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(network.controls.len(), 1);
-        let control = network.controls.get(0).unwrap();
+        let control = network.controls.first().unwrap();
         assert_eq!(control.link_id, "L1".into());
         assert_eq!(control.setting, Some(1.5));
         assert_eq!(control.status, None);
@@ -1769,12 +1767,12 @@ mod tests {
         network.read_control("LINK L1 CLOSED IF TIME 1:15").unwrap();
 
         assert_eq!(network.controls.len(), 1);
-        let control = network.controls.get(0).unwrap();
+        let control = network.controls.first().unwrap();
         assert_eq!(control.link_id, "L1".into());
         let ControlCondition::Time { seconds } = &control.condition else {
             panic!("Expected Time control condition");
         };
-        assert_eq!(*seconds, 1 * 3600 + 15 * 60);
+        assert_eq!(*seconds, 3600 + 15 * 60);
     }
 
     #[test]
@@ -1785,7 +1783,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(network.controls.len(), 1);
-        let control = network.controls.get(0).unwrap();
+        let control = network.controls.first().unwrap();
         assert_eq!(control.link_id, "L1".into());
         let ControlCondition::ClockTime { seconds } = &control.condition else {
             panic!("Expected ClockTime control condition");

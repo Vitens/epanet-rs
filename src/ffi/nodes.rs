@@ -13,8 +13,13 @@ use crate::ffi::enums::NodeType as ENNodeType;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_double, c_int};
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
+/// `out_index` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_addnode(
+pub unsafe extern "C" fn EN_addnode(
     ph: *mut Project,
     id: *const c_char,
     node_type: c_int,
@@ -76,8 +81,13 @@ pub extern "C" fn EN_addnode(
 }
 
 /// Gets the index of a node given its ID name.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
+/// `out_index` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getnodeindex(
+pub unsafe extern "C" fn EN_getnodeindex(
     ph: *mut Project,
     id: *const c_char,
     out_index: *mut c_int,
@@ -103,8 +113,16 @@ pub extern "C" fn EN_getnodeindex(
 }
 
 // Gets the ID name of a node given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_id` must point to a buffer large enough for the result string including NUL.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getnodeid(ph: *mut Project, index: c_int, out_id: *mut c_char) -> ErrorCode {
+pub unsafe extern "C" fn EN_getnodeid(
+    ph: *mut Project,
+    index: c_int,
+    out_id: *mut c_char,
+) -> ErrorCode {
     let simulation = get_simulation!(ph);
 
     // EPANET indexes from 1, so we need to subtract 1 from the index
@@ -125,8 +143,16 @@ pub extern "C" fn EN_getnodeid(ph: *mut Project, index: c_int, out_id: *mut c_ch
 }
 
 // Sets the ID name of a node given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setnodeid(ph: *mut Project, index: c_int, id: *const c_char) -> ErrorCode {
+pub unsafe extern "C" fn EN_setnodeid(
+    ph: *mut Project,
+    index: c_int,
+    id: *const c_char,
+) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     let c_str = unsafe { CStr::from_ptr(id) };
@@ -175,8 +201,12 @@ pub extern "C" fn EN_setnodeid(ph: *mut Project, index: c_int, id: *const c_char
 }
 
 // Get the node type given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_type` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getnodetype(
+pub unsafe extern "C" fn EN_getnodetype(
     ph: *mut Project,
     index: c_int,
     out_type: *mut c_int,
@@ -203,8 +233,12 @@ pub extern "C" fn EN_getnodetype(
 }
 
 /// Retrieves the property value of a node
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_value` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getnodevalue(
+pub unsafe extern "C" fn EN_getnodevalue(
     ph: *mut Project,
     index: c_int,
     property: c_int,
@@ -349,8 +383,11 @@ pub extern "C" fn EN_getnodevalue(
 }
 
 // Set the property value of a node
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setnodevalue(
+pub unsafe extern "C" fn EN_setnodevalue(
     ph: *mut Project,
     index: c_int,
     property: c_int,
@@ -447,8 +484,13 @@ pub extern "C" fn EN_setnodevalue(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_x` must be a valid non-null writable pointer.
+/// `out_y` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getcoord(
+pub unsafe extern "C" fn EN_getcoord(
     ph: *mut Project,
     index: c_int,
     out_x: *mut c_double,
@@ -474,8 +516,11 @@ pub extern "C" fn EN_getcoord(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setcoord(
+pub unsafe extern "C" fn EN_setcoord(
     ph: *mut Project,
     index: c_int,
     x: c_double,
@@ -494,8 +539,15 @@ pub extern "C" fn EN_setcoord(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_deletenode(ph: *mut Project, index: c_int, action_code: c_int) -> ErrorCode {
+pub unsafe extern "C" fn EN_deletenode(
+    ph: *mut Project,
+    index: c_int,
+    action_code: c_int,
+) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     // EPANET indexes from 1, so we need to subtract 1 from the index

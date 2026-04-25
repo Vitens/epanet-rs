@@ -61,8 +61,11 @@ impl Simulation {
     }
     /// Creates a new simulation with the given network and options.
     pub fn init(flow_units: FlowUnits, headloss_formula: HeadlossFormula) -> Self {
-        let mut network = Network::default();
-        network.options = SimulationOptions::new(flow_units, headloss_formula);
+        let network = Network {
+            options: SimulationOptions::new(flow_units, headloss_formula),
+            ..Network::default()
+        };
+
         Self::new(network)
     }
 

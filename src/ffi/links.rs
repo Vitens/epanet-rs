@@ -22,8 +22,15 @@ use std::os::raw::{c_char, c_double, c_int};
 
 /// Delete the link from the network
 /// TODO: Implement action code
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_deletelink(ph: *mut Project, index: c_int, action_code: c_int) -> ErrorCode {
+pub unsafe extern "C" fn EN_deletelink(
+    ph: *mut Project,
+    index: c_int,
+    action_code: c_int,
+) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     let link_id = match simulation.network.links.get((index - 1) as usize) {
@@ -44,8 +51,13 @@ pub extern "C" fn EN_deletelink(ph: *mut Project, index: c_int, action_code: c_i
 }
 
 /// Gets the index of a node given its ID name.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
+/// `out_index` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getlinkindex(
+pub unsafe extern "C" fn EN_getlinkindex(
     ph: *mut Project,
     id: *const c_char,
     out_index: *mut c_int,
@@ -71,8 +83,16 @@ pub extern "C" fn EN_getlinkindex(
 }
 
 // Gets the ID name of a node given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_id` must point to a buffer large enough for the result string including NUL.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getlinkid(ph: *mut Project, index: c_int, out_id: *mut c_char) -> ErrorCode {
+pub unsafe extern "C" fn EN_getlinkid(
+    ph: *mut Project,
+    index: c_int,
+    out_id: *mut c_char,
+) -> ErrorCode {
     let simulation = get_simulation!(ph);
 
     let link_id = match simulation.network.links.get((index - 1) as usize) {
@@ -90,8 +110,16 @@ pub extern "C" fn EN_getlinkid(ph: *mut Project, index: c_int, out_id: *mut c_ch
 }
 
 // Sets the ID name of a node given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setlinkid(ph: *mut Project, index: c_int, id: *const c_char) -> ErrorCode {
+pub unsafe extern "C" fn EN_setlinkid(
+    ph: *mut Project,
+    index: c_int,
+    id: *const c_char,
+) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     // EPANET indexes from 1, so we need to subtract 1 from the index
@@ -128,8 +156,12 @@ pub extern "C" fn EN_setlinkid(ph: *mut Project, index: c_int, id: *const c_char
 }
 
 // Get the link type given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_type` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getlinktype(
+pub unsafe extern "C" fn EN_getlinktype(
     ph: *mut Project,
     index: c_int,
     out_type: *mut c_int,
@@ -164,8 +196,13 @@ pub extern "C" fn EN_getlinktype(
 }
 
 // Get node index of the start and end nodes of a link given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_start_node` must be a valid non-null writable pointer.
+/// `out_end_node` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getlinknodes(
+pub unsafe extern "C" fn EN_getlinknodes(
     ph: *mut Project,
     index: c_int,
     out_start_node: *mut c_int,
@@ -184,8 +221,11 @@ pub extern "C" fn EN_getlinknodes(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setlinknodes(
+pub unsafe extern "C" fn EN_setlinknodes(
     ph: *mut Project,
     index: c_int,
     start_node: c_int,
@@ -229,8 +269,12 @@ pub extern "C" fn EN_setlinknodes(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_value` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getlinkvalue(
+pub unsafe extern "C" fn EN_getlinkvalue(
     ph: *mut Project,
     index: c_int,
     property: c_int,
@@ -365,8 +409,11 @@ pub extern "C" fn EN_getlinkvalue(
 }
 
 // Set the property value of a link
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setlinkvalue(
+pub unsafe extern "C" fn EN_setlinkvalue(
     ph: *mut Project,
     index: c_int,
     property: c_int,
@@ -449,9 +496,10 @@ pub extern "C" fn EN_setlinkvalue(
 
             // if the link is a pipe with check_valve, return an error
             if let LinkType::Pipe(pipe) = &link.link_type
-                && pipe.check_valve {
-                    return ErrorCode::IllegalValveControl;
-                }
+                && pipe.check_valve
+            {
+                return ErrorCode::IllegalValveControl;
+            }
             simulation.network.update_link(
                 &link_id,
                 &LinkUpdate {
@@ -514,8 +562,15 @@ pub extern "C" fn EN_setlinkvalue(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
+/// `start_node` must be a valid non-null pointer to a NUL-terminated C string.
+/// `end_node` must be a valid non-null pointer to a NUL-terminated C string.
+/// `out_index` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_addlink(
+pub unsafe extern "C" fn EN_addlink(
     ph: *mut Project,
     id: *const c_char,
     link_type: c_int,
@@ -634,8 +689,12 @@ pub extern "C" fn EN_addlink(
     }
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_index` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getheadcurveindex(
+pub unsafe extern "C" fn EN_getheadcurveindex(
     ph: *mut Project,
     index: c_int,
     out_index: *mut c_int,
@@ -653,9 +712,10 @@ pub extern "C" fn EN_getheadcurveindex(
     match &link.link_type {
         LinkType::Pump(pump) => {
             if let Some(head_curve_id) = &pump.head_curve_id
-                && let Some(index) = simulation.network.curve_map.get(head_curve_id) {
-                    unsafe { *out_index = (*index + 1) as c_int };
-                }
+                && let Some(index) = simulation.network.curve_map.get(head_curve_id)
+            {
+                unsafe { *out_index = (*index + 1) as c_int };
+            }
         }
         _ => return ErrorCode::UndefinedPump,
     }
@@ -663,8 +723,11 @@ pub extern "C" fn EN_getheadcurveindex(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setheadcurveindex(
+pub unsafe extern "C" fn EN_setheadcurveindex(
     ph: *mut Project,
     index: c_int,
     head_curve_index: c_int,

@@ -266,12 +266,13 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
     );
     for node in network.nodes.iter() {
         if let NodeType::Junction(junction) = &node.node_type
-            && junction.emitter_coefficient > 0.0 {
-                write_line(
-                    &mut buffer,
-                    &format!("{:<10} {:<12}", node.id, junction.emitter_coefficient),
-                );
-            }
+            && junction.emitter_coefficient > 0.0
+        {
+            write_line(
+                &mut buffer,
+                &format!("{:<10} {:<12}", node.id, junction.emitter_coefficient),
+            );
+        }
     }
 
     // write curves

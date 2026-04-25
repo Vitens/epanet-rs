@@ -8,8 +8,15 @@ use crate::model::options::DemandModel;
 
 use std::os::raw::{c_int, c_long};
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_settimeparam(ph: *mut Project, param: c_int, value: c_long) -> ErrorCode {
+pub unsafe extern "C" fn EN_settimeparam(
+    ph: *mut Project,
+    param: c_int,
+    value: c_long,
+) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     let time_options = &mut simulation.network.options.time_options;
@@ -68,8 +75,11 @@ pub extern "C" fn EN_settimeparam(ph: *mut Project, param: c_int, value: c_long)
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setdemandmodel(ph: *mut Project, demand_model: c_int) -> ErrorCode {
+pub unsafe extern "C" fn EN_setdemandmodel(ph: *mut Project, demand_model: c_int) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     let demand_model = match ENDemandModel::from_repr(demand_model) {
@@ -89,8 +99,15 @@ pub extern "C" fn EN_setdemandmodel(ph: *mut Project, demand_model: c_int) -> Er
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setoption(ph: *mut Project, option: c_int, _value: c_long) -> ErrorCode {
+pub unsafe extern "C" fn EN_setoption(
+    ph: *mut Project,
+    option: c_int,
+    _value: c_long,
+) -> ErrorCode {
     let _simulation = get_simulation_mut!(ph);
 
     let _option = match SimOption::from_repr(option) {

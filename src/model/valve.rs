@@ -62,9 +62,7 @@ impl LinkTrait for Valve {
                 LinkCoefficients::simple(g_inv, y)
             }
             // Pressure Breaking Valve (PBV)
-            ValveType::PBV => {
-                LinkCoefficients::simple(BIG_VALUE, setting * BIG_VALUE)
-            }
+            ValveType::PBV => LinkCoefficients::simple(BIG_VALUE, setting * BIG_VALUE),
             // Positional Control Valve (PCV)
             ValveType::PCV => {
                 let km = self.pcv_minor_loss(setting);
@@ -98,9 +96,7 @@ impl LinkTrait for Valve {
                     LinkCoefficients::simple(1.0 / SMALL_VALUE, q)
                 }
             }
-            ValveType::GPV => {
-                self.gpv_coefficients(q)
-            }
+            ValveType::GPV => self.gpv_coefficients(q),
         }
     }
     /// Return the resistance of the valve
@@ -308,10 +304,8 @@ impl Valve {
         }
 
         // Valve is partially open
-        let ratio = if self.valve_curve.is_some() {
+        let ratio = if let Some(curve) = &self.valve_curve {
             // Use the valve curve to compute the ratio
-            let curve = self.valve_curve.as_ref().unwrap();
-            // get intercept and slope of the curve at the setting
             let (h0, r) = curve.coefficients(setting);
             let ratio = h0 + r * setting;
             ratio / 100.0

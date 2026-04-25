@@ -9,8 +9,12 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_double, c_int};
 
 // Adds a new curve to the network.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_addcurve(ph: *mut Project, id: *const c_char) -> ErrorCode {
+pub unsafe extern "C" fn EN_addcurve(ph: *mut Project, id: *const c_char) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     let c_str = unsafe { CStr::from_ptr(id) };
@@ -35,8 +39,13 @@ pub extern "C" fn EN_addcurve(ph: *mut Project, id: *const c_char) -> ErrorCode 
 }
 
 /// Gets the index of a curve given its ID name.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
+/// `out_index` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getcurveindex(
+pub unsafe extern "C" fn EN_getcurveindex(
     ph: *mut Project,
     id: *const c_char,
     out_index: *mut c_int,
@@ -61,8 +70,16 @@ pub extern "C" fn EN_getcurveindex(
 }
 
 /// Gets the ID name of a curve given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_id` must point to a buffer large enough for the result string including NUL.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getcurveid(ph: *mut Project, index: c_int, out_id: *mut c_char) -> ErrorCode {
+pub unsafe extern "C" fn EN_getcurveid(
+    ph: *mut Project,
+    index: c_int,
+    out_id: *mut c_char,
+) -> ErrorCode {
     let simulation = get_simulation!(ph);
 
     // EPANET indexes from 1, so we need to subtract 1 from the index
@@ -83,8 +100,16 @@ pub extern "C" fn EN_getcurveid(ph: *mut Project, index: c_int, out_id: *mut c_c
 }
 
 /// Sets the ID name of a curve given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setcurveid(ph: *mut Project, index: c_int, id: *const c_char) -> ErrorCode {
+pub unsafe extern "C" fn EN_setcurveid(
+    ph: *mut Project,
+    index: c_int,
+    id: *const c_char,
+) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     let c_str = unsafe { CStr::from_ptr(id) };
@@ -122,8 +147,12 @@ pub extern "C" fn EN_setcurveid(ph: *mut Project, index: c_int, id: *const c_cha
 }
 
 // Get the length of a curve given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_count` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getcurvelen(
+pub unsafe extern "C" fn EN_getcurvelen(
     ph: *mut Project,
     index: c_int,
     out_count: *mut c_int,
@@ -146,8 +175,13 @@ pub extern "C" fn EN_getcurvelen(
 }
 
 // Retrieve the value of a single point on a curve
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_x` must be a valid non-null writable pointer.
+/// `out_y` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getcurvevalue(
+pub unsafe extern "C" fn EN_getcurvevalue(
     ph: *mut Project,
     index: c_int,
     point_index: c_int,
@@ -180,8 +214,14 @@ pub extern "C" fn EN_getcurvevalue(
 }
 
 // Retrieve all of a curve's points
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_x` must be a valid non-null writable pointer.
+/// `out_y` must be a valid non-null writable pointer.
+/// `out_n_points` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getcurve(
+pub unsafe extern "C" fn EN_getcurve(
     ph: *mut Project,
     index: c_int,
     out_n_points: *mut c_int,
@@ -209,8 +249,13 @@ pub extern "C" fn EN_getcurve(
 }
 
 // Sets the values of a curve given its index.
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `x` must point to at least `count` readable `c_double` values.
+/// `y` must point to at least `count` readable `c_double` values.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setcurve(
+pub unsafe extern "C" fn EN_setcurve(
     ph: *mut Project,
     index: c_int,
     x: *const c_double,

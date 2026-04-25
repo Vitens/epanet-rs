@@ -33,9 +33,10 @@ impl Node {
     }
     pub fn head_pattern(&self) -> Option<&str> {
         if let NodeType::Reservoir(reservoir) = &self.node_type
-            && reservoir.head_pattern.is_some() {
-                return Some(reservoir.head_pattern.as_ref().unwrap());
-            }
+            && reservoir.head_pattern.is_some()
+        {
+            return Some(reservoir.head_pattern.as_ref().unwrap());
+        }
         None
     }
     pub fn initial_head(&self) -> f64 {

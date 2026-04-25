@@ -13,14 +13,15 @@ impl HydraulicSolver {
     // Assemble the Jacobian matrix and the right-hand side vector for the system of equations
     // First assemble the contributions from the links
     // Then assemble the contributions from the emitters (virtual links)
+    #[allow(clippy::too_many_arguments)]
     pub fn assemble_jacobian(
         &self,
         network: &Network,
         state: &mut SolverState,
-        values: &mut Vec<f64>,
-        rhs: &mut Vec<f64>,
+        values: &mut [f64],
+        rhs: &mut [f64],
         link_coefficients: &mut ResistanceCoefficients,
-        excess_flows: &Vec<f64>,
+        excess_flows: &[f64],
         grounded_nodes: &[bool],
     ) {
         // assemble the contributions from the links
@@ -43,16 +44,15 @@ impl HydraulicSolver {
     /// conductance (SMALL_VALUE) to the diagonal. This effectively pins the head
     /// at 0, equivalent to a direct connection to a reservoir, making the matrix
     /// non-singular for disconnected or ill-conditioned sub-networks.
-    fn grounded_node_contributions(&self, values: &mut Vec<f64>, grounded_nodes: &[bool]) {
+    fn grounded_node_contributions(&self, values: &mut [f64], grounded_nodes: &[bool]) {
         for (i, &grounded) in grounded_nodes.iter().enumerate() {
-            if grounded
-                && let Some(row) = self.node_rows[i] {
-                    values[row] += SMALL_VALUE;
-                }
+            if grounded && let Some(row) = self.node_rows[i] {
+                values[row] += SMALL_VALUE;
+            }
         }
     }
 
-    fn node_contributions(&self, network: &Network, state: &mut SolverState, rhs: &mut Vec<f64>) {
+    fn node_contributions(&self, network: &Network, state: &mut SolverState, rhs: &mut [f64]) {
         for (i, node) in network.nodes.iter().enumerate() {
             if let NodeType::Junction(_) = &node.node_type {
                 let idx = self.node_to_unknown[i].unwrap();
@@ -69,10 +69,10 @@ impl HydraulicSolver {
         &self,
         network: &Network,
         state: &mut SolverState,
-        values: &mut Vec<f64>,
-        rhs: &mut Vec<f64>,
+        values: &mut [f64],
+        rhs: &mut [f64],
         link_coefficients: &mut ResistanceCoefficients,
-        excess_flows: &Vec<f64>,
+        excess_flows: &[f64],
     ) {
         // iterate over the links
         for (i, link) in network.links.iter().enumerate() {
@@ -134,27 +134,26 @@ impl HydraulicSolver {
         &self,
         network: &Network,
         state: &mut SolverState,
-        values: &mut Vec<f64>,
-        rhs: &mut Vec<f64>,
+        values: &mut [f64],
+        rhs: &mut [f64],
     ) {
         // iterate over emitters
         for (i, node) in network.nodes.iter().enumerate() {
             if let NodeType::Junction(junction) = &node.node_type
-                && junction.emitter_coefficient > 0.0 {
-                    // get the index for the diagonal entry in the Jacobian matrix
-                    let row = self.node_rows[i].unwrap();
-                    // get the index for the unknown node in the RHS vector
-                    let idx = self.node_to_unknown[i].unwrap();
+                && junction.emitter_coefficient > 0.0
+            {
+                // get the index for the diagonal entry in the Jacobian matrix
+                let row = self.node_rows[i].unwrap();
+                // get the index for the unknown node in the RHS vector
+                let idx = self.node_to_unknown[i].unwrap();
 
-                    let (g_inv, y) = junction.emitter_coefficients(
-                        state.emitter_flows[i],
-                        network.options.emitter_exponent,
-                    );
-                    // update RHS
-                    rhs[idx] += (y + node.elevation) * g_inv - state.emitter_flows[i];
-                    // update matrix diagonal
-                    values[row] += g_inv;
-                }
+                let (g_inv, y) = junction
+                    .emitter_coefficients(state.emitter_flows[i], network.options.emitter_exponent);
+                // update RHS
+                rhs[idx] += (y + node.elevation) * g_inv - state.emitter_flows[i];
+                // update matrix diagonal
+                values[row] += g_inv;
+            }
         }
     }
 
@@ -162,8 +161,8 @@ impl HydraulicSolver {
         &self,
         network: &Network,
         state: &mut SolverState,
-        values: &mut Vec<f64>,
-        rhs: &mut Vec<f64>,
+        values: &mut [f64],
+        rhs: &mut [f64],
     ) {
         let options = &network.options;
 
