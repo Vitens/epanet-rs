@@ -283,3 +283,23 @@ fn test_pump_speed_cv_network() {
         &expected_flows,
     );
 }
+
+#[test]
+// Bug with tankmodel.inp
+fn test_solve_tankmodel_network() {
+  let mut simulation =
+        Simulation::from_file("tests/tankmodel.inp").expect("Failed to create simulation");
+    let result = simulation
+        .solve_hydraulics(false)
+        .expect("Failed to solve hydraulics");
+
+    let expected_heads: Vec<(&str, f64)> = vec![("Tank", 133.17), ("N1", 133.13), ("N2", 133.12)];
+    let expected_flows: Vec<(&str, f64)> = vec![("P1", 90.00), ("P2", 50.00)];
+    verify_heads_and_flows(
+        &simulation.network,
+        &result,
+        &expected_heads,
+        &expected_flows,
+    );
+}
+
