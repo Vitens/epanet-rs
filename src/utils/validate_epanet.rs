@@ -2,6 +2,7 @@
 
 use std::env;
 
+use std::cmp::Ordering;
 use std::process::Command;
 use std::process::Stdio;
 
@@ -10,7 +11,13 @@ use simplelog::{error, info, warn};
 use crate::simulation::Simulation;
 use crate::utils::binfile::read_outfile;
 
-pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bool) -> bool {
+pub fn validate_with_epanet(
+    input_file: &str,
+    rtol: f64,
+    atol: f64,
+    max_mismatches: usize,
+    parallel: bool,
+) -> bool {
     info!("Loading network from file: {}", input_file);
     info!(
         "Using tolerance: rtol={} ({}%), atol={}",
@@ -71,9 +78,9 @@ pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bo
 
     let epanet_results = read_outfile(temp_file_str);
 
-    let mut head_mismatches = 0;
-    let mut flow_mismatches = 0;
-    let mut demand_mismatches = 0;
+    let mut head_mismatches = Vec::new();
+    let mut flow_mismatches = Vec::new();
+    let mut demand_mismatches = Vec::new();
 
     // compare the heads
     for i in 0..rs_result.heads.len() {
@@ -84,20 +91,16 @@ pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bo
                 rtol,
                 atol,
             ) {
-                if head_mismatches < 5 {
-                    let diff = (rs_result.heads[i][j] - epanet_results.heads[i][j]).abs();
-                    let allowed = atol + rtol * epanet_results.heads[i][j].abs();
-                    warn!(
-                        "Head mismatch at node '{}' in period {} (RS vs EPA): {} vs {} (diff: {:.4}, allowed: {:.4})",
-                        epanet_results.node_ids[j],
-                        i,
-                        rs_result.heads[i][j],
-                        epanet_results.heads[i][j],
-                        diff,
-                        allowed
-                    );
-                }
-                head_mismatches += 1;
+                let diff = (rs_result.heads[i][j] - epanet_results.heads[i][j]).abs();
+                let allowed = atol + rtol * epanet_results.heads[i][j].abs();
+                head_mismatches.push(ValidationMismatch {
+                    id: &epanet_results.node_ids[j],
+                    period: i,
+                    rs_value: rs_result.heads[i][j],
+                    epanet_value: epanet_results.heads[i][j],
+                    diff,
+                    allowed,
+                });
             }
         }
     }
@@ -113,18 +116,14 @@ pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bo
             ) {
                 let diff = (rs_result.flows[i][j] - epanet_results.flows[i][j]).abs();
                 let allowed = atol + rtol * epanet_results.flows[i][j].abs();
-                if flow_mismatches < 5 {
-                    warn!(
-                        "Flow mismatch at link '{}' in period {} (RS vs EPA): {} vs {} (diff: {:.4}, allowed: {:.4})",
-                        epanet_results.link_ids[j],
-                        i,
-                        rs_result.flows[i][j],
-                        epanet_results.flows[i][j],
-                        diff,
-                        allowed
-                    );
-                }
-                flow_mismatches += 1;
+                flow_mismatches.push(ValidationMismatch {
+                    id: &epanet_results.link_ids[j],
+                    period: i,
+                    rs_value: rs_result.flows[i][j],
+                    epanet_value: epanet_results.flows[i][j],
+                    diff,
+                    allowed,
+                });
             }
         }
     }
@@ -144,31 +143,65 @@ pub fn validate_with_epanet(input_file: &str, rtol: f64, atol: f64, parallel: bo
                 }
                 let diff = (rs_result.demands[i][j] - epanet_results.demands[i][j]).abs();
                 let allowed = atol + rtol * epanet_results.demands[i][j].abs();
-                if demand_mismatches < 5 {
-                    warn!(
-                        "Demand mismatch at node '{}' in period {} (RS vs EPA): {} vs {} (diff: {:.4}, allowed: {:.4})",
-                        epanet_results.node_ids[j],
-                        i,
-                        rs_result.demands[i][j],
-                        epanet_results.demands[i][j],
-                        diff,
-                        allowed
-                    );
-                }
-                demand_mismatches += 1;
+                demand_mismatches.push(ValidationMismatch {
+                    id: &epanet_results.node_ids[j],
+                    period: i,
+                    rs_value: rs_result.demands[i][j],
+                    epanet_value: epanet_results.demands[i][j],
+                    diff,
+                    allowed,
+                });
             }
         }
     }
 
-    if head_mismatches > 0 || flow_mismatches > 0 || demand_mismatches > 0 {
+    log_top_mismatches("Head", "node", &mut head_mismatches, max_mismatches);
+    log_top_mismatches("Flow", "link", &mut flow_mismatches, max_mismatches);
+    log_top_mismatches("Demand", "node", &mut demand_mismatches, max_mismatches);
+
+    if !head_mismatches.is_empty() || !flow_mismatches.is_empty() || !demand_mismatches.is_empty() {
         error!(
             "Validation <on-red><b> FAILED </> : {} head mismatches, {} flow mismatches, {} demand mismatches",
-            head_mismatches, flow_mismatches, demand_mismatches
+            head_mismatches.len(),
+            flow_mismatches.len(),
+            demand_mismatches.len()
         );
         false
     } else {
         info!("Validation <on-green><b> PASSED! </>");
         true
+    }
+}
+
+struct ValidationMismatch<'a> {
+    id: &'a str,
+    period: usize,
+    rs_value: f64,
+    epanet_value: f64,
+    diff: f64,
+    allowed: f64,
+}
+
+fn log_top_mismatches(
+    mismatch_type: &str,
+    entity_type: &str,
+    mismatches: &mut [ValidationMismatch],
+    max_mismatches: usize,
+) {
+    mismatches.sort_by(|a, b| b.diff.partial_cmp(&a.diff).unwrap_or(Ordering::Equal));
+
+    for mismatch_item in mismatches.iter().take(max_mismatches) {
+        warn!(
+            "{} mismatch at {} '{}' in period {} (RS vs EPA): {} vs {} (diff: {:.4}, allowed: {:.4})",
+            mismatch_type,
+            entity_type,
+            mismatch_item.id,
+            mismatch_item.period,
+            mismatch_item.rs_value,
+            mismatch_item.epanet_value,
+            mismatch_item.diff,
+            mismatch_item.allowed
+        );
     }
 }
 

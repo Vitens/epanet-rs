@@ -72,6 +72,9 @@ enum Commands {
         /// Run in parallel
         #[arg(short = 'P', long, default_value = "false")]
         parallel: bool,
+        /// Maximum number of mismatches to log (default: 5)
+        #[arg(short, long, default_value = "5")]
+        max_mismatches: usize,
     },
 }
 
@@ -135,8 +138,9 @@ fn main() -> Result<(), String> {
             rtol,
             atol,
             parallel,
+            max_mismatches,
         } => {
-            if validate_network(&input_file, rtol, atol, parallel) {
+            if validate_with_epanet(&input_file, rtol, atol, max_mismatches, parallel) {
                 Ok(())
             } else {
                 Err("Validation failed".to_string())
@@ -256,9 +260,4 @@ fn convert_network(input_file: &str, output_file: &str) {
 
     let end_time = Instant::now();
     info!("Network saved in {:?}", end_time.duration_since(load_time));
-}
-
-/// Validate a network file against EPANET results
-fn validate_network(input_file: &str, rtol: f64, atol: f64, parallel: bool) -> bool {
-    validate_with_epanet(input_file, rtol, atol, parallel)
 }
