@@ -30,8 +30,8 @@ pub fn parse_time_str(time_str: &str, unit_or_suffix: Option<&str>) -> Result<us
 
         if let Some(suffix) = unit_or_suffix {
             match suffix.to_uppercase().as_str() {
-                "AM" => hour24 = hours % 12,          // 12 AM → 0
-                "PM" => hour24 = (hours % 12) + 12,   // 12 PM → 12
+                "AM" => hour24 = hours % 12,        // 12 AM → 0
+                "PM" => hour24 = (hours % 12) + 12, // 12 PM → 12
                 _ => {}
             }
         }
@@ -55,7 +55,7 @@ pub fn parse_time_str(time_str: &str, unit_or_suffix: Option<&str>) -> Result<us
             "MINUTE" | "MIN" => (value * 60.0) as usize,
             "SECOND" | "SEC" => value as usize,
             "DAY" => (value * 86_400.0) as usize,
-            "AM" => ((value as usize % 12)) * 3600,
+            "AM" => (value as usize % 12) * 3600,
             "PM" => (((value as usize) % 12) + 12) * 3600,
             _ => return Err(InputError::new(format!("Invalid time unit: {}", unit))),
         };
@@ -78,9 +78,18 @@ mod tests {
     fn test_hhmm_am_pm() {
         assert_eq!(parse_time_str("12:00", Some("AM")).unwrap(), 0);
         assert_eq!(parse_time_str("12:00", Some("PM")).unwrap(), 12 * 3600);
-        assert_eq!(parse_time_str("1:30", Some("AM")).unwrap(), 1 * 3600 + 30 * 60);
-        assert_eq!(parse_time_str("1:30", Some("PM")).unwrap(), 13 * 3600 + 30 * 60);
-        assert_eq!(parse_time_str("11:59", Some("PM")).unwrap(), 23 * 3600 + 59 * 60);
+        assert_eq!(
+            parse_time_str("1:30", Some("AM")).unwrap(),
+            1 * 3600 + 30 * 60
+        );
+        assert_eq!(
+            parse_time_str("1:30", Some("PM")).unwrap(),
+            13 * 3600 + 30 * 60
+        );
+        assert_eq!(
+            parse_time_str("11:59", Some("PM")).unwrap(),
+            23 * 3600 + 59 * 60
+        );
     }
 
     #[test]
