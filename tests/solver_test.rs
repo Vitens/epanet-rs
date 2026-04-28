@@ -287,7 +287,7 @@ fn test_pump_speed_cv_network() {
 #[test]
 // Bug with tankmodel.inp
 fn test_solve_tankmodel_network() {
-  let mut simulation =
+    let mut simulation =
         Simulation::from_file("tests/tankmodel.inp").expect("Failed to create simulation");
     let result = simulation
         .solve_hydraulics(false)
@@ -302,4 +302,3 @@ fn test_solve_tankmodel_network() {
         &expected_flows,
     );
 }
-
