@@ -162,16 +162,14 @@ pub unsafe extern "C" fn EN_setpatternid(
     // update all nodes that point to the old pattern id to point to the new pattern id
     for node in simulation.network.nodes.iter_mut() {
         match &mut node.node_type {
-            NodeType::Junction(junction) => {
-                if junction.pattern.as_deref() == Some(&old_pattern_id) {
+            NodeType::Junction(junction)
+                if junction.pattern.as_deref() == Some(&old_pattern_id) => {
                     junction.pattern = Some(new_pattern_id.into());
                 }
-            }
-            NodeType::Reservoir(reservoir) => {
-                if reservoir.head_pattern.as_deref() == Some(&old_pattern_id) {
+            NodeType::Reservoir(reservoir)
+                if reservoir.head_pattern.as_deref() == Some(&old_pattern_id) => {
                     reservoir.head_pattern = Some(new_pattern_id.into());
                 }
-            }
             _ => {}
         }
     }
