@@ -1,0 +1,128 @@
+[TITLE]
+Scenario: Base 
+Date: 30/01/2025 14:37:11 
+
+[JUNCTIONS]
+;ID              	Elev        	
+N1              115           	
+N2           	117           	
+
+[RESERVOIRS]
+;ID              	Head        	Pattern         
+
+[TANKS]
+;ID              	Elevation   	InitLevel   	MinLevel    	MaxLevel    	Diameter    	MinVol      	VolCurve        	Overflow
+ Tank            	125         	10           	0           	15          	15          	0.00283168463686774	                	;
+
+[PIPES]
+;ID              	Node1           	Node2           	Length      	Diameter    	Roughness   	MinorLoss   	Status
+ P1           	    Tank          	    N1             	    1	            200	            130         	0           	Open  	;
+ P2            	    N1             	    N2            	    1	            200	            130         	0           	Open  	;
+ 
+[PUMPS]
+;ID              	Node1           	Node2           	Parameters
+
+[VALVES]
+;ID              	Node1           	Node2           	Diameter    	Type	Setting     	MinorLoss   
+
+[TAGS]
+
+[DEMANDS]
+;Junction        	Demand      	Pattern         	Category
+N1            	    40 	  	;          
+ N2             	50 	  	;               
+
+
+[STATUS]
+;Id	Status
+
+[CURVES]
+;Id	X	Y
+
+[PATTERNS]
+;Id	Multiplier
+constant	1
+
+[TIMES]
+ Duration           	1:00 
+ Hydraulic Timestep 	0:15 
+ Quality Timestep   	0:00 
+ Pattern Timestep   	0:15 
+ Pattern Start      	0:00 
+ Report Timestep    	0:15 
+ Report Start       	0:00 
+ Start ClockTime    	12 am
+ Statistic          	NONE
+
+[REPORT]
+ Status             	No
+ Summary            	No
+ Page               	0
+ Nodes                  All
+ Links                  All
+
+[OPTIONS]
+ Units              	LPS
+ Headloss           	H-W
+ Specific Gravity   	1.00
+ Viscosity          	1
+ Trials             	40
+ Accuracy           	0.001
+ CHECKFREQ          	2
+ MAXCHECK           	10
+ DAMPLIMIT          	0
+ Unbalanced         	Continue 10
+ Pattern            	1
+ Demand Multiplier  	1.0
+ Demand Model       	PDA
+ Minimum Pressure   	0
+ Required Pressure  	0.1
+ Pressure Exponent  	0.5
+ Emitter Exponent   	0.5
+ Quality            	Chemical mg/L
+ Diffusivity        	1
+ Tolerance          	0.01
+[ENERGY]
+ Global Efficiency  	75
+ Global Price       	0
+ Demand Charge      	0
+
+[EMITTERS]
+;Junction        	Coefficient
+[QUALITY]
+;Node            	InitQual
+ Tank            	1
+
+[SOURCES]
+;Node            	Type        	Quality     	Pattern      	
+ Tank            	SETPOINT    	1           	
+
+[REACTIONS]
+;Type     	Pipe/Tank       	Coefficient
+Global Bulk	-0.5
+Global Wall	-1
+
+[BACKDROP]
+Units	NONE
+
+[REACTIONS]
+ Order Bulk            	1
+ Order Tank            	1
+ Order Wall            	1
+ Global Bulk           	-0.5
+ Global Wall           	-1
+ Limiting Potential    	0
+ Roughness Correlation 	0
+
+[MIXING]
+;Tank            	Model
+[COORDINATES]
+;Node            	X-Coord           	Y-Coord
+Tank           	    0                   0
+N1            	    1        	        0      
+N2          	    2        	        0     
+
+[VERTICES]
+;link	X-coord	Y-coord
+
+[END]

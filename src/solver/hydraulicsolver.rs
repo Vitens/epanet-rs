@@ -406,6 +406,9 @@ impl HydraulicSolver {
                 if dq.abs() > stats.max_dq {
                     stats.max_dq = dq.abs();
                 }
+            } else {
+                // preserve demands for tanks and reservoirs
+                state.demand_flows[i] = state.demands[i];
             }
         }
     }
