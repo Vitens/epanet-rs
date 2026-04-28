@@ -9,8 +9,12 @@ use std::os::raw::{c_char, c_double, c_int};
 use crate::model::network::modify::PatternData;
 use crate::model::node::NodeType;
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_addpattern(ph: *mut Project, id: *const c_char) -> ErrorCode {
+pub unsafe extern "C" fn EN_addpattern(ph: *mut Project, id: *const c_char) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     let c_str = unsafe { CStr::from_ptr(id) };
@@ -35,8 +39,11 @@ pub extern "C" fn EN_addpattern(ph: *mut Project, id: *const c_char) -> ErrorCod
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_deletepattern(ph: *mut Project, index: c_int) -> ErrorCode {
+pub unsafe extern "C" fn EN_deletepattern(ph: *mut Project, index: c_int) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     let pattern_id = match simulation.network.patterns.get((index - 1) as usize) {
@@ -55,8 +62,12 @@ pub extern "C" fn EN_deletepattern(ph: *mut Project, index: c_int) -> ErrorCode 
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_value` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getaveragepatternvalue(
+pub unsafe extern "C" fn EN_getaveragepatternvalue(
     ph: *mut Project,
     index: c_int,
     out_value: *mut c_double,
@@ -77,8 +88,12 @@ pub extern "C" fn EN_getaveragepatternvalue(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_id` must point to a buffer large enough for the result string including NUL.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getpatternid(
+pub unsafe extern "C" fn EN_getpatternid(
     ph: *mut Project,
     index: c_int,
     out_id: *mut c_char,
@@ -101,8 +116,16 @@ pub extern "C" fn EN_getpatternid(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setpatternid(ph: *mut Project, index: c_int, id: *const c_char) -> ErrorCode {
+pub unsafe extern "C" fn EN_setpatternid(
+    ph: *mut Project,
+    index: c_int,
+    id: *const c_char,
+) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
     let index = (index - 1) as usize;
@@ -134,7 +157,7 @@ pub extern "C" fn EN_setpatternid(ph: *mut Project, index: c_int, id: *const c_c
     simulation
         .network
         .pattern_map
-        .insert(new_pattern_id.into(), index as usize);
+        .insert(new_pattern_id.into(), index);
 
     // update all nodes that point to the old pattern id to point to the new pattern id
     for node in simulation.network.nodes.iter_mut() {
@@ -156,8 +179,13 @@ pub extern "C" fn EN_setpatternid(ph: *mut Project, index: c_int, id: *const c_c
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `id` must be a valid non-null pointer to a NUL-terminated C string.
+/// `out_index` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getpatternindex(
+pub unsafe extern "C" fn EN_getpatternindex(
     ph: *mut Project,
     id: *const c_char,
     out_index: *mut c_int,
@@ -180,8 +208,12 @@ pub extern "C" fn EN_getpatternindex(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_count` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getpatternlen(
+pub unsafe extern "C" fn EN_getpatternlen(
     ph: *mut Project,
     index: c_int,
     out_count: *mut c_int,
@@ -199,8 +231,12 @@ pub extern "C" fn EN_getpatternlen(
     ErrorCode::Ok
 }
 
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_value` must be a valid non-null writable pointer.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getpatternvalue(
+pub unsafe extern "C" fn EN_getpatternvalue(
     ph: *mut Project,
     index: c_int,
     time: c_int,
@@ -222,8 +258,13 @@ pub extern "C" fn EN_getpatternvalue(
     ErrorCode::Ok
 }
 
+///
+/// # Safety
+///
+/// `ph` must be a valid project handle. `multipliers` must point to `count`
+/// readable `c_double` values.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_setpattern(
+pub unsafe extern "C" fn EN_setpattern(
     ph: *mut Project,
     index: c_int,
     multipliers: *const c_double,

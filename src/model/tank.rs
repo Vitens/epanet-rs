@@ -54,7 +54,7 @@ impl Tank {
             return (delta_volume / flow).ceil() as usize;
         }
 
-        return usize::MAX;
+        usize::MAX
     }
     /// calculate the time to fill or drain the tank given the current level and flow
     pub fn time_to_fill_or_drain(&self, current_level: Ft, flow: Cfs) -> usize {
@@ -62,9 +62,8 @@ impl Tank {
             return usize::MAX;
         }
 
-        return self
-            .time_to_reach_level(current_level, self.max_level, flow)
-            .min(self.time_to_reach_level(current_level, self.min_level, flow));
+        self.time_to_reach_level(current_level, self.max_level, flow)
+            .min(self.time_to_reach_level(current_level, self.min_level, flow))
     }
 
     pub fn volume_at_level(&self, level: Ft) -> Ft3 {
@@ -76,7 +75,7 @@ impl Tank {
         if self.volume_curve.is_some() {
             panic!("Tank volume curves not supported yet!");
         } else {
-            return level * PI * self.diameter * self.diameter / 4.0;
+            level * PI * self.diameter * self.diameter / 4.0
         }
     }
 
@@ -87,14 +86,14 @@ impl Tank {
         if self.volume_curve.is_some() {
             panic!("Tank volume curves not supported yet!");
         } else {
-            return self.min_level * PI * self.diameter * self.diameter / 4.0;
+            self.min_level * PI * self.diameter * self.diameter / 4.0
         }
     }
     pub fn max_volume(&self) -> Ft3 {
         if self.volume_curve.is_some() {
             panic!("Tank volume curves not supported yet!");
         } else {
-            return self.max_level * PI * self.diameter * self.diameter / 4.0;
+            self.max_level * PI * self.diameter * self.diameter / 4.0
         }
     }
 
@@ -111,29 +110,29 @@ impl Tank {
             level = new_level.clamp(self.min_level, self.max_level);
         }
 
-        return self.elevation + level;
+        self.elevation + level
     }
 }
 
 impl UnitConversion for Tank {
     fn convert_to_standard(&mut self, options: &SimulationOptions) {
         // convert the elevation to feet
-        self.elevation = self.elevation / options.unit_system.per_feet();
+        self.elevation /= options.unit_system.per_feet();
         // convert the initial level, min level, max level, diameter, min volume
-        self.initial_level = self.initial_level / options.unit_system.per_feet();
-        self.min_level = self.min_level / options.unit_system.per_feet();
-        self.max_level = self.max_level / options.unit_system.per_feet();
-        self.diameter = self.diameter / options.unit_system.per_feet();
-        self.min_volume = self.min_volume / options.unit_system.per_cubic_feet();
+        self.initial_level /= options.unit_system.per_feet();
+        self.min_level /= options.unit_system.per_feet();
+        self.max_level /= options.unit_system.per_feet();
+        self.diameter /= options.unit_system.per_feet();
+        self.min_volume /= options.unit_system.per_cubic_feet();
     }
     fn convert_from_standard(&mut self, options: &SimulationOptions) {
-        self.elevation = self.elevation * options.unit_system.per_feet();
+        self.elevation *= options.unit_system.per_feet();
         // convert the initial level, min level, max level, diameter, min volume
-        self.initial_level = self.initial_level * options.unit_system.per_feet();
-        self.min_level = self.min_level * options.unit_system.per_feet();
-        self.max_level = self.max_level * options.unit_system.per_feet();
-        self.diameter = self.diameter * options.unit_system.per_feet();
-        self.min_volume = self.min_volume * options.unit_system.per_cubic_feet();
+        self.initial_level *= options.unit_system.per_feet();
+        self.min_level *= options.unit_system.per_feet();
+        self.max_level *= options.unit_system.per_feet();
+        self.diameter *= options.unit_system.per_feet();
+        self.min_volume *= options.unit_system.per_cubic_feet();
     }
 }
 

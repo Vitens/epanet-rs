@@ -9,8 +9,16 @@ use crate::model::node::NodeType;
 use std::os::raw::{c_char, c_int};
 
 /// Retrieves the number of objects of a given type in a project.
+///
+/// # Safety
+///
+/// `out_count` must be a valid, non-null pointer to writable memory for one `c_int`.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_getcount(ph: *mut Project, object: c_int, out_count: *mut c_int) -> ErrorCode {
+pub unsafe extern "C" fn EN_getcount(
+    ph: *mut Project,
+    object: c_int,
+    out_count: *mut c_int,
+) -> ErrorCode {
     let simulation = get_simulation!(ph);
 
     let count_type = match CountType::from_repr(object) {
@@ -40,8 +48,16 @@ pub extern "C" fn EN_getcount(ph: *mut Project, object: c_int, out_count: *mut c
 /// Retrieves the text of an error message given its error code.
 ///
 /// Writes up to `maxLen` bytes (including the null terminator) into `errmsg`.
+///
+/// # Safety
+///
+/// `errmsg` must be a valid pointer to a buffer of at least `max_len` bytes.
 #[unsafe(no_mangle)]
-pub extern "C" fn EN_geterror(errcode: c_int, errmsg: *mut c_char, max_len: c_int) -> ErrorCode {
+pub unsafe extern "C" fn EN_geterror(
+    errcode: c_int,
+    errmsg: *mut c_char,
+    max_len: c_int,
+) -> ErrorCode {
     if errmsg.is_null() || max_len <= 0 {
         return ErrorCode::InvalidFormat;
     }

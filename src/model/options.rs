@@ -134,11 +134,11 @@ impl SimulationOptions {
 // unit conversion methods for simulationoptions
 impl SimulationOptions {
     pub fn convert_to_standard(&mut self) {
-        self.minimum_pressure = self.minimum_pressure / self.pressure_units.per_feet();
-        self.required_pressure = self.required_pressure / self.pressure_units.per_feet();
+        self.minimum_pressure /= self.pressure_units.per_feet();
+        self.required_pressure /= self.pressure_units.per_feet();
     }
     pub fn convert_from_standard(&mut self) {
-        self.minimum_pressure = self.minimum_pressure * self.pressure_units.per_feet();
-        self.required_pressure = self.required_pressure * self.pressure_units.per_feet();
+        self.minimum_pressure *= self.pressure_units.per_feet();
+        self.required_pressure *= self.pressure_units.per_feet();
     }
 }

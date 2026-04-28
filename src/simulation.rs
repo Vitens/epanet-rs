@@ -61,8 +61,11 @@ impl Simulation {
     }
     /// Creates a new simulation with the given network and options.
     pub fn init(flow_units: FlowUnits, headloss_formula: HeadlossFormula) -> Self {
-        let mut network = Network::default();
-        network.options = SimulationOptions::new(flow_units, headloss_formula);
+        let network = Network {
+            options: SimulationOptions::new(flow_units, headloss_formula),
+            ..Network::default()
+        };
+
         Self::new(network)
     }
 
@@ -133,7 +136,7 @@ impl Simulation {
         }
         let remaining = duration - self.time;
         let timestep =
-            Self::calculate_time_step(&self.network, &state, self.time, self.skip_timesteps)
+            Self::calculate_time_step(&self.network, state, self.time, self.skip_timesteps)
                 .min(remaining);
         state.update_tanks(&self.network, timestep);
         self.time += timestep;

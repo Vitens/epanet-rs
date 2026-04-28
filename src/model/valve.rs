@@ -59,48 +59,44 @@ impl LinkTrait for Valve {
                 // Minor loss coefficient is the setting of the valve
                 let km = 0.02517 * setting / self.diameter.powi(4);
                 let (g_inv, y) = self.valve_coefficients(q, km);
-                return LinkCoefficients::simple(g_inv, y);
+                LinkCoefficients::simple(g_inv, y)
             }
             // Pressure Breaking Valve (PBV)
-            ValveType::PBV => {
-                return LinkCoefficients::simple(BIG_VALUE, setting * BIG_VALUE);
-            }
+            ValveType::PBV => LinkCoefficients::simple(BIG_VALUE, setting * BIG_VALUE),
             // Positional Control Valve (PCV)
             ValveType::PCV => {
                 let km = self.pcv_minor_loss(setting);
                 let (g_inv, y) = self.valve_coefficients(q, km);
-                return LinkCoefficients::simple(g_inv, y);
+                LinkCoefficients::simple(g_inv, y)
             }
             // Flow Control Valve (FCV)
             ValveType::FCV => {
                 let (g_inv, y) = self.valve_coefficients(q, SMALL_VALUE);
                 // if flow is less than the setting, treat as a regular valve (no flow control/restrictions)
                 if q < setting {
-                    return LinkCoefficients::simple(g_inv, y);
+                    LinkCoefficients::simple(g_inv, y)
                 } else {
                     let hloss = y / g_inv + BIG_VALUE * (q - setting);
                     let hgrad = BIG_VALUE;
-                    return LinkCoefficients::simple(1.0 / hgrad, hloss / hgrad);
+                    LinkCoefficients::simple(1.0 / hgrad, hloss / hgrad)
                 }
             }
             // Pressure Reducing Valve (PRV)
             ValveType::PRV => {
                 if status == LinkStatus::Active {
-                    return self.prv_coefficients(setting, excess_flow_downstream);
+                    self.prv_coefficients(setting, excess_flow_downstream)
                 } else {
-                    return LinkCoefficients::simple(1.0 / SMALL_VALUE, q);
+                    LinkCoefficients::simple(1.0 / SMALL_VALUE, q)
                 }
             }
             ValveType::PSV => {
                 if status == LinkStatus::Active {
-                    return self.psv_coefficients(setting, excess_flow_upstream);
+                    self.psv_coefficients(setting, excess_flow_upstream)
                 } else {
-                    return LinkCoefficients::simple(1.0 / SMALL_VALUE, q);
+                    LinkCoefficients::simple(1.0 / SMALL_VALUE, q)
                 }
             }
-            ValveType::GPV => {
-                return self.gpv_coefficients(q);
-            }
+            ValveType::GPV => self.gpv_coefficients(q),
         }
     }
     /// Return the resistance of the valve
@@ -252,7 +248,7 @@ impl Valve {
         let (h0, r) = curve.coefficients(q_abs);
         let r = r.max(TINY);
 
-        return LinkCoefficients::simple(1.0 / r, (h0 / r + q_abs) * q.signum());
+        LinkCoefficients::simple(1.0 / r, (h0 / r + q_abs) * q.signum())
     }
 
     /// Compute the coefficients for pressure sustaining valve with a flow q and excess flow upstream
@@ -263,16 +259,16 @@ impl Valve {
             rhs_add += excess_flow_upstream;
         }
 
-        return LinkCoefficients {
+        LinkCoefficients {
             g_inv: 0.0,
             y: -excess_flow_upstream,
             new_status: None,
             upstream_modification: Some(NodeModification {
                 diagonal_add: BIG_VALUE,
-                rhs_add: rhs_add,
+                rhs_add,
             }),
             downstream_modification: None,
-        };
+        }
     }
 
     /// Compute the coefficients for pressure reducing valve with a flow q and excess flow downstream
@@ -282,16 +278,16 @@ impl Valve {
             rhs_add += excess_flow_downstream;
         }
 
-        return LinkCoefficients {
+        LinkCoefficients {
             g_inv: 0.0,
             y: excess_flow_downstream,
             new_status: None,
             upstream_modification: None,
             downstream_modification: Some(NodeModification {
                 diagonal_add: BIG_VALUE,
-                rhs_add: rhs_add,
+                rhs_add,
             }),
-        };
+        }
     }
 
     fn pcv_minor_loss(&self, setting: f64) -> f64 {
@@ -308,10 +304,8 @@ impl Valve {
         }
 
         // Valve is partially open
-        let ratio = if self.valve_curve.is_some() {
+        let ratio = if let Some(curve) = &self.valve_curve {
             // Use the valve curve to compute the ratio
-            let curve = self.valve_curve.as_ref().unwrap();
-            // get intercept and slope of the curve at the setting
             let (h0, r) = curve.coefficients(setting);
             let ratio = h0 + r * setting;
             ratio / 100.0
@@ -326,7 +320,7 @@ impl Valve {
         // convert the ratio to a minor loss coefficient
         let km = k_open / ratio.powi(2);
 
-        return km.min(BIG_VALUE);
+        km.min(BIG_VALUE)
     }
     /// Compute the coefficients for throttle control valve with a minor loss coefficient km and flow q
     fn valve_coefficients(&self, q: f64, km: f64) -> (f64, f64) {
@@ -338,10 +332,10 @@ impl Valve {
             if hgrad < RQ_TOL {
                 let hgrad = RQ_TOL;
                 let hloss = q * hgrad;
-                return (1.0 / hgrad, hloss / hgrad);
+                (1.0 / hgrad, hloss / hgrad)
             } else {
                 let hloss = q * hgrad / 2.0;
-                return (1.0 / hgrad, hloss / hgrad);
+                (1.0 / hgrad, hloss / hgrad)
             }
         }
         // if no minor loss coefficient, use a low resistance linear head loss relation
@@ -354,56 +348,56 @@ impl Valve {
 impl UnitConversion for Valve {
     fn convert_to_standard(&mut self, options: &SimulationOptions) {
         if options.unit_system == UnitSystem::US {
-            self.diameter = self.diameter / 12.0; // convert in to ft
+            self.diameter /= 12.0; // convert in to ft
             // convert valve setting from PSI to feet
             if self.valve_type == ValveType::PRV
                 || self.valve_type == ValveType::PSV
                 || self.valve_type == ValveType::PBV
             {
-                self.setting = self.setting / PSIperFT; // convert PSI to feet
+                self.setting /= PSIperFT; // convert PSI to feet
             }
         } else {
-            self.diameter = self.diameter / 1000.0; // convert mm to m
+            self.diameter /= 1000.0; // convert mm to m
         }
 
         // convert the diameter from the given unit system to feet
         self.diameter /= options.unit_system.per_feet();
         // convert valve setting from the given unit system to cfs
         if self.valve_type == ValveType::FCV {
-            self.setting = self.setting / options.flow_units.per_cfs();
+            self.setting /= options.flow_units.per_cfs();
         }
         // convert valve setting from the given unit system to feet
         if self.valve_type == ValveType::PRV
             || self.valve_type == ValveType::PSV
             || self.valve_type == ValveType::PBV
         {
-            self.setting = self.setting / options.unit_system.per_feet();
+            self.setting /= options.unit_system.per_feet();
         }
     }
     fn convert_from_standard(&mut self, options: &SimulationOptions) {
         if options.unit_system == UnitSystem::US {
-            self.diameter = self.diameter * 12.0; // convert ft to in
+            self.diameter *= 12.0; // convert ft to in
             if self.valve_type == ValveType::PRV
                 || self.valve_type == ValveType::PSV
                 || self.valve_type == ValveType::PBV
             {
-                self.setting = self.setting * PSIperFT; // convert feet to PSI
+                self.setting *= PSIperFT; // convert feet to PSI
             }
         } else {
-            self.diameter = self.diameter * 1000.0; // convert m to mm
+            self.diameter *= 1000.0; // convert m to mm
         }
         // convert the diameter from the given unit system to feet
         self.diameter *= options.unit_system.per_feet();
         // convert valve setting from the given unit system to cfs
         if self.valve_type == ValveType::FCV {
-            self.setting = self.setting * options.flow_units.per_cfs();
+            self.setting *= options.flow_units.per_cfs();
         }
         // convert valve setting from the given unit system to feet
         if self.valve_type == ValveType::PRV
             || self.valve_type == ValveType::PSV
             || self.valve_type == ValveType::PBV
         {
-            self.setting = self.setting * options.unit_system.per_feet();
+            self.setting *= options.unit_system.per_feet();
         }
     }
 }

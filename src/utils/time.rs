@@ -78,10 +78,7 @@ mod tests {
     fn test_hhmm_am_pm() {
         assert_eq!(parse_time_str("12:00", Some("AM")).unwrap(), 0);
         assert_eq!(parse_time_str("12:00", Some("PM")).unwrap(), 12 * 3600);
-        assert_eq!(
-            parse_time_str("1:30", Some("AM")).unwrap(),
-            1 * 3600 + 30 * 60
-        );
+        assert_eq!(parse_time_str("1:30", Some("AM")).unwrap(), 3600 + 30 * 60);
         assert_eq!(
             parse_time_str("1:30", Some("PM")).unwrap(),
             13 * 3600 + 30 * 60
@@ -110,7 +107,7 @@ mod tests {
     fn test_numeric_am_pm() {
         assert_eq!(parse_time_str("12", Some("AM")).unwrap(), 0);
         assert_eq!(parse_time_str("12", Some("PM")).unwrap(), 12 * 3600);
-        assert_eq!(parse_time_str("1", Some("AM")).unwrap(), 1 * 3600);
+        assert_eq!(parse_time_str("1", Some("AM")).unwrap(), 3600);
         assert_eq!(parse_time_str("1", Some("PM")).unwrap(), 13 * 3600);
     }
 

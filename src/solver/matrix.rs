@@ -47,7 +47,7 @@ pub fn find_csc_index(
 /// Build sparsity pattern
 pub fn build_sparsity_pattern(
     network: &Network,
-    node_to_unknown: &Vec<Option<usize>>,
+    node_to_unknown: &[Option<usize>],
 ) -> SymbolicSparseColMat<usize> {
     let n_unknowns = node_to_unknown.iter().filter(|&x| x.is_some()).count();
 
@@ -69,9 +69,8 @@ pub fn build_sparsity_pattern(
     }
     let sparsity_matrix =
         SparseColMat::try_new_from_triplets(n_unknowns, n_unknowns, &triplets).unwrap();
-    let symbolic = sparsity_matrix.symbolic().to_owned().unwrap();
 
-    symbolic
+    sparsity_matrix.symbolic().to_owned().unwrap()
 }
 
 /// Build global unknown-numbering map
@@ -97,7 +96,7 @@ pub fn build_unknown_numbering_map(network: &Network) -> Vec<Option<usize>> {
 pub fn map_links_to_csc_indices(
     network: &Network,
     sparsity_pattern: &SymbolicSparseColMat<usize>,
-    node_to_unknown: &Vec<Option<usize>>,
+    node_to_unknown: &[Option<usize>],
 ) -> Vec<CSCIndex> {
     let mut csc_indices = Vec::with_capacity(network.links.len());
     for link in network.links.iter() {
@@ -125,7 +124,7 @@ pub fn map_links_to_csc_indices(
 pub fn map_nodes_to_rows(
     network: &Network,
     sparsity_pattern: &SymbolicSparseColMat<usize>,
-    node_to_unknown: &Vec<Option<usize>>,
+    node_to_unknown: &[Option<usize>],
 ) -> Vec<Option<usize>> {
     let mut node_rows = Vec::with_capacity(network.nodes.len());
 
@@ -144,7 +143,7 @@ pub fn map_nodes_to_rows(
 /// Returns the forward permutation, used to map LLT errors back to the original unknowns
 pub fn compute_amd_permutation(
     sparsity_pattern: &SymbolicSparseColMat<usize>,
-    node_to_unknown: &Vec<Option<usize>>,
+    node_to_unknown: &[Option<usize>],
 ) -> Vec<usize> {
     let n_unknowns = node_to_unknown.iter().filter(|x| x.is_some()).count();
     let a_nnz = sparsity_pattern.as_ref().compute_nnz();

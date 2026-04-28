@@ -41,25 +41,20 @@ pub enum LinkType {
 }
 
 // Source: EPANET 2.3 types.h
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Deserialize, Serialize)]
+#[rustfmt::skip]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Deserialize, Serialize, Default)]
 pub enum LinkStatus {
     Xhead,       // pump cannot deliver head (closed)
     TempClosed,  // temporarily closed
     Closed,      // closed
-    Open,        // open
+    #[default]
+    Open,        // Open
     Active,      // valve active (partially open)
     Xflow,       // pump exceeds maximum flow
     XFCV,        // FCV cannot supply flow
     XPressure,   // valve cannot supply pressure
     FixedOpen,   // fixed open
     FixedClosed, // fixed closed
-}
-
-impl Default for LinkStatus {
-    // Default to open
-    fn default() -> Self {
-        LinkStatus::Open
-    }
 }
 
 impl std::fmt::Display for LinkStatus {
@@ -86,7 +81,7 @@ impl LinkStatus {
                 }
             }
             "ACTIVE" => Ok(LinkStatus::Active),
-            _ => return Err(InputError::new(format!("Invalid link status '{}'", status))),
+            _ => Err(InputError::new(format!("Invalid link status '{}'", status))),
         }
     }
 }
