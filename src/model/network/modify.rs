@@ -1265,14 +1265,16 @@ impl Network {
                 match &mut control.condition {
                     ControlCondition::HighPressure { node_index: ni, .. }
                     | ControlCondition::LowPressure { node_index: ni, .. }
-                        if *ni == last_index => {
-                            *ni = node_index;
-                        }
+                        if *ni == last_index =>
+                    {
+                        *ni = node_index;
+                    }
                     ControlCondition::HighLevel { tank_index, .. }
                     | ControlCondition::LowLevel { tank_index, .. }
-                        if *tank_index == last_index => {
-                            *tank_index = node_index;
-                        }
+                        if *tank_index == last_index =>
+                    {
+                        *tank_index = node_index;
+                    }
                     _ => {}
                 }
             }

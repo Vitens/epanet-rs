@@ -358,10 +358,7 @@ pub unsafe extern "C" fn EN_getnodevalue(
         },
 
         NodeProperty::CanOverflow => match &node.node_type {
-            NodeType::Tank(tank)
-                if tank.overflow => {
-                    1.0
-                }
+            NodeType::Tank(tank) if tank.overflow => 1.0,
             _ => 0.0,
         },
         NodeProperty::DemandDeficit => 0.0,

@@ -37,7 +37,7 @@ enum Commands {
     Run {
         /// Input file (EPANET .inp format)
         input_file: String,
-        /// Output file for results (.rpt format)
+        /// Output file for results (.json or .msgpack format)
         output_file: Option<String>,
         /// Run timesteps in parallel (experimental)
         #[arg(short, long)]

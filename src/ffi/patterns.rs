@@ -163,13 +163,15 @@ pub unsafe extern "C" fn EN_setpatternid(
     for node in simulation.network.nodes.iter_mut() {
         match &mut node.node_type {
             NodeType::Junction(junction)
-                if junction.pattern.as_deref() == Some(&old_pattern_id) => {
-                    junction.pattern = Some(new_pattern_id.into());
-                }
+                if junction.pattern.as_deref() == Some(&old_pattern_id) =>
+            {
+                junction.pattern = Some(new_pattern_id.into());
+            }
             NodeType::Reservoir(reservoir)
-                if reservoir.head_pattern.as_deref() == Some(&old_pattern_id) => {
-                    reservoir.head_pattern = Some(new_pattern_id.into());
-                }
+                if reservoir.head_pattern.as_deref() == Some(&old_pattern_id) =>
+            {
+                reservoir.head_pattern = Some(new_pattern_id.into());
+            }
             _ => {}
         }
     }
