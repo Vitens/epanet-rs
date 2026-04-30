@@ -17,7 +17,7 @@ use crate::model::pattern::Pattern;
 use crate::model::pipe::Pipe;
 use crate::model::pump::Pump;
 use crate::model::reservoir::Reservoir;
-use crate::model::rule::{Rule, RuleAction, RuleCondition};
+use crate::model::rule::*;
 use crate::model::tank::Tank;
 use crate::model::units::{FlowUnits, PressureUnits, UnitConversion, UnitSystem};
 use crate::model::valve::{Valve, ValveType};
@@ -1121,8 +1121,118 @@ impl Network {
         })
     }
 
-    fn read_rule_condition(&self, _line: &String) -> Result<RuleCondition, InputError> {
-        Err(InputError::new("test"))
+    fn read_rule_condition(&self, line: &str) -> Result<RuleCondition, InputError> {
+        // read a rule condition clause with format
+        // <object> <id?>  <attribute>  <relation>  <value>
+        let mut parts = line.split_whitespace();
+
+        let first = parts.next().ok_or_missing("Invalid rule condition")?;
+
+        let operator = match first {
+            "IF" => RuleConditionOperator::And,
+            "AND" => RuleConditionOperator::And,
+            "OR" => RuleConditionOperator::Or,
+            _ => return Err(InputError::new("Invalid rule operator")),
+        };
+
+        // get rule condition target
+        let target = parts.next().ok_or_missing("Invalid rule condition")?;
+
+        let target = match target {
+            "SYSTEM" => {
+                let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = match attribute {
+                    "DEMAND" => SystemAttribute::Demand,
+                    "TIME" => SystemAttribute::Time,
+                    "CLOCKTIME" => SystemAttribute::ClockTime,
+                    _ => return Err(InputError::new("Invalid rule condition")),
+                };
+                RuleConditionTarget::System { attribute }
+            }
+            "NODE" => {
+                let node_id = parts.next().ok_or_missing("Invalid rule condition")?;
+                let node_id = node_id.into();
+                let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = match attribute {
+                    "DEMAND" => NodeAttribute::Demand,
+                    "HEAD" => NodeAttribute::Head,
+                    "PRESSURE" => NodeAttribute::Pressure,
+                    _ => return Err(InputError::new("Invalid rule condition")),
+                };
+                RuleConditionTarget::Node {
+                    id: node_id,
+                    attribute,
+                }
+            }
+            "TANK" => {
+                let tank_id = parts.next().ok_or_missing("Invalid rule condition")?;
+                let tank_id = tank_id.into();
+                let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = match attribute {
+                    "LEVEL" => TankAttribute::Level,
+                    "FILLTIME" => TankAttribute::FillTime,
+                    "DRAINTIME" => TankAttribute::DrainTime,
+                    _ => return Err(InputError::new("Invalid rule condition")),
+                };
+                RuleConditionTarget::Tank {
+                    id: tank_id,
+                    attribute,
+                }
+            }
+            "LINK" => {
+                let link_id = parts.next().ok_or_missing("Invalid rule condition")?;
+                let link_id = link_id.into();
+                let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = match attribute {
+                    "FLOW" => LinkAttribute::Flow,
+                    "STATUS" => LinkAttribute::Status,
+                    "SETTING" => LinkAttribute::Setting,
+                    _ => return Err(InputError::new("Invalid rule condition")),
+                };
+                RuleConditionTarget::Link {
+                    id: link_id,
+                    attribute,
+                }
+            }
+            _ => return Err(InputError::new("Invalid rule condition target")),
+        };
+
+        let comparison = parts.next().ok_or_missing("Invalid rule condition")?;
+
+        let comparison_operator = match ComparisonOperator::from_str(comparison) {
+            Ok(comparison_operator) => comparison_operator,
+            Err(_) => {
+                return Err(InputError::new(format!(
+                    "Invalid rule condition comparison {}",
+                    comparison
+                )));
+            }
+        };
+
+        let value = parts.next().ok_or_missing("Invalid rule condition")?;
+
+        // convert value to ConditionValue
+        let condition_value = match value {
+            "OPEN" => ConditionValue::Status(LinkStatus::Open),
+            "CLOSED" => ConditionValue::Status(LinkStatus::Closed),
+            _ => {
+                if let Ok(value) = value.parse::<f64>() {
+                    ConditionValue::Number(value)
+                } else {
+                    return Err(InputError::new(format!(
+                        "Invalid rule condition value {}",
+                        value
+                    )));
+                }
+            }
+        };
+
+        Ok(RuleCondition {
+            operator,
+            target,
+            comparison: comparison_operator,
+            value: condition_value,
+        })
     }
 
     fn read_control(&mut self, line: &str) -> Result<(), InputError> {
