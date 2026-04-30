@@ -5,6 +5,7 @@ use hashbrown::{HashMap, HashSet};
 use crate::model::curve::Curve;
 use crate::model::link::{Link, LinkType};
 use crate::model::node::{Node, NodeType};
+use crate::model::rule::Rule;
 use crate::model::valve::ValveType;
 
 use crate::model::control::{Control, ControlCondition};
@@ -43,6 +44,9 @@ pub struct Network {
     /// Controls in the network
     pub controls: Vec<Control>,
 
+    /// Rules in the network
+    pub rules: Vec<Rule>,
+
     // Skip serialization of the node_map and link_map to avoid bloating the file size with unnecessary data.
     #[serde(skip)]
     pub node_map: HashMap<Box<str>, usize>,
@@ -52,6 +56,8 @@ pub struct Network {
     pub curve_map: HashMap<Box<str>, usize>,
     #[serde(skip)]
     pub pattern_map: HashMap<Box<str>, usize>,
+    #[serde(skip)]
+    pub rule_map: HashMap<Box<str>, usize>,
     #[serde(skip)]
     pub contains_pressure_control_valve: bool,
 
@@ -204,7 +210,7 @@ impl<'de> Deserialize<'de> for Network {
     }
 }
 
-/// Crate-private utility methods to add nodes and links
+/// Crate-private utility methods to add nodes, links and rules
 impl Network {
     pub(crate) fn add_node(&mut self, node: Node) -> Result<(), InputError> {
         if self.node_map.contains_key(&node.id) {
@@ -240,6 +246,17 @@ impl Network {
 
         // adding a link changes the sparsity pattern, so bump the topology version
         self.topology_version += 1;
+        Ok(())
+    }
+    pub(crate) fn add_rule(&mut self, rule: Rule) -> Result<(), InputError> {
+        if self.rule_map.contains_key(&rule.id) {
+            return Err(InputError::new(format!(
+                "Rule with id {} already exists",
+                rule.id
+            )));
+        }
+        self.rule_map.insert(rule.id.clone(), self.rules.len());
+        self.rules.push(rule);
         Ok(())
     }
 }

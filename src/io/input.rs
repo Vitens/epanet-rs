@@ -2,7 +2,7 @@
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::str::FromStr;
+use std::str::{FromStr, SplitWhitespace};
 
 use crate::constants::*;
 use crate::error::*;
@@ -17,6 +17,7 @@ use crate::model::pattern::Pattern;
 use crate::model::pipe::Pipe;
 use crate::model::pump::Pump;
 use crate::model::reservoir::Reservoir;
+use crate::model::rule::{Rule, RuleAction, RuleCondition};
 use crate::model::tank::Tank;
 use crate::model::units::{FlowUnits, PressureUnits, UnitConversion, UnitSystem};
 use crate::model::valve::{Valve, ValveType};
@@ -104,13 +105,19 @@ impl Network {
         let mut reader = BufReader::new(file);
         let mut line_buffer = String::with_capacity(512);
 
+        // buffer for reading RULES (multiple lines)
+        let mut rule_buffer: Vec<String> = Vec::new();
+
         // iterate over the lines in the file
         while reader.read_line(&mut line_buffer)? > 0 {
             line_number += 1;
             let line = line_buffer.trim();
 
             if line.starts_with(";") || line.is_empty() {
-                // skip comment and empty lines
+                // skip comment and empty lines if rule_buffer is empty, otherwise, evaluate rule
+                if !rule_buffer.is_empty() {
+                    self.add_rule(self.read_rule(&mut rule_buffer)?)?;
+                }
             }
             // if the line starts with [, it is a new section
             else if line.starts_with("[") {
@@ -158,7 +165,16 @@ impl Network {
                     ReadState::Options => self.read_options(line),
                     ReadState::Times => self.read_times(line),
                     ReadState::Status => self.read_status(line),
-                    ReadState::Rules => Err(InputError::new("Rules are not supported yet")),
+                    ReadState::Rules => {
+                        // if LINE starts with RULE, and rule_buffer is not empty
+                        // parse the buffer into a new rule
+                        if line.starts_with("RULE") && !rule_buffer.is_empty() {
+                            self.add_rule(self.read_rule(&mut rule_buffer)?);
+                        } else {
+                            rule_buffer.push(line.to_string());
+                        }
+                        Ok(())
+                    }
                     ReadState::Controls => self.read_control(line),
                     ReadState::Coordinates => self.read_coordinates(line),
                     ReadState::Vertices => self.read_vertices(line),
@@ -941,6 +957,94 @@ impl Network {
             _ => (),
         }
         Ok(())
+    }
+
+    /// Attempts to read a rule from a linebuffer
+    fn read_rule(&self, lines: &mut Vec<String>) -> Result<Rule, InputError> {
+        let mut rule_id: Option<String> = None;
+        let mut rule_priority: Option<usize> = None;
+        let mut conditions: Vec<RuleCondition> = Vec::new();
+        let mut actions: Vec<RuleAction> = Vec::new();
+
+        let mut reading_conditions = true;
+        let mut else_action = false;
+
+        for line in lines.drain(..) {
+            let mut parts = line.split_whitespace();
+            let operation = parts.next().ok_or_missing("")?;
+
+            match operation {
+                // Read RULE ID
+                "RULE" => {
+                    let id = parts.next().ok_or_missing("Missing RULE id")?;
+                    rule_id = Some(id.to_string());
+                }
+                "IF" => {
+                    conditions.push(self.read_rule_condition(&line)?);
+                }
+                // Read a rule condition
+                "OR" => {
+                    conditions.push(self.read_rule_condition(&line)?);
+                }
+                // Read a rule action
+                "THEN" => {
+                    reading_conditions = false;
+                    actions.push(self.read_rule_action(&line, false)?);
+                }
+                // Read a rule condition or action, based on reading_conditions flag
+                "AND" => {
+                    if reading_conditions {
+                        conditions.push(self.read_rule_condition(&line)?);
+                    } else {
+                        actions.push(self.read_rule_action(&line, else_action)?)
+                    }
+                }
+                // Read an action, set else_action flag
+                "ELSE" => {
+                    // reading
+                    else_action = true;
+                    actions.push(self.read_rule_action(&line, else_action)?)
+                }
+                "PRIORITY" => {
+                    rule_priority = Some(
+                        parts
+                            .next()
+                            .ok_or_missing("Missing Priority value")?
+                            .parse_field::<usize>("invalid priority")?,
+                    );
+                }
+                _ => return Err(InputError::new(format!("Invalid RULE line: {}", line))),
+            }
+        }
+
+        // validate rule
+        if conditions.is_empty() {
+            return Err(InputError::new("Rule has no conditions"));
+        }
+        if actions.is_empty() {
+            return Err(InputError::new("Rule has no conditions"));
+        }
+
+        let rule = Rule {
+            id: rule_id.ok_or_missing("Rule ID missing")?.into(),
+            conditions: conditions,
+            actions: actions,
+            priority: rule_priority,
+        };
+
+        Ok(rule)
+    }
+
+    fn read_rule_action(
+        &self,
+        line: &String,
+        else_action: bool,
+    ) -> Result<RuleAction, InputError> {
+      // finish
+    }
+
+    fn read_rule_condition(&self, line: &String) -> Result<RuleCondition, InputError> {
+      // finish
     }
 
     fn read_control(&mut self, line: &str) -> Result<(), InputError> {
