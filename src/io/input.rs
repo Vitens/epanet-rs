@@ -1212,20 +1212,29 @@ impl Network {
         let value = parts.next().ok_or_missing("Invalid rule condition")?;
 
         // convert value to ConditionValue
-        let condition_value = match value {
+        let mut condition_value = match value {
             "OPEN" => ConditionValue::Status(LinkStatus::Open),
             "CLOSED" => ConditionValue::Status(LinkStatus::Closed),
+            "ACTIVE" => ConditionValue::Status(LinkStatus::Active),
             _ => {
+              // if the condition target is a system time attribute
+              if matches!(target, RuleConditionTarget::System { attribute: SystemAttribute::Time } | RuleConditionTarget::System { attribute: SystemAttribute::ClockTime }) {
+                let seconds = parse_time_str(value, parts.next())?;
+                ConditionValue::Number(seconds as f64)
+              } else {
                 if let Ok(value) = value.parse::<f64>() {
-                    ConditionValue::Number(value)
+                  ConditionValue::Number(value)
                 } else {
-                    return Err(InputError::new(format!(
-                        "Invalid rule condition value {}",
-                        value
+                  return Err(InputError::new(format!(
+                      "Invalid rule condition value {}",
+                      value
                     )));
                 }
+              }
             }
         };
+
+        
 
         Ok(RuleCondition {
             operator,
@@ -2081,6 +2090,113 @@ mod tests {
             panic!("Expected ClockTime control condition");
         };
         assert_eq!(*seconds, 13 * 3600 + 15 * 60);
+    }
+
+    #[test]
+    fn test_read_rules_with_clocktime_and_tank_level() {
+        let mut network = test_network(true);
+        network
+            .add_link(Link {
+                id: "335".into(),
+                link_type: LinkType::Pump(Pump {
+                    speed: 1.0,
+                    head_curve_id: None,
+                    power: 1.0,
+                    head_curve: None,
+                }),
+                start_node: 0,
+                end_node: 1,
+                start_node_id: "N1".into(),
+                end_node_id: "N2".into(),
+                initial_status: LinkStatus::Open,
+                vertices: None,
+            })
+            .unwrap();
+        network
+            .add_link(Link {
+                id: "330".into(),
+                link_type: LinkType::Pipe(Pipe {
+                    length: 100.0,
+                    diameter: 12.0,
+                    roughness: 100.0,
+                    check_valve: false,
+                    headloss_formula: HeadlossFormula::HazenWilliams,
+                    minor_loss: 0.0,
+                }),
+                start_node: 0,
+                end_node: 1,
+                start_node_id: "N1".into(),
+                end_node_id: "N2".into(),
+                initial_status: LinkStatus::Open,
+                vertices: None,
+            })
+            .unwrap();
+
+        let mut rule_1 = vec![
+            "RULE 1".to_string(),
+            "IF   TANK   1 LEVEL ABOVE 19.1".to_string(),
+            "THEN PUMP 335 STATUS IS CLOSED".to_string(),
+            "AND  PIPE 330 STATUS IS OPEN".to_string(),
+        ];
+        let mut rule_2 = vec![
+            "RULE 2".to_string(),
+            "IF   SYSTEM CLOCKTIME >= 8 AM".to_string(),
+            "AND  SYSTEM CLOCKTIME < 6 PM".to_string(),
+            "AND  TANK 1 LEVEL BELOW 12".to_string(),
+            "THEN PUMP 335 STATUS IS OPEN".to_string(),
+        ];
+        let mut rule_3 = vec![
+            "RULE 3".to_string(),
+            "IF   SYSTEM CLOCKTIME >= 6 PM".to_string(),
+            "OR   SYSTEM CLOCKTIME < 8 AM".to_string(),
+            "AND  TANK 1 LEVEL BELOW 14".to_string(),
+            "THEN PUMP 335 STATUS IS OPEN".to_string(),
+        ];
+
+        let rule_1 = network.read_rule(&mut rule_1).unwrap();
+        let rule_2 = network.read_rule(&mut rule_2).unwrap();
+        let rule_3 = network.read_rule(&mut rule_3).unwrap();
+
+        assert_eq!(&*rule_1.id, "1");
+        assert_eq!(rule_1.conditions.len(), 1);
+        assert_eq!(rule_1.actions.len(), 2);
+        match &rule_1.conditions[0].target {
+            RuleConditionTarget::Tank { id, attribute } => {
+                assert_eq!(&**id, "1");
+                assert!(matches!(attribute, TankAttribute::Level));
+            }
+            _ => panic!("Expected tank level condition"),
+        }
+        assert!(matches!(&rule_1.conditions[0].comparison, ComparisonOperator::Gt));
+        assert!(matches!(rule_1.conditions[0].value, ConditionValue::Number(19.1)));
+        assert_eq!(rule_1.actions[0].link_id, "335".into());
+        assert_eq!(rule_1.actions[0].status, Some(LinkStatus::Closed));
+        assert_eq!(rule_1.actions[1].link_id, "330".into());
+        assert_eq!(rule_1.actions[1].status, Some(LinkStatus::Open));
+
+        assert_eq!(&*rule_2.id, "2");
+        assert_eq!(rule_2.conditions.len(), 3);
+        assert_eq!(rule_2.actions.len(), 1);
+        assert!(matches!(&rule_2.conditions[0].comparison, ComparisonOperator::Ge));
+        assert!(matches!(rule_2.conditions[0].value, ConditionValue::Number(28800.0)));
+        assert!(matches!(&rule_2.conditions[1].comparison, ComparisonOperator::Lt));
+        assert!(matches!(rule_2.conditions[1].value, ConditionValue::Number(64800.0)));
+        assert!(matches!(&rule_2.conditions[2].comparison, ComparisonOperator::Lt));
+        assert!(matches!(rule_2.conditions[2].value, ConditionValue::Number(12.0)));
+        assert_eq!(rule_2.actions[0].link_id, "335".into());
+        assert_eq!(rule_2.actions[0].status, Some(LinkStatus::Open));
+
+        assert_eq!(&*rule_3.id, "3");
+        assert_eq!(rule_3.conditions.len(), 3);
+        assert_eq!(rule_3.actions.len(), 1);
+        assert!(matches!(&rule_3.conditions[0].operator, RuleConditionOperator::And));
+        assert!(matches!(&rule_3.conditions[1].operator, RuleConditionOperator::Or));
+        assert!(matches!(&rule_3.conditions[2].operator, RuleConditionOperator::And));
+        assert!(matches!(rule_3.conditions[0].value, ConditionValue::Number(64800.0)));
+        assert!(matches!(rule_3.conditions[1].value, ConditionValue::Number(28800.0)));
+        assert!(matches!(rule_3.conditions[2].value, ConditionValue::Number(14.0)));
+        assert_eq!(rule_3.actions[0].link_id, "335".into());
+        assert_eq!(rule_3.actions[0].status, Some(LinkStatus::Open));
     }
 
     #[test]
