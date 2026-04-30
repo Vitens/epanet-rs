@@ -38,12 +38,12 @@ impl Control {
             ControlCondition::ClockTime { seconds } => *seconds == clocktime,
             ControlCondition::HighPressure { node_index, target } => {
                 let node = &network.nodes[*node_index];
-                let value = (state.heads[*node_index] + node.elevation) * PSIperFT; // convert head to pressure
+                let value = (state.heads[*node_index] - node.elevation) * PSIperFT; // convert head to pressure
                 value - *target >= -H_TOL
             }
             ControlCondition::LowPressure { node_index, target } => {
                 let node = &network.nodes[*node_index];
-                let value = (state.heads[*node_index] + node.elevation) * PSIperFT; // convert head to pressure
+                let value = (state.heads[*node_index] - node.elevation) * PSIperFT; // convert head to pressure
                 value - *target <= H_TOL
             }
             ControlCondition::HighLevel { tank_index, target } => {

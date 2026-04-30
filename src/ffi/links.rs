@@ -364,13 +364,10 @@ pub unsafe extern "C" fn EN_getlinkvalue(
                 ValveType::FCV => valve.setting * options.flow_units.per_cfs(),
                 ValveType::TCV => valve.setting,
                 ValveType::PCV => valve.setting,
-                ValveType::PRV => {
-                    let downstream_node = simulation.network.nodes.get(link.end_node).unwrap();
-                    (valve.setting + downstream_node.elevation) * options.pressure_units.per_feet()
-                }
-                ValveType::PSV => {
-                    let upstream_node = simulation.network.nodes.get(link.start_node).unwrap();
-                    (valve.setting + upstream_node.elevation) * options.pressure_units.per_feet()
+                // PRV/PSV/PBV settings are stored as pressure (in feet of
+                // head); just convert to the user's pressure units.
+                ValveType::PRV | ValveType::PSV | ValveType::PBV => {
+                    valve.setting * options.pressure_units.per_feet()
                 }
                 _ => 0.0,
             },

@@ -653,9 +653,10 @@ impl Network {
         self.add_link(link)
     }
 
-    /// Add a new valve to the network. Any `curve_id` is resolved eagerly. For
-    /// PSV/PRV valves the stored setting is offset by the attached node's
-    /// elevation, matching the input file loader's behaviour.
+    /// Add a new valve to the network. Any `curve_id` is resolved eagerly.
+    /// PSV/PRV valves store their setting as pressure (in feet of head) at
+    /// the anchor node; the solver adds the anchor's elevation at the point
+    /// of use, so the stored setting is independent of node elevation.
     pub fn add_valve(&mut self, id: &str, data: &ValveData) -> Result<(), InputError> {
         let start_node =
             *self
@@ -700,18 +701,11 @@ impl Network {
 
         link.convert_to_standard(&self.options);
 
-        // apply the node-elevation offset to PSV/PRV settings and attach the curve
+        // attach the curve and flag the network as containing PSV/PRV (no
+        // elevation offset is applied — the setting is stored as pressure).
         if let LinkType::Valve(valve) = &mut link.link_type {
-            match valve.valve_type {
-                ValveType::PSV => {
-                    valve.setting += self.nodes[start_node].elevation;
-                    self.contains_pressure_control_valve = true;
-                }
-                ValveType::PRV => {
-                    valve.setting += self.nodes[end_node].elevation;
-                    self.contains_pressure_control_valve = true;
-                }
-                _ => {}
+            if matches!(valve.valve_type, ValveType::PSV | ValveType::PRV) {
+                self.contains_pressure_control_valve = true;
             }
             valve.valve_curve = valve_curve;
         }
@@ -811,8 +805,8 @@ impl Network {
     /// Update properties of an existing valve. `curve_id` follows the
     /// `Option<Option<_>>` convention: `None` leaves the curve untouched,
     /// `Some(None)` clears it, `Some(Some(id))` sets it (GPV valves cannot
-    /// have their curve cleared). The PSV/PRV elevation offset is
-    /// automatically re-applied when the `setting` is changed. Changing
+    /// have their curve cleared). PSV/PRV settings are stored as pressure
+    /// (in feet of head) and are independent of node elevation. Changing
     /// `valve_type` requires a new `setting` (the stored value has no
     /// meaning under a different type); switching to `GPV` also requires a
     /// `curve_id` to be supplied.
@@ -878,35 +872,14 @@ impl Network {
             }
         };
 
-        // capture start/end node elevations (already in standard units) for PSV/PRV
-        let start_elevation = self.nodes[self.links[link_index].start_node].elevation;
-        let end_elevation = self.nodes[self.links[link_index].end_node].elevation;
-
         let link = &mut self.links[link_index];
 
-        let stored_setting = if let LinkType::Valve(valve) = &link.link_type {
-            valve.setting
-        } else {
-            unreachable!()
-        };
-
-        // strip the old PSV/PRV elevation offset before converting to user units.
-        // The offset for the (possibly new) type is re-applied after the
-        // to-standard step below, matching add_valve's semantics.
-        if let LinkType::Valve(valve) = &mut link.link_type {
-            match old_valve_type {
-                ValveType::PSV => {
-                    valve.setting = stored_setting - start_elevation;
-                }
-                ValveType::PRV => {
-                    valve.setting = stored_setting - end_elevation;
-                }
-                _ => {}
-            }
-        }
-
-        // convert_from_standard uses valve.valve_type, which is still the OLD
-        // type here so the existing `setting` is interpreted correctly.
+        // PSV/PRV settings are stored as pressure (no elevation offset), so
+        // converting to/from user units is a straight unit conversion driven
+        // by the valve's current valve_type. We use the OLD type for the
+        // `from_standard` step below so the existing `setting` is interpreted
+        // correctly, and the NEW type for the `to_standard` step so the
+        // updated `setting` is interpreted in new-type semantics.
         link.convert_from_standard(&self.options);
 
         if let LinkType::Valve(valve) = &mut link.link_type {
@@ -919,27 +892,16 @@ impl Network {
             if let Some(minor_loss) = update.minor_loss {
                 valve.minor_loss = minor_loss;
             }
-            // switch to the NEW type before converting back to standard so that
-            // the new `setting` is interpreted in new-type semantics.
             valve.valve_type = new_valve_type.clone();
         }
 
         link.convert_to_standard(&self.options);
 
-        if let LinkType::Valve(valve) = &mut link.link_type {
-            match new_valve_type {
-                ValveType::PSV => {
-                    valve.setting += start_elevation;
-                }
-                ValveType::PRV => {
-                    valve.setting += end_elevation;
-                }
-                _ => {}
-            }
-            if let Some((new_curve_id, new_valve_curve)) = curve_change {
-                valve.curve_id = new_curve_id;
-                valve.valve_curve = new_valve_curve;
-            }
+        if let LinkType::Valve(valve) = &mut link.link_type
+            && let Some((new_curve_id, new_valve_curve)) = curve_change
+        {
+            valve.curve_id = new_curve_id;
+            valve.valve_curve = new_valve_curve;
         }
 
         // Recompute the PSV/PRV flag when the type changed (we may have added a
@@ -1000,20 +962,9 @@ impl Network {
         let old_start = link.start_node;
         let old_end = link.end_node;
 
-        // remember the valve_type so we can re-offset PSV/PRV settings if the
-        // attached node (and thus its elevation) is swapped out
-        let valve_type = if let LinkType::Valve(valve) = &link.link_type {
-            Some(valve.valve_type.clone())
-        } else {
-            None
-        };
-
         let mut topology_changed = false;
 
         if let Some((start_id, start_idx)) = new_start {
-            let old_elev = self.nodes[old_start].elevation;
-            let new_elev = self.nodes[start_idx].elevation;
-
             // detach from old tank's links_from and attach to new tank's links_from
             remove_tank_link(
                 &mut self.nodes[old_start],
@@ -1030,19 +981,12 @@ impl Network {
             link.start_node = start_idx;
             link.start_node_id = start_id;
 
-            // keep PSV setting offset in sync with its start-node elevation
-            if valve_type.as_ref() == Some(&ValveType::PSV)
-                && let LinkType::Valve(valve) = &mut link.link_type
-            {
-                valve.setting += new_elev - old_elev;
-            }
+            // PSV/PRV settings are stored as pressure (independent of node
+            // elevation), so swapping endpoints does not alter the setting.
             topology_changed = true;
         }
 
         if let Some((end_id, end_idx)) = new_end {
-            let old_elev = self.nodes[old_end].elevation;
-            let new_elev = self.nodes[end_idx].elevation;
-
             remove_tank_link(
                 &mut self.nodes[old_end],
                 link_index,
@@ -1058,12 +1002,6 @@ impl Network {
             link.end_node = end_idx;
             link.end_node_id = end_id;
 
-            // keep PRV setting offset in sync with its end-node elevation
-            if valve_type.as_ref() == Some(&ValveType::PRV)
-                && let LinkType::Valve(valve) = &mut link.link_type
-            {
-                valve.setting += new_elev - old_elev;
-            }
             topology_changed = true;
         }
 
@@ -2721,9 +2659,10 @@ mod tests {
     // --- add_valve tests ---
 
     #[test]
-    fn test_add_prv_applies_end_elevation_offset() {
-        // user adds a PRV with setting 50 psi (US units). Internal setting should
-        // be the converted pressure plus the end node's elevation (in feet).
+    fn test_add_prv_stores_pressure_setting() {
+        // user adds a PRV with setting 50 psi (US units). Internal setting is
+        // the pressure expressed in feet of head (no elevation offset — the
+        // solver adds the anchor-node elevation at the point of use).
         let mut network = Network::default();
         // J1 at 100 ft, J2 at 200 ft
         network
@@ -2771,8 +2710,8 @@ mod tests {
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
         };
-        // 50 psi -> 50 / PSIperFT ft, plus end-node elevation (J2 = 200 ft)
-        let expected = 50.0 / crate::constants::PSIperFT + 200.0;
+        // 50 psi -> 50 / PSIperFT ft (no elevation offset)
+        let expected = 50.0 / crate::constants::PSIperFT;
         assert!((valve.setting - expected).abs() < 1e-6);
         assert!(network.contains_pressure_control_valve);
     }
@@ -3109,7 +3048,7 @@ mod tests {
     // --- update_valve tests ---
 
     #[test]
-    fn test_update_valve_setting_reapplies_prv_offset() {
+    fn test_update_valve_setting_stores_pressure_for_prv() {
         let mut network = Network::default();
         network
             .add_junction(
@@ -3168,7 +3107,8 @@ mod tests {
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
         };
-        let expected = 80.0 / crate::constants::PSIperFT + 200.0;
+        // 80 psi expressed in feet of head, no elevation offset
+        let expected = 80.0 / crate::constants::PSIperFT;
         assert!((valve.setting - expected).abs() < 1e-6);
     }
 
@@ -3459,7 +3399,7 @@ mod tests {
     }
 
     #[test]
-    fn test_update_valve_type_change_tcv_to_prv_applies_offset() {
+    fn test_update_valve_type_change_tcv_to_prv_stores_pressure_setting() {
         let mut network = Network::default();
         network
             .add_junction(
@@ -3520,8 +3460,8 @@ mod tests {
             panic!("Expected Valve link type");
         };
         assert_eq!(valve.valve_type, ValveType::PRV);
-        // 50 psi -> ft, plus end-node elevation (J2 = 200 ft)
-        let expected = 50.0 / crate::constants::PSIperFT + 200.0;
+        // 50 psi expressed in feet of head (no elevation offset)
+        let expected = 50.0 / crate::constants::PSIperFT;
         assert!((valve.setting - expected).abs() < 1e-6);
         assert!(network.contains_pressure_control_valve);
     }
@@ -3714,86 +3654,6 @@ mod tests {
             "T1 should no longer be a destination"
         );
         assert_eq!(t2.links_to, vec![0], "T2 should now be a destination");
-    }
-
-    #[test]
-    fn test_update_link_prv_setting_follows_end_node_elevation() {
-        let mut network = Network::default();
-        network
-            .add_junction(
-                "J1",
-                &JunctionData {
-                    elevation: 100.0,
-                    basedemand: 0.0,
-                    emitter_coefficient: 0.0,
-                    pattern: None,
-                    coordinates: None,
-                },
-            )
-            .unwrap();
-        network
-            .add_junction(
-                "J2",
-                &JunctionData {
-                    elevation: 200.0,
-                    basedemand: 0.0,
-                    emitter_coefficient: 0.0,
-                    pattern: None,
-                    coordinates: None,
-                },
-            )
-            .unwrap();
-        network
-            .add_junction(
-                "J3",
-                &JunctionData {
-                    elevation: 300.0,
-                    basedemand: 0.0,
-                    emitter_coefficient: 0.0,
-                    pattern: None,
-                    coordinates: None,
-                },
-            )
-            .unwrap();
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::PRV,
-                    setting: 50.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
-        let setting_before = if let LinkType::Valve(valve) = &network.links[0].link_type {
-            valve.setting
-        } else {
-            unreachable!()
-        };
-
-        network
-            .update_link(
-                "V1",
-                &LinkUpdate {
-                    start_node: None,
-                    end_node: Some("J3".into()),
-                    vertices: None,
-                    initial_status: None,
-                },
-            )
-            .unwrap();
-
-        let LinkType::Valve(valve) = &network.links[0].link_type else {
-            panic!("Expected Valve link type");
-        };
-        // the internal setting should have shifted by +100 ft (J3 - J2 elevations)
-        assert!((valve.setting - (setting_before + 100.0)).abs() < 1e-6);
     }
 
     #[test]

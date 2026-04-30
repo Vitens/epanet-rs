@@ -216,14 +216,9 @@ impl Network {
                 }
             }
             if let LinkType::Valve(valve) = &mut link.link_type {
-                // if the valve is a PSV, add the elevation of the start node to the setting
-                if valve.valve_type == ValveType::PSV {
-                    valve.setting += self.nodes[link.start_node].elevation;
-                    self.contains_pressure_control_valve = true;
-                }
-                // if the valve is a PRV, add the elevation of the end node from the setting
-                if valve.valve_type == ValveType::PRV {
-                    valve.setting += self.nodes[link.end_node].elevation;
+                // PSV/PRV settings are stored as pressure (in feet of head) at the
+                // anchor node; the solver adds the elevation at the point of use.
+                if valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV {
                     self.contains_pressure_control_valve = true;
                 }
                 // assign the valve curve to the valve
@@ -249,8 +244,8 @@ impl Network {
     }
 
     /// Convert control settings from user units to internal units.
-    /// Must be called after convert_to_standard and update_links so that
-    /// node elevations and valve settings are already in internal units (feet/CFS).
+    /// Must be called after convert_to_standard so that valve settings are
+    /// already in internal units (feet of head for PRV/PSV/PBV, CFS for FCV).
     fn convert_control_settings(&mut self) {
         let unit_system = &self.options.unit_system;
         let flow_units = &self.options.flow_units;
@@ -266,25 +261,10 @@ impl Network {
 
             if let LinkType::Valve(valve) = &link.link_type {
                 match valve.valve_type {
-                    ValveType::PRV => {
-                        let mut s = setting;
-                        if *unit_system == UnitSystem::US {
-                            s /= PSIperFT;
-                        }
-                        s /= unit_system.per_feet();
-                        s += self.nodes[link.end_node].elevation;
-                        control.setting = Some(s);
-                    }
-                    ValveType::PSV => {
-                        let mut s = setting;
-                        if *unit_system == UnitSystem::US {
-                            s /= PSIperFT;
-                        }
-                        s /= unit_system.per_feet();
-                        s += self.nodes[link.start_node].elevation;
-                        control.setting = Some(s);
-                    }
-                    ValveType::PBV => {
+                    // PRV/PSV/PBV settings are stored as pressure (in feet of
+                    // head); the solver adds the anchor-node elevation when
+                    // it consumes the setting.
+                    ValveType::PRV | ValveType::PSV | ValveType::PBV => {
                         let mut s = setting;
                         if *unit_system == UnitSystem::US {
                             s /= PSIperFT;
@@ -1151,7 +1131,6 @@ impl Network {
             }
             "NODE" => {
                 let node_id = parts.next().ok_or_missing("Invalid rule condition")?;
-                let node_id = node_id.into();
                 let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
                 let attribute = match attribute {
                     "DEMAND" => NodeAttribute::Demand,
@@ -1160,13 +1139,12 @@ impl Network {
                     _ => return Err(InputError::new("Invalid rule condition")),
                 };
                 RuleConditionTarget::Node {
-                    id: node_id,
+                    id: node_id.into(),
                     attribute,
                 }
             }
             "TANK" => {
                 let tank_id = parts.next().ok_or_missing("Invalid rule condition")?;
-                let tank_id = tank_id.into();
                 let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
                 let attribute = match attribute {
                     "LEVEL" => TankAttribute::Level,
@@ -1175,13 +1153,12 @@ impl Network {
                     _ => return Err(InputError::new("Invalid rule condition")),
                 };
                 RuleConditionTarget::Tank {
-                    id: tank_id,
+                    id: tank_id.into(),
                     attribute,
                 }
             }
-            "LINK" => {
+            "LINK" | "PIPE" | "VALVE" | "PUMP" => {
                 let link_id = parts.next().ok_or_missing("Invalid rule condition")?;
-                let link_id = link_id.into();
                 let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
                 let attribute = match attribute {
                     "FLOW" => LinkAttribute::Flow,
@@ -1190,7 +1167,7 @@ impl Network {
                     _ => return Err(InputError::new("Invalid rule condition")),
                 };
                 RuleConditionTarget::Link {
-                    id: link_id,
+                    id: link_id.into(),
                     attribute,
                 }
             }
@@ -1212,7 +1189,7 @@ impl Network {
         let value = parts.next().ok_or_missing("Invalid rule condition")?;
 
         // convert value to ConditionValue
-        let mut condition_value = match value {
+        let condition_value = match value {
             "OPEN" => ConditionValue::Status(LinkStatus::Open),
             "CLOSED" => ConditionValue::Status(LinkStatus::Closed),
             "ACTIVE" => ConditionValue::Status(LinkStatus::Active),
@@ -2211,5 +2188,44 @@ mod tests {
         assert_eq!(action.status, Some(LinkStatus::Closed));
         assert_eq!(action.setting, None);
         assert_eq!(action.default_active, true);
+    }
+    #[test]
+    fn test_read_rule_condition_clocktime() {
+        let network = test_network(true);
+        let condition = network.read_rule_condition("IF SYSTEM CLOCKTIME >= 8 AM").unwrap();
+        assert_eq!(condition.operator, RuleConditionOperator::And);
+        assert_eq!(condition.target, RuleConditionTarget::System { attribute: SystemAttribute::ClockTime });
+        assert_eq!(condition.comparison, ComparisonOperator::Ge);
+        assert_eq!(condition.value, ConditionValue::Number(28800.0));
+    }
+
+    #[test]
+    fn test_read_rule_condition_link_flow() {
+        let network = test_network(true);
+        let condition = network.read_rule_condition("IF LINK L1 FLOW ABOVE 100").unwrap();
+        assert_eq!(condition.operator, RuleConditionOperator::And);
+        assert_eq!(condition.target, RuleConditionTarget::Link { id: "L1".into(), attribute: LinkAttribute::Flow });
+        assert_eq!(condition.comparison, ComparisonOperator::Gt);
+        assert_eq!(condition.value, ConditionValue::Number(100.0));
+    }
+
+    #[test]
+    fn test_read_rule_condition_link_status() {
+        let network = test_network(true);
+        let condition = network.read_rule_condition("IF LINK L1 STATUS IS OPEN").unwrap();
+        assert_eq!(condition.operator, RuleConditionOperator::And);
+        assert_eq!(condition.target, RuleConditionTarget::Link { id: "L1".into(), attribute: LinkAttribute::Status });
+        assert_eq!(condition.comparison, ComparisonOperator::Eq);
+        assert_eq!(condition.value, ConditionValue::Status(LinkStatus::Open));
+    }
+
+    #[test]
+    fn test_read_rule_condition_link_setting() {
+        let network = test_network(true);
+        let condition = network.read_rule_condition("IF PUMP L1 SETTING IS 1.5").unwrap();
+        assert_eq!(condition.operator, RuleConditionOperator::And);
+        assert_eq!(condition.target, RuleConditionTarget::Link { id: "L1".into(), attribute: LinkAttribute::Setting });
+        assert_eq!(condition.comparison, ComparisonOperator::Eq);
+        assert_eq!(condition.value, ConditionValue::Number(1.5));
     }
 }
