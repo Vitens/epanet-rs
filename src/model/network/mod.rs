@@ -141,6 +141,7 @@ impl<'de> Deserialize<'de> for Network {
             curves: Vec<Curve>,
             patterns: Vec<Pattern>,
             controls: Vec<Control>,
+            rules: Vec<Rule>,
         }
 
         let mut data = NetworkData::deserialize(deserializer)?;
@@ -173,6 +174,13 @@ impl<'de> Deserialize<'de> for Network {
             .map(|(i, p)| (p.id.clone(), i))
             .collect();
 
+        let rule_map: HashMap<Box<str>, usize> = data
+            .rules
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.id.clone(), i))
+            .collect();
+
         let mut contains_pressure_control_valve = false;
         for link in data.links.iter_mut() {
             link.start_node = *node_map.get(&link.start_node_id).unwrap();
@@ -192,9 +200,11 @@ impl<'de> Deserialize<'de> for Network {
             curves: data.curves,
             patterns: data.patterns,
             controls: data.controls,
+            rules: data.rules,
             node_map,
             link_map,
             curve_map,
+            rule_map,
             pattern_map,
             contains_pressure_control_valve,
             topology_version: 0,

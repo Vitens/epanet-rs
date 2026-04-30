@@ -2,7 +2,7 @@
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::str::{FromStr, SplitWhitespace};
+use std::str::FromStr;
 
 use crate::constants::*;
 use crate::error::*;
@@ -169,7 +169,7 @@ impl Network {
                         // if LINE starts with RULE, and rule_buffer is not empty
                         // parse the buffer into a new rule
                         if line.starts_with("RULE") && !rule_buffer.is_empty() {
-                            self.add_rule(self.read_rule(&mut rule_buffer)?);
+                            self.add_rule(self.read_rule(&mut rule_buffer)?)?;
                         } else {
                             rule_buffer.push(line.to_string());
                         }
@@ -1027,24 +1027,102 @@ impl Network {
 
         let rule = Rule {
             id: rule_id.ok_or_missing("Rule ID missing")?.into(),
-            conditions: conditions,
-            actions: actions,
+            conditions,
+            actions,
             priority: rule_priority,
         };
 
         Ok(rule)
     }
 
-    fn read_rule_action(
-        &self,
-        line: &String,
-        else_action: bool,
-    ) -> Result<RuleAction, InputError> {
-      // finish
+    fn read_rule_action(&self, line: &str, else_action: bool) -> Result<RuleAction, InputError> {
+        // A rule action clause consists of
+        // THEN/AND/ELSE <OBJECT> <ID> STATUS/SETTING IS <value>
+
+        let mut parts = line.split_whitespace();
+        // skip first word
+        parts.next();
+        // get object type
+        let link_type = parts
+            .next()
+            .ok_or_missing("missing link type for rule action")?;
+
+        let link_id = parts
+            .next()
+            .ok_or_missing("missing link id for rule action")?;
+        let link_index = *self.link_map.get(link_id).ok_or_else(|| {
+            InputError::new(format!("Link '{}' not found for rule action", link_id))
+        })?;
+
+        let link = &self.links[link_index];
+
+        // check for valid link type
+        let is_valid = match link_type {
+            "LINK" => true,
+            "PIPE" => matches!(link.link_type, LinkType::Pipe(_)),
+            "VALVE" => matches!(link.link_type, LinkType::Valve(_)),
+            "PUMP" => matches!(link.link_type, LinkType::Pump(_)),
+            _ => {
+                return Err(InputError::new(format!(
+                    "Invalid link type '{}' for rule action",
+                    link_type
+                )));
+            }
+        };
+        if !is_valid {
+            return Err(InputError::new(format!(
+                "Rule action target id '{}' is not a {}",
+                link_id, link_type
+            )));
+        }
+
+        let status_or_setting = parts.next().ok_or_missing("Invalid action clause")?;
+        let is = parts.next().ok_or_missing("Invalid action clause")?;
+
+        if is != "IS" {
+            return Err(InputError::new("Invalid action clause, missing IS"));
+        }
+
+        let value = parts
+            .next()
+            .ok_or_missing("Action clause missing value or setting")?;
+
+        // get status or setting value
+        let (setting, status) = match status_or_setting {
+            "STATUS" => {
+                let link_status = match value {
+                    "OPEN" => LinkStatus::Open,
+                    "CLOSED" => LinkStatus::Closed,
+                    _ => {
+                        return Err(InputError::new(format!(
+                            "Invalid action status value {}, only OPEN/CLOSE supported",
+                            value
+                        )));
+                    }
+                };
+                (None, Some(link_status))
+            }
+            "SETTING" => {
+                let setting = value.parse_field::<f64>("Rule value")?;
+                (Some(setting), None)
+            }
+            _ => {
+                return Err(InputError::new(
+                    "Invalid action, STATUS/SETTING expected".to_string(),
+                ));
+            }
+        };
+
+        Ok(RuleAction {
+            link_id: link_id.into(),
+            setting,
+            status,
+            default_active: else_action,
+        })
     }
 
-    fn read_rule_condition(&self, line: &String) -> Result<RuleCondition, InputError> {
-      // finish
+    fn read_rule_condition(&self, _line: &String) -> Result<RuleCondition, InputError> {
+        Err(InputError::new("test"))
     }
 
     fn read_control(&mut self, line: &str) -> Result<(), InputError> {
@@ -1893,5 +1971,19 @@ mod tests {
             panic!("Expected ClockTime control condition");
         };
         assert_eq!(*seconds, 13 * 3600 + 15 * 60);
+    }
+
+    #[test]
+    fn test_read_rule_action() {
+        let mut network = test_network(true);
+
+        let action = network
+            .read_rule_action("THEN LINK L1 STATUS IS CLOSED", true)
+            .unwrap();
+
+        assert_eq!(action.link_id, "L1".into());
+        assert_eq!(action.status, Some(LinkStatus::Closed));
+        assert_eq!(action.setting, None);
+        assert_eq!(action.default_active, true);
     }
 }
