@@ -286,13 +286,13 @@ pub unsafe extern "C" fn EN_getnodevalue(
                 .map(|d| {
                     d.pattern_index
                         .map(|index| (index + 1) as f64)
-                        .unwrap_or(123.0)
+                        .unwrap_or(0.0)
                 })
-                .unwrap_or(123.0),
+                .unwrap_or(0.0),
             NodeType::Reservoir(reservoir) => reservoir
                 .head_pattern_index
                 .map(|index| (index + 1) as f64)
-                .unwrap_or(123.0),
+                .unwrap_or(0.0),
             _ => 0.0,
         },
         NodeProperty::Emitter => match &node.node_type {
