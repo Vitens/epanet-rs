@@ -397,7 +397,7 @@ pub unsafe extern "C" fn EN_getnodevalue(
         NodeProperty::DemandFlow => 0.0,
         NodeProperty::FullDemand => 0.0,
         NodeProperty::SourceMass => 0.0, // TODO: mass not implemented yet
-        _ => -123.0,
+        _ => return ErrorCode::InvalidParameterCode,
     };
 
     unsafe { *out_value = value as c_double };
