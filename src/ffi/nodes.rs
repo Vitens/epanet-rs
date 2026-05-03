@@ -97,6 +97,11 @@ pub unsafe extern "C" fn EN_getnodeindex(
     id: *const c_char,
     out_index: *mut c_int,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_index.is_null() {
+        unsafe { *out_index = 0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let c_str = unsafe { CStr::from_ptr(id) };
@@ -216,6 +221,11 @@ pub unsafe extern "C" fn EN_getnodetype(
     index: c_int,
     out_type: *mut c_int,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_type.is_null() {
+        unsafe { *out_type = 0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     // EPANET indexes from 1, so we need to add 1 to the index
@@ -249,6 +259,11 @@ pub unsafe extern "C" fn EN_getnodevalue(
     property: c_int,
     out_value: *mut c_double,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_value.is_null() {
+        unsafe { *out_value = 0.0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     // EPANET indexes from 1, so we need to subtract 1 from the index
@@ -504,6 +519,15 @@ pub unsafe extern "C" fn EN_getcoord(
     out_x: *mut c_double,
     out_y: *mut c_double,
 ) -> ErrorCode {
+    // Initialize output parameters to match C API behavior
+    if !out_x.is_null() {
+        unsafe { *out_x = 0.0 };
+    }
+
+    if !out_y.is_null() {
+        unsafe { *out_y = 0.0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     // EPANET indexes from 1, so we need to subtract 1 from the index
