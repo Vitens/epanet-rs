@@ -27,7 +27,7 @@ pub fn validate_with_epanet(
     );
 
     // check if the input file is a .inp file
-    if !input_file.ends_with(".inp") {
+    if !input_file.to_lowercase().ends_with(".inp") {
         error!("Input file must be a .inp file");
         return false;
     }
