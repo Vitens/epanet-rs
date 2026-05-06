@@ -180,7 +180,7 @@ let mut simulation = Simulation::new(network);
 // solve the network for a single time step
 simulation.run_hydraulics()?;
 
-// update the pipe roughness  
+// update the pipe roughness
 simulation.network.update_pipe("P1", &PipeUpdate {
     roughness: Some(0.2),
     ..Default::default()
@@ -193,11 +193,11 @@ simulation.run_hydraulics()?;
 # }
 ```
 */
-pub mod io;
-pub mod model;
-pub mod solver;
 pub mod constants;
-pub mod utils;
-pub mod simulation;
 pub mod error;
 pub mod ffi;
+pub mod io;
+pub mod model;
+pub mod simulation;
+pub mod solver;
+pub mod utils;
