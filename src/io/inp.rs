@@ -172,14 +172,15 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
             let mut parameters = String::new();
 
             if pump.head_curve_id.is_some() {
-                parameters.push_str(&format!("HEAD {}", pump.head_curve_id.as_deref().unwrap()));
+                parameters.push_str(&format!("HEAD {} ", pump.head_curve_id.as_deref().unwrap()));
             }
             if pump.speed != 1.0 {
-                parameters.push_str(&format!("SPEED {}", pump.speed));
+                parameters.push_str(&format!("SPEED {} ", pump.speed));
             }
             if pump.power != 0.0 {
-                parameters.push_str(&format!("POWER {}", pump.power));
+                parameters.push_str(&format!("POWER {} ", pump.power));
             }
+            parameters = parameters.trim().to_string();
 
             write_line(
                 &mut buffer,

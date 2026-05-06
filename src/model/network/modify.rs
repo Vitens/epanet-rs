@@ -924,6 +924,8 @@ impl Network {
             }
             if let Some(setting) = update.setting {
                 valve.setting = setting;
+                // set the valve status to active
+                link.initial_status = LinkStatus::Active;
             }
             if let Some(minor_loss) = update.minor_loss {
                 valve.minor_loss = minor_loss;
