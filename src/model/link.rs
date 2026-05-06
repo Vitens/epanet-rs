@@ -126,7 +126,12 @@ impl LinkCoefficients {
 }
 
 pub trait LinkTrait {
-    /// Calculate the 1/G_ij and Y_ij coefficients for the link
+    /// Calculate the 1/G_ij and Y_ij coefficients for the link.
+    ///
+    /// `elevation_upstream`/`elevation_downstream` are the elevations of the
+    /// link's start/end nodes (in feet). Only PRV/PSV use them, to translate
+    /// their pressure-style setting into absolute head at the anchor node.
+    #[allow(clippy::too_many_arguments)]
     fn coefficients(
         &self,
         q: f64,
@@ -135,10 +140,16 @@ pub trait LinkTrait {
         status: LinkStatus,
         excess_flow_upstream: f64,
         excess_flow_downstream: f64,
+        elevation_upstream: f64,
+        elevation_downstream: f64,
     ) -> LinkCoefficients;
     /// Calculate the resistance of the link
     fn resistance(&self) -> f64;
-    /// Update the status of the link
+    /// Update the status of the link.
+    ///
+    /// `elevation_upstream`/`elevation_downstream` mirror the elevations
+    /// passed to [`LinkTrait::coefficients`] and are only consumed by PRV/PSV.
+    #[allow(clippy::too_many_arguments)]
     fn update_status(
         &self,
         setting: f64,
@@ -146,6 +157,8 @@ pub trait LinkTrait {
         flow: f64,
         head_upstream: f64,
         head_downstream: f64,
+        elevation_upstream: f64,
+        elevation_downstream: f64,
     ) -> Option<LinkStatus>;
     /// Get the initial flow of the link
     fn initial_flow(&self) -> f64;
@@ -161,6 +174,8 @@ impl LinkTrait for Link {
         status: LinkStatus,
         excess_flow_upstream: f64,
         excess_flow_downstream: f64,
+        elevation_upstream: f64,
+        elevation_downstream: f64,
     ) -> LinkCoefficients {
         match &self.link_type {
             LinkType::Pipe(pipe) => pipe.coefficients(
@@ -170,6 +185,8 @@ impl LinkTrait for Link {
                 status,
                 excess_flow_upstream,
                 excess_flow_downstream,
+                elevation_upstream,
+                elevation_downstream,
             ),
             LinkType::Pump(pump) => pump.coefficients(
                 q,
@@ -178,6 +195,8 @@ impl LinkTrait for Link {
                 status,
                 excess_flow_upstream,
                 excess_flow_downstream,
+                elevation_upstream,
+                elevation_downstream,
             ),
             LinkType::Valve(valve) => valve.coefficients(
                 q,
@@ -186,6 +205,8 @@ impl LinkTrait for Link {
                 status,
                 excess_flow_upstream,
                 excess_flow_downstream,
+                elevation_upstream,
+                elevation_downstream,
             ),
         }
     }
@@ -205,17 +226,37 @@ impl LinkTrait for Link {
         flow: f64,
         head_upstream: f64,
         head_downstream: f64,
+        elevation_upstream: f64,
+        elevation_downstream: f64,
     ) -> Option<LinkStatus> {
         match &self.link_type {
-            LinkType::Pipe(pipe) => {
-                pipe.update_status(setting, status, flow, head_upstream, head_downstream)
-            }
-            LinkType::Pump(pump) => {
-                pump.update_status(setting, status, flow, head_upstream, head_downstream)
-            }
-            LinkType::Valve(valve) => {
-                valve.update_status(setting, status, flow, head_upstream, head_downstream)
-            }
+            LinkType::Pipe(pipe) => pipe.update_status(
+                setting,
+                status,
+                flow,
+                head_upstream,
+                head_downstream,
+                elevation_upstream,
+                elevation_downstream,
+            ),
+            LinkType::Pump(pump) => pump.update_status(
+                setting,
+                status,
+                flow,
+                head_upstream,
+                head_downstream,
+                elevation_upstream,
+                elevation_downstream,
+            ),
+            LinkType::Valve(valve) => valve.update_status(
+                setting,
+                status,
+                flow,
+                head_upstream,
+                head_downstream,
+                elevation_upstream,
+                elevation_downstream,
+            ),
         }
     }
     fn initial_flow(&self) -> f64 {

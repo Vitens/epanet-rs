@@ -39,6 +39,8 @@ impl LinkTrait for Valve {
         status: LinkStatus,
         excess_flow_upstream: f64,
         excess_flow_downstream: f64,
+        elevation_upstream: f64,
+        elevation_downstream: f64,
     ) -> LinkCoefficients {
         // if the valve is closed, fixed closed, or XPressure, return a high resistance valve
         if status == LinkStatus::Closed
@@ -81,17 +83,22 @@ impl LinkTrait for Valve {
                     LinkCoefficients::simple(1.0 / hgrad, hloss / hgrad)
                 }
             }
-            // Pressure Reducing Valve (PRV)
+            // Pressure Reducing Valve (PRV) — setting is pressure (in feet of head)
+            // at the downstream node; convert to absolute head.
             ValveType::PRV => {
                 if status == LinkStatus::Active {
-                    self.prv_coefficients(setting, excess_flow_downstream)
+                    let target_head = setting + elevation_downstream;
+                    self.prv_coefficients(target_head, excess_flow_downstream)
                 } else {
                     LinkCoefficients::simple(1.0 / SMALL_VALUE, q)
                 }
             }
+            // Pressure Sustaining Valve (PSV) — setting is pressure (in feet of head)
+            // at the upstream node; convert to absolute head.
             ValveType::PSV => {
                 if status == LinkStatus::Active {
-                    self.psv_coefficients(setting, excess_flow_upstream)
+                    let target_head = setting + elevation_upstream;
+                    self.psv_coefficients(target_head, excess_flow_upstream)
                 } else {
                     LinkCoefficients::simple(1.0 / SMALL_VALUE, q)
                 }
@@ -111,10 +118,18 @@ impl LinkTrait for Valve {
         q: f64,
         head_upstream: f64,
         head_downstream: f64,
+        elevation_upstream: f64,
+        elevation_downstream: f64,
     ) -> Option<LinkStatus> {
         match self.valve_type {
-            ValveType::PRV => self.prv_status(setting, status, q, head_upstream, head_downstream),
-            ValveType::PSV => self.psv_status(setting, status, q, head_upstream, head_downstream),
+            ValveType::PRV => {
+                let target_head = setting + elevation_downstream;
+                self.prv_status(target_head, status, q, head_upstream, head_downstream)
+            }
+            ValveType::PSV => {
+                let target_head = setting + elevation_upstream;
+                self.psv_status(target_head, status, q, head_upstream, head_downstream)
+            }
             _ => None,
         }
     }

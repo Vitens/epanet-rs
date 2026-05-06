@@ -17,6 +17,7 @@ use crate::model::pattern::Pattern;
 use crate::model::pipe::Pipe;
 use crate::model::pump::Pump;
 use crate::model::reservoir::Reservoir;
+use crate::model::rule::*;
 use crate::model::tank::Tank;
 use crate::model::units::{FlowUnits, PressureUnits, UnitConversion, UnitSystem};
 use crate::model::valve::{Valve, ValveType};
@@ -108,13 +109,19 @@ impl Network {
         let mut reader = BufReader::new(file);
         let mut line_buffer = String::with_capacity(512);
 
+        // buffer for reading RULES (multiple lines)
+        let mut rule_buffer: Vec<String> = Vec::new();
+
         // iterate over the lines in the file
         while reader.read_line(&mut line_buffer)? > 0 {
             line_number += 1;
             let line = line_buffer.trim();
 
             if line.starts_with(";") || line.is_empty() {
-                // skip comment and empty lines
+                // skip comment and empty lines if rule_buffer is empty, otherwise, evaluate rule
+                if !rule_buffer.is_empty() {
+                    self.add_rule(self.read_rule(&mut rule_buffer)?)?;
+                }
             }
             // if the line starts with [, it is a new section
             else if line.starts_with("[") {
@@ -162,7 +169,16 @@ impl Network {
                     ReadState::Options => self.read_options(line),
                     ReadState::Times => self.read_times(line),
                     ReadState::Status => self.read_status(line),
-                    ReadState::Rules => Err(InputError::new("Rules are not supported yet")),
+                    ReadState::Rules => {
+                        // if LINE starts with RULE, and rule_buffer is not empty
+                        // parse the buffer into a new rule
+                        if line.starts_with("RULE") && !rule_buffer.is_empty() {
+                            self.add_rule(self.read_rule(&mut rule_buffer)?)?;
+                        } else {
+                            rule_buffer.push(line.to_string());
+                        }
+                        Ok(())
+                    }
                     ReadState::Controls => self.read_control(line),
                     ReadState::Coordinates => self.read_coordinates(line),
                     ReadState::Vertices => self.read_vertices(line),
@@ -204,14 +220,9 @@ impl Network {
                 }
             }
             if let LinkType::Valve(valve) = &mut link.link_type {
-                // if the valve is a PSV, add the elevation of the start node to the setting
-                if valve.valve_type == ValveType::PSV {
-                    valve.setting += self.nodes[link.start_node].elevation;
-                    self.contains_pressure_control_valve = true;
-                }
-                // if the valve is a PRV, add the elevation of the end node from the setting
-                if valve.valve_type == ValveType::PRV {
-                    valve.setting += self.nodes[link.end_node].elevation;
+                // PSV/PRV settings are stored as pressure (in feet of head) at the
+                // anchor node; the solver adds the elevation at the point of use.
+                if valve.valve_type == ValveType::PSV || valve.valve_type == ValveType::PRV {
                     self.contains_pressure_control_valve = true;
                 }
                 // assign the valve curve to the valve
@@ -237,8 +248,8 @@ impl Network {
     }
 
     /// Convert control settings from user units to internal units.
-    /// Must be called after convert_to_standard and update_links so that
-    /// node elevations and valve settings are already in internal units (feet/CFS).
+    /// Must be called after convert_to_standard so that valve settings are
+    /// already in internal units (feet of head for PRV/PSV/PBV, CFS for FCV).
     fn convert_control_settings(&mut self) {
         let unit_system = &self.options.unit_system;
         let flow_units = &self.options.flow_units;
@@ -254,25 +265,10 @@ impl Network {
 
             if let LinkType::Valve(valve) = &link.link_type {
                 match valve.valve_type {
-                    ValveType::PRV => {
-                        let mut s = setting;
-                        if *unit_system == UnitSystem::US {
-                            s /= PSIperFT;
-                        }
-                        s /= unit_system.per_feet();
-                        s += self.nodes[link.end_node].elevation;
-                        control.setting = Some(s);
-                    }
-                    ValveType::PSV => {
-                        let mut s = setting;
-                        if *unit_system == UnitSystem::US {
-                            s /= PSIperFT;
-                        }
-                        s /= unit_system.per_feet();
-                        s += self.nodes[link.start_node].elevation;
-                        control.setting = Some(s);
-                    }
-                    ValveType::PBV => {
+                    // PRV/PSV/PBV settings are stored as pressure (in feet of
+                    // head); the solver adds the anchor-node elevation when
+                    // it consumes the setting.
+                    ValveType::PRV | ValveType::PSV | ValveType::PBV => {
                         let mut s = setting;
                         if *unit_system == UnitSystem::US {
                             s /= PSIperFT;
@@ -945,6 +941,288 @@ impl Network {
             _ => (),
         }
         Ok(())
+    }
+
+    /// Attempts to read a rule from a linebuffer
+    fn read_rule(&self, lines: &mut Vec<String>) -> Result<Rule, InputError> {
+        let mut rule_id: Option<String> = None;
+        let mut rule_priority: Option<usize> = None;
+        let mut conditions: Vec<RuleCondition> = Vec::new();
+        let mut actions: Vec<RuleAction> = Vec::new();
+
+        let mut reading_conditions = true;
+        let mut else_action = false;
+
+        for line in lines.drain(..) {
+            let mut parts = line.split_whitespace();
+            let operation = parts.next().ok_or_missing("")?;
+
+            match operation {
+                // Read RULE ID
+                "RULE" => {
+                    let id = parts.next().ok_or_missing("Missing RULE id")?;
+                    rule_id = Some(id.to_string());
+                }
+                "IF" => {
+                    conditions.push(self.read_rule_condition(&line)?);
+                }
+                // Read a rule condition
+                "OR" => {
+                    conditions.push(self.read_rule_condition(&line)?);
+                }
+                // Read a rule action
+                "THEN" => {
+                    reading_conditions = false;
+                    actions.push(self.read_rule_action(&line, false)?);
+                }
+                // Read a rule condition or action, based on reading_conditions flag
+                "AND" => {
+                    if reading_conditions {
+                        conditions.push(self.read_rule_condition(&line)?);
+                    } else {
+                        actions.push(self.read_rule_action(&line, else_action)?)
+                    }
+                }
+                // Read an action, set else_action flag
+                "ELSE" => {
+                    // reading
+                    else_action = true;
+                    actions.push(self.read_rule_action(&line, else_action)?)
+                }
+                "PRIORITY" => {
+                    rule_priority = Some(
+                        parts
+                            .next()
+                            .ok_or_missing("Missing Priority value")?
+                            .parse_field::<usize>("invalid priority")?,
+                    );
+                }
+                _ => return Err(InputError::new(format!("Invalid RULE line: {}", line))),
+            }
+        }
+
+        // validate rule
+        if conditions.is_empty() {
+            return Err(InputError::new("Rule has no conditions"));
+        }
+        if actions.is_empty() {
+            return Err(InputError::new("Rule has no conditions"));
+        }
+
+        let rule = Rule {
+            id: rule_id.ok_or_missing("Rule ID missing")?.into(),
+            conditions,
+            actions,
+            priority: rule_priority,
+        };
+
+        Ok(rule)
+    }
+
+    fn read_rule_action(&self, line: &str, else_action: bool) -> Result<RuleAction, InputError> {
+        // A rule action clause consists of
+        // THEN/AND/ELSE <OBJECT> <ID> STATUS/SETTING IS <value>
+
+        let mut parts = line.split_whitespace();
+        // skip first word
+        parts.next();
+        // get object type
+        let link_type = parts
+            .next()
+            .ok_or_missing("missing link type for rule action")?;
+
+        let link_id = parts
+            .next()
+            .ok_or_missing("missing link id for rule action")?;
+        let link_index = *self.link_map.get(link_id).ok_or_else(|| {
+            InputError::new(format!("Link '{}' not found for rule action", link_id))
+        })?;
+
+        let link = &self.links[link_index];
+
+        // check for valid link type
+        let is_valid = match link_type {
+            "LINK" => true,
+            "PIPE" => matches!(link.link_type, LinkType::Pipe(_)),
+            "VALVE" => matches!(link.link_type, LinkType::Valve(_)),
+            "PUMP" => matches!(link.link_type, LinkType::Pump(_)),
+            _ => {
+                return Err(InputError::new(format!(
+                    "Invalid link type '{}' for rule action",
+                    link_type
+                )));
+            }
+        };
+        if !is_valid {
+            return Err(InputError::new(format!(
+                "Rule action target id '{}' is not a {}",
+                link_id, link_type
+            )));
+        }
+
+        let status_or_setting = parts.next().ok_or_missing("Invalid action clause")?;
+        let is = parts.next().ok_or_missing("Invalid action clause")?;
+
+        if is != "IS" {
+            return Err(InputError::new("Invalid action clause, missing IS"));
+        }
+
+        let value = parts
+            .next()
+            .ok_or_missing("Action clause missing value or setting")?;
+
+        // get status or setting value
+        let (setting, status) = match status_or_setting {
+            "STATUS" => {
+                let link_status = match value {
+                    "OPEN" => LinkStatus::Open,
+                    "CLOSED" => LinkStatus::Closed,
+                    _ => {
+                        return Err(InputError::new(format!(
+                            "Invalid action status value {}, only OPEN/CLOSE supported",
+                            value
+                        )));
+                    }
+                };
+                (None, Some(link_status))
+            }
+            "SETTING" => {
+                let setting = value.parse_field::<f64>("Rule value")?;
+                (Some(setting), None)
+            }
+            _ => {
+                return Err(InputError::new(
+                    "Invalid action, STATUS/SETTING expected".to_string(),
+                ));
+            }
+        };
+
+        Ok(RuleAction {
+            link_id: link_id.into(),
+            setting,
+            status,
+            default_active: else_action,
+        })
+    }
+
+    fn read_rule_condition(&self, line: &str) -> Result<RuleCondition, InputError> {
+        // read a rule condition clause with format
+        // <object> <id?>  <attribute>  <relation>  <value>
+        let mut parts = line.split_whitespace();
+
+        let first = parts.next().ok_or_missing("Invalid rule condition")?;
+
+        let operator = match first {
+            "IF" => RuleConditionOperator::And,
+            "AND" => RuleConditionOperator::And,
+            "OR" => RuleConditionOperator::Or,
+            _ => return Err(InputError::new("Invalid rule operator")),
+        };
+
+        // get rule condition target
+        let target = parts.next().ok_or_missing("Invalid rule condition")?;
+
+        let target = match target {
+            "SYSTEM" => {
+                let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = match attribute {
+                    "DEMAND" => SystemAttribute::Demand,
+                    "TIME" => SystemAttribute::Time,
+                    "CLOCKTIME" => SystemAttribute::ClockTime,
+                    _ => return Err(InputError::new("Invalid rule condition")),
+                };
+                RuleConditionTarget::System { attribute }
+            }
+            "NODE" => {
+                let node_id = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = match attribute {
+                    "DEMAND" => NodeAttribute::Demand,
+                    "HEAD" => NodeAttribute::Head,
+                    "PRESSURE" => NodeAttribute::Pressure,
+                    _ => return Err(InputError::new("Invalid rule condition")),
+                };
+                RuleConditionTarget::Node {
+                    id: node_id.into(),
+                    attribute,
+                }
+            }
+            "TANK" => {
+                let tank_id = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = match attribute {
+                    "LEVEL" => TankAttribute::Level,
+                    "FILLTIME" => TankAttribute::FillTime,
+                    "DRAINTIME" => TankAttribute::DrainTime,
+                    _ => return Err(InputError::new("Invalid rule condition")),
+                };
+                RuleConditionTarget::Tank {
+                    id: tank_id.into(),
+                    attribute,
+                }
+            }
+            "LINK" | "PIPE" | "VALVE" | "PUMP" => {
+                let link_id = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = parts.next().ok_or_missing("Invalid rule condition")?;
+                let attribute = match attribute {
+                    "FLOW" => LinkAttribute::Flow,
+                    "STATUS" => LinkAttribute::Status,
+                    "SETTING" => LinkAttribute::Setting,
+                    _ => return Err(InputError::new("Invalid rule condition")),
+                };
+                RuleConditionTarget::Link {
+                    id: link_id.into(),
+                    attribute,
+                }
+            }
+            _ => return Err(InputError::new("Invalid rule condition target")),
+        };
+
+        let comparison = parts.next().ok_or_missing("Invalid rule condition")?;
+
+        let comparison_operator = match ComparisonOperator::from_str(comparison) {
+            Ok(comparison_operator) => comparison_operator,
+            Err(_) => {
+                return Err(InputError::new(format!(
+                    "Invalid rule condition comparison {}",
+                    comparison
+                )));
+            }
+        };
+
+        let value = parts.next().ok_or_missing("Invalid rule condition")?;
+
+        // convert value to ConditionValue
+        let condition_value = match value {
+            "OPEN" => ConditionValue::Status(LinkStatus::Open),
+            "CLOSED" => ConditionValue::Status(LinkStatus::Closed),
+            "ACTIVE" => ConditionValue::Status(LinkStatus::Active),
+            _ => {
+              // if the condition target is a system time attribute
+              if matches!(target, RuleConditionTarget::System { attribute: SystemAttribute::Time } | RuleConditionTarget::System { attribute: SystemAttribute::ClockTime }) {
+                let seconds = parse_time_str(value, parts.next())?;
+                ConditionValue::Number(seconds as f64)
+              } else {
+                if let Ok(value) = value.parse::<f64>() {
+                  ConditionValue::Number(value)
+                } else {
+                  return Err(InputError::new(format!(
+                      "Invalid rule condition value {}",
+                      value
+                    )));
+                }
+              }
+            }
+        };
+
+        
+
+        Ok(RuleCondition {
+            operator,
+            target,
+            comparison: comparison_operator,
+            value: condition_value,
+        })
     }
 
     fn read_control(&mut self, line: &str) -> Result<(), InputError> {
@@ -1793,5 +2071,165 @@ mod tests {
             panic!("Expected ClockTime control condition");
         };
         assert_eq!(*seconds, 13 * 3600 + 15 * 60);
+    }
+
+    #[test]
+    fn test_read_rules_with_clocktime_and_tank_level() {
+        let mut network = test_network(true);
+        network
+            .add_link(Link {
+                id: "335".into(),
+                link_type: LinkType::Pump(Pump {
+                    speed: 1.0,
+                    head_curve_id: None,
+                    power: 1.0,
+                    head_curve: None,
+                }),
+                start_node: 0,
+                end_node: 1,
+                start_node_id: "N1".into(),
+                end_node_id: "N2".into(),
+                initial_status: LinkStatus::Open,
+                vertices: None,
+            })
+            .unwrap();
+        network
+            .add_link(Link {
+                id: "330".into(),
+                link_type: LinkType::Pipe(Pipe {
+                    length: 100.0,
+                    diameter: 12.0,
+                    roughness: 100.0,
+                    check_valve: false,
+                    headloss_formula: HeadlossFormula::HazenWilliams,
+                    minor_loss: 0.0,
+                }),
+                start_node: 0,
+                end_node: 1,
+                start_node_id: "N1".into(),
+                end_node_id: "N2".into(),
+                initial_status: LinkStatus::Open,
+                vertices: None,
+            })
+            .unwrap();
+
+        let mut rule_1 = vec![
+            "RULE 1".to_string(),
+            "IF   TANK   1 LEVEL ABOVE 19.1".to_string(),
+            "THEN PUMP 335 STATUS IS CLOSED".to_string(),
+            "AND  PIPE 330 STATUS IS OPEN".to_string(),
+        ];
+        let mut rule_2 = vec![
+            "RULE 2".to_string(),
+            "IF   SYSTEM CLOCKTIME >= 8 AM".to_string(),
+            "AND  SYSTEM CLOCKTIME < 6 PM".to_string(),
+            "AND  TANK 1 LEVEL BELOW 12".to_string(),
+            "THEN PUMP 335 STATUS IS OPEN".to_string(),
+        ];
+        let mut rule_3 = vec![
+            "RULE 3".to_string(),
+            "IF   SYSTEM CLOCKTIME >= 6 PM".to_string(),
+            "OR   SYSTEM CLOCKTIME < 8 AM".to_string(),
+            "AND  TANK 1 LEVEL BELOW 14".to_string(),
+            "THEN PUMP 335 STATUS IS OPEN".to_string(),
+        ];
+
+        let rule_1 = network.read_rule(&mut rule_1).unwrap();
+        let rule_2 = network.read_rule(&mut rule_2).unwrap();
+        let rule_3 = network.read_rule(&mut rule_3).unwrap();
+
+        assert_eq!(&*rule_1.id, "1");
+        assert_eq!(rule_1.conditions.len(), 1);
+        assert_eq!(rule_1.actions.len(), 2);
+        match &rule_1.conditions[0].target {
+            RuleConditionTarget::Tank { id, attribute } => {
+                assert_eq!(&**id, "1");
+                assert!(matches!(attribute, TankAttribute::Level));
+            }
+            _ => panic!("Expected tank level condition"),
+        }
+        assert!(matches!(&rule_1.conditions[0].comparison, ComparisonOperator::Gt));
+        assert!(matches!(rule_1.conditions[0].value, ConditionValue::Number(19.1)));
+        assert_eq!(rule_1.actions[0].link_id, "335".into());
+        assert_eq!(rule_1.actions[0].status, Some(LinkStatus::Closed));
+        assert_eq!(rule_1.actions[1].link_id, "330".into());
+        assert_eq!(rule_1.actions[1].status, Some(LinkStatus::Open));
+
+        assert_eq!(&*rule_2.id, "2");
+        assert_eq!(rule_2.conditions.len(), 3);
+        assert_eq!(rule_2.actions.len(), 1);
+        assert!(matches!(&rule_2.conditions[0].comparison, ComparisonOperator::Ge));
+        assert!(matches!(rule_2.conditions[0].value, ConditionValue::Number(28800.0)));
+        assert!(matches!(&rule_2.conditions[1].comparison, ComparisonOperator::Lt));
+        assert!(matches!(rule_2.conditions[1].value, ConditionValue::Number(64800.0)));
+        assert!(matches!(&rule_2.conditions[2].comparison, ComparisonOperator::Lt));
+        assert!(matches!(rule_2.conditions[2].value, ConditionValue::Number(12.0)));
+        assert_eq!(rule_2.actions[0].link_id, "335".into());
+        assert_eq!(rule_2.actions[0].status, Some(LinkStatus::Open));
+
+        assert_eq!(&*rule_3.id, "3");
+        assert_eq!(rule_3.conditions.len(), 3);
+        assert_eq!(rule_3.actions.len(), 1);
+        assert!(matches!(&rule_3.conditions[0].operator, RuleConditionOperator::And));
+        assert!(matches!(&rule_3.conditions[1].operator, RuleConditionOperator::Or));
+        assert!(matches!(&rule_3.conditions[2].operator, RuleConditionOperator::And));
+        assert!(matches!(rule_3.conditions[0].value, ConditionValue::Number(64800.0)));
+        assert!(matches!(rule_3.conditions[1].value, ConditionValue::Number(28800.0)));
+        assert!(matches!(rule_3.conditions[2].value, ConditionValue::Number(14.0)));
+        assert_eq!(rule_3.actions[0].link_id, "335".into());
+        assert_eq!(rule_3.actions[0].status, Some(LinkStatus::Open));
+    }
+
+    #[test]
+    fn test_read_rule_action() {
+        let mut network = test_network(true);
+
+        let action = network
+            .read_rule_action("THEN LINK L1 STATUS IS CLOSED", true)
+            .unwrap();
+
+        assert_eq!(action.link_id, "L1".into());
+        assert_eq!(action.status, Some(LinkStatus::Closed));
+        assert_eq!(action.setting, None);
+        assert_eq!(action.default_active, true);
+    }
+    #[test]
+    fn test_read_rule_condition_clocktime() {
+        let network = test_network(true);
+        let condition = network.read_rule_condition("IF SYSTEM CLOCKTIME >= 8 AM").unwrap();
+        assert_eq!(condition.operator, RuleConditionOperator::And);
+        assert_eq!(condition.target, RuleConditionTarget::System { attribute: SystemAttribute::ClockTime });
+        assert_eq!(condition.comparison, ComparisonOperator::Ge);
+        assert_eq!(condition.value, ConditionValue::Number(28800.0));
+    }
+
+    #[test]
+    fn test_read_rule_condition_link_flow() {
+        let network = test_network(true);
+        let condition = network.read_rule_condition("IF LINK L1 FLOW ABOVE 100").unwrap();
+        assert_eq!(condition.operator, RuleConditionOperator::And);
+        assert_eq!(condition.target, RuleConditionTarget::Link { id: "L1".into(), attribute: LinkAttribute::Flow });
+        assert_eq!(condition.comparison, ComparisonOperator::Gt);
+        assert_eq!(condition.value, ConditionValue::Number(100.0));
+    }
+
+    #[test]
+    fn test_read_rule_condition_link_status() {
+        let network = test_network(true);
+        let condition = network.read_rule_condition("IF LINK L1 STATUS IS OPEN").unwrap();
+        assert_eq!(condition.operator, RuleConditionOperator::And);
+        assert_eq!(condition.target, RuleConditionTarget::Link { id: "L1".into(), attribute: LinkAttribute::Status });
+        assert_eq!(condition.comparison, ComparisonOperator::Eq);
+        assert_eq!(condition.value, ConditionValue::Status(LinkStatus::Open));
+    }
+
+    #[test]
+    fn test_read_rule_condition_link_setting() {
+        let network = test_network(true);
+        let condition = network.read_rule_condition("IF PUMP L1 SETTING IS 1.5").unwrap();
+        assert_eq!(condition.operator, RuleConditionOperator::And);
+        assert_eq!(condition.target, RuleConditionTarget::Link { id: "L1".into(), attribute: LinkAttribute::Setting });
+        assert_eq!(condition.comparison, ComparisonOperator::Eq);
+        assert_eq!(condition.value, ConditionValue::Number(1.5));
     }
 }

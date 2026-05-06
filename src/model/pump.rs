@@ -28,6 +28,8 @@ impl LinkTrait for Pump {
         status: LinkStatus,
         _: f64,
         _: f64,
+        _: f64,
+        _: f64,
     ) -> LinkCoefficients {
         // for closed pumps, stalled pumps, or pumps with speed, act as closed pipe
         if status == LinkStatus::Closed
@@ -89,6 +91,8 @@ impl LinkTrait for Pump {
         &self,
         _: f64,
         status: LinkStatus,
+        _: f64,
+        _: f64,
         _: f64,
         _: f64,
         _: f64,
