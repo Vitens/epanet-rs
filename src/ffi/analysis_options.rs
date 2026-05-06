@@ -57,7 +57,6 @@ pub unsafe extern "C" fn EN_settimeparam(
             }
         }
         TimeParameter::PatternStart => {
-            println!("Pattern start: {}", value);
             time_options.pattern_start = value;
         }
         TimeParameter::ReportStep => {

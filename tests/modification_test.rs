@@ -112,6 +112,4 @@ fn test_network_creation() {
 
     let result = simulation.solve_hydraulics(false).unwrap();
     assert!((result.heads[0][1] - 106.35).abs() < 0.01);
-
-    // switch link "G" to a valve
 }
