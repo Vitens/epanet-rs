@@ -12,6 +12,7 @@ pub mod pattern;
 pub mod pipe;
 pub mod pump;
 pub mod reservoir;
+pub mod rule;
 pub mod tank;
 pub mod units;
 pub mod valve;

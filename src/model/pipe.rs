@@ -40,6 +40,8 @@ impl LinkTrait for Pipe {
         status: LinkStatus,
         _: f64,
         _: f64,
+        _: f64,
+        _: f64,
     ) -> LinkCoefficients {
         if self.check_valve && q < 0.0 {
             return LinkCoefficients::new_status(1.0 / BIG_VALUE, q, LinkStatus::TempClosed);
@@ -106,6 +108,8 @@ impl LinkTrait for Pipe {
         &self,
         _: f64,
         status: LinkStatus,
+        _: f64,
+        _: f64,
         _: f64,
         _: f64,
         _: f64,

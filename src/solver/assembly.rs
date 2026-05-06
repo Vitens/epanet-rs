@@ -85,6 +85,8 @@ impl HydraulicSolver {
                 state.statuses[i],
                 excess_flows[link.start_node],
                 excess_flows[link.end_node],
+                network.nodes[link.start_node].elevation,
+                network.nodes[link.end_node].elevation,
             );
 
             link_coefficients.g_inv[i] = coefficients.g_inv;

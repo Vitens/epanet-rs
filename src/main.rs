@@ -23,7 +23,7 @@ const BANNER: [&str; 6] = [
 #[derive(Parser, Debug)]
 #[command(
     author = "Abel Heinsbroek (Vitens N.V.)",
-    version = "0.1.0",
+    version = "0.2.1",
     about = "A very fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust"
 )]
 struct Cli {
