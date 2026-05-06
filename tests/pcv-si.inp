@@ -1,0 +1,88 @@
+
+[JUNCTIONS]
+;ID        Elev         Demand       Pattern      
+;-------------------------------------------------
+
+[RESERVOIRS]
+;ID        Head            Pattern      
+;---------------------------------------
+N1         5            
+N2         4
+
+[TANKS]
+;ID        Elevation       InitLevel       MinLevel        MaxLevel        Diameter        MinVol          VolCurve        Overflow     
+;---------------------------------------------------------------------------------------------------------------------------------------
+
+[PIPES]
+;ID        Node1        Node2        Length       Diameter     Roughness    MinorLoss    Status       
+;-----------------------------------------------------------------------------------------------------
+
+[PUMPS]
+;ID        Node1        Node2        Parameters   
+;-------------------------------------------------
+
+[VALVES]
+;ID        Node1        Node2        Diameter     Type         Setting      MinorLoss    PCV Curve    
+;-----------------------------------------------------------------------------------------------------
+v1         N1           N2           50           PCV          20           0.4          c1          
+
+[DEMANDS]
+;Junction  Demand       Pattern      
+;------------------------------------
+
+[EMITTERS]
+;Junction  Coefficient  
+;-----------------------
+
+[CURVES]
+;ID        X-Value      Y-Value      
+;------------------------------------
+c1         0            0           
+c1         12.9111      1.4366      
+c1         23.6179      3.6852      
+c1         34.6396      7.995       
+c1         41.5675      11.93       
+c1         50.5948      18.1137     
+c1         60.7768      28.2324     
+c1         68.8593      39.1006     
+c1         78.2015      56.1524     
+c1         86.704       78.0762     
+c1         93.1071      91.7552     
+c1         100          100         
+;
+
+[PATTERNS]
+;ID        Multipliers  
+;-----------------------
+
+[CONTROLS]
+
+[TIMES]
+DURATION 00:00
+HYDRAULIC TIMESTEP 01:00
+PATTERN TIMESTEP 01:00
+REPORT TIMESTEP 01:00
+PATTERN START 00:00
+START CLOCKTIME 00:00
+
+[OPTIONS]
+Units CMH
+Headloss D-W
+DEMAND MODEL PDA
+Specific Gravity 1
+Viscosity 1
+Trials 40
+Accuracy 0.001
+Pattern 1
+Demand Multiplier 1
+Emitter Exponent 2
+
+[COORDINATES]
+;ID        X            Y            
+;------------------------------------
+N1         0            0           
+N2         5            0           
+
+[VERTICES]
+;Link      X            Y            
+;------------------------------------

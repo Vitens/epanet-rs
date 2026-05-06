@@ -676,7 +676,14 @@ impl Network {
         // if data.valve_type == ValveType::GPV && data.curve_id.is_none() {
         //   return Err(InputError::new("GPV valves require a curve id"));
         // }
-        let valve_curve = self.resolve_valve_curve(data.curve_id.as_deref())?;
+        // resolve the curve based on valve type. GPV curves are converted to
+        // standard units, while PCV curves are stored as-is because they
+        // represent dimensionless percentage relationships.
+        let (gpv_curve, pcv_curve) = match data.valve_type {
+            ValveType::GPV => (self.resolve_gpv_curve(data.curve_id.as_deref())?, None),
+            ValveType::PCV => (None, self.resolve_pcv_curve(data.curve_id.as_deref())?),
+            _ => (None, None),
+        };
 
         let valve = Valve {
             diameter: data.diameter,
@@ -684,7 +691,8 @@ impl Network {
             curve_id: data.curve_id.clone(),
             valve_type: data.valve_type.clone(),
             minor_loss: data.minor_loss,
-            valve_curve: None,
+            gpv_curve: None,
+            pcv_curve: None,
         };
 
         let mut link = Link {
@@ -713,7 +721,8 @@ impl Network {
                 }
                 _ => {}
             }
-            valve.valve_curve = valve_curve;
+            valve.gpv_curve = gpv_curve;
+            valve.pcv_curve = pcv_curve;
         }
 
         self.add_link(link)
@@ -828,9 +837,9 @@ impl Network {
 
         // capture the current valve_type and resolve the target valve_type so we
         // can validate the update before mutating anything.
-        let (old_valve_type, _had_curve) =
+        let (old_valve_type, old_curve_id) =
             if let LinkType::Valve(valve) = &self.links[link_index].link_type {
-                (valve.valve_type.clone(), valve.curve_id.is_some())
+                (valve.valve_type.clone(), valve.curve_id.clone())
             } else {
                 unreachable!()
             };
@@ -868,12 +877,39 @@ impl Network {
         }
 
         // resolve the new curve (if a curve change is requested) before we take
-        // a mutable borrow on the link.
-        let curve_change: Option<(Option<Box<str>>, Option<ValveCurve>)> = match &update.curve_id {
-            None => None,
-            Some(None) => Some((None, None)),
+        // a mutable borrow on the link. The resolved curve type depends on the
+        // (possibly new) valve type: GPV uses a unit-converted ValveCurve,
+        // while PCV uses a raw Curve (its values are dimensionless percentages).
+        // When the valve type changes but curve_id is left unchanged, we still
+        // need to re-build the cached curve under the new type's semantics.
+        let curve_change: Option<(Option<Box<str>>, ResolvedValveCurve)> = match &update.curve_id {
+            None => {
+                if type_changed {
+                    let resolved = match (new_valve_type.clone(), old_curve_id.as_deref()) {
+                        (ValveType::GPV, Some(cid)) => {
+                            ResolvedValveCurve::Gpv(self.resolve_gpv_curve(Some(cid))?)
+                        }
+                        (ValveType::PCV, Some(cid)) => {
+                            ResolvedValveCurve::Pcv(self.resolve_pcv_curve(Some(cid))?)
+                        }
+                        _ => ResolvedValveCurve::None,
+                    };
+                    Some((old_curve_id.clone(), resolved))
+                } else {
+                    None
+                }
+            }
+            Some(None) => Some((None, ResolvedValveCurve::None)),
             Some(Some(curve_id)) => {
-                let resolved = self.resolve_valve_curve(Some(curve_id.as_ref()))?;
+                let resolved = match new_valve_type {
+                    ValveType::GPV => ResolvedValveCurve::Gpv(
+                        self.resolve_gpv_curve(Some(curve_id.as_ref()))?,
+                    ),
+                    ValveType::PCV => ResolvedValveCurve::Pcv(
+                        self.resolve_pcv_curve(Some(curve_id.as_ref()))?,
+                    ),
+                    _ => ResolvedValveCurve::None,
+                };
                 Some((Some(curve_id.clone()), resolved))
             }
         };
@@ -938,7 +974,14 @@ impl Network {
             }
             if let Some((new_curve_id, new_valve_curve)) = curve_change {
                 valve.curve_id = new_curve_id;
-                valve.valve_curve = new_valve_curve;
+                // clear both caches and set whichever applies for the new type
+                valve.gpv_curve = None;
+                valve.pcv_curve = None;
+                match new_valve_curve {
+                    ResolvedValveCurve::Gpv(c) => valve.gpv_curve = c,
+                    ResolvedValveCurve::Pcv(c) => valve.pcv_curve = c,
+                    ResolvedValveCurve::None => {}
+                }
             }
         }
 
@@ -1428,11 +1471,19 @@ impl Network {
                     self.updated_links.insert(i);
                 }
                 LinkType::Valve(valve) if valve.curve_id.as_deref() == Some(id) => {
-                    valve.valve_curve = Some(ValveCurve::new(
-                        curve,
-                        &self.options.flow_units,
-                        &self.options.unit_system,
-                    )?);
+                    match valve.valve_type {
+                        ValveType::GPV => {
+                            valve.gpv_curve = Some(ValveCurve::new(
+                                curve,
+                                &self.options.flow_units,
+                                &self.options.unit_system,
+                            )?);
+                        }
+                        ValveType::PCV => {
+                            valve.pcv_curve = Some(curve.clone());
+                        }
+                        _ => {}
+                    }
                     self.updated_links.insert(i);
                 }
                 _ => {}
@@ -1503,7 +1554,10 @@ impl Network {
         )?))
     }
 
-    fn resolve_valve_curve(
+    /// Resolve a curve id to a unit-converted [`ValveCurve`] used by GPV
+    /// valves. The curve x/y values are converted from user units to the
+    /// internal CFS/feet representation.
+    fn resolve_gpv_curve(
         &self,
         curve_id: Option<&str>,
     ) -> Result<Option<ValveCurve>, InputError> {
@@ -1524,6 +1578,33 @@ impl Network {
             &self.options.unit_system,
         )?))
     }
+
+    /// Resolve a curve id to a raw [`Curve`] used by PCV valves. PCV curves
+    /// describe a dimensionless percent-open vs. flow-ratio relationship and
+    /// are therefore stored unmodified.
+    fn resolve_pcv_curve(&self, curve_id: Option<&str>) -> Result<Option<Curve>, InputError> {
+        let Some(curve_id) = curve_id else {
+            return Ok(None);
+        };
+        let curve_index =
+            *self
+                .curve_map
+                .get(curve_id)
+                .ok_or_else(|| InputError::CurveNotFound {
+                    curve_id: curve_id.into(),
+                })?;
+        Ok(Some(self.curves[curve_index].clone()))
+    }
+}
+
+/// Result of resolving a curve id for a valve. The variant carried depends
+/// on the valve's type because GPV and PCV valves cache different
+/// representations of the underlying curve (see [`Valve::gpv_curve`] and
+/// [`Valve::pcv_curve`]).
+enum ResolvedValveCurve {
+    Gpv(Option<ValveCurve>),
+    Pcv(Option<Curve>),
+    None,
 }
 
 /// Validate a raw curve's x/y arrays: both must be non-empty, of equal
@@ -3413,7 +3494,8 @@ mod tests {
             panic!("Expected Valve link type");
         };
         assert_eq!(valve.curve_id.as_deref(), Some("C1"));
-        assert!(valve.valve_curve.is_some());
+        assert!(valve.gpv_curve.is_some());
+        assert!(valve.pcv_curve.is_none());
     }
 
     #[test]
@@ -3455,7 +3537,8 @@ mod tests {
             panic!("Expected Valve link type");
         };
         assert!(valve.curve_id.is_none());
-        assert!(valve.valve_curve.is_none());
+        assert!(valve.gpv_curve.is_none());
+        assert!(valve.pcv_curve.is_none());
     }
 
     #[test]

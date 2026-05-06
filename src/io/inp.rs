@@ -412,7 +412,7 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
         &mut buffer,
         &format!(
             "Pattern {}",
-            network.options.pattern.as_deref().unwrap_or("")
+            network.options.pattern.as_deref().unwrap_or("1")
         ),
     );
     write_line(

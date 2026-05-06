@@ -1,7 +1,7 @@
 //! `Valve` link and `ValveType` variants (PRV, PSV, PBV, FCV, TCV, GPV) with their control logic.
 
 use crate::constants::*;
-use crate::model::curve::ValveCurve;
+use crate::model::curve::{Curve, ValveCurve};
 use crate::model::link::{LinkCoefficients, LinkStatus, LinkTrait, NodeModification};
 use crate::model::options::SimulationOptions;
 use crate::model::units::{Ft, UnitConversion, UnitSystem};
@@ -26,7 +26,9 @@ pub struct Valve {
     pub valve_type: ValveType,
     pub minor_loss: f64,
     #[serde(skip)]
-    pub valve_curve: Option<ValveCurve>,
+    pub gpv_curve: Option<ValveCurve>,
+    #[serde(skip)]
+    pub pcv_curve: Option<Curve>,
 }
 
 impl LinkTrait for Valve {
@@ -241,7 +243,7 @@ impl Valve {
 
     /// Compute the coefficients for general purpose valve with a flow q
     fn gpv_coefficients(&self, q: f64) -> LinkCoefficients {
-        let curve = self.valve_curve.as_ref().unwrap();
+        let curve = self.gpv_curve.as_ref().unwrap();
 
         let q_abs = q.abs().max(TINY);
 
@@ -304,7 +306,7 @@ impl Valve {
         }
 
         // Valve is partially open
-        let ratio = if let Some(curve) = &self.valve_curve {
+        let ratio = if let Some(curve) = &self.pcv_curve {
             // Use the valve curve to compute the ratio
             let (h0, r) = curve.coefficients(setting);
             let ratio = h0 + r * setting;
@@ -347,6 +349,7 @@ impl Valve {
 
 impl UnitConversion for Valve {
     fn convert_to_standard(&mut self, options: &SimulationOptions) {
+
         if options.unit_system == UnitSystem::US {
             self.diameter /= 12.0; // convert in to ft
             // convert valve setting from PSI to feet

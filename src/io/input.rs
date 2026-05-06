@@ -214,17 +214,27 @@ impl Network {
                     valve.setting += self.nodes[link.end_node].elevation;
                     self.contains_pressure_control_valve = true;
                 }
-                // assign the valve curve to the valve
+                // assign the valve curve to the valve. GPV curves are converted
+                // to standard units, while PCV curves are stored as-is because
+                // they represent dimensionless percentage relationships.
                 if let Some(curve_id) = &valve.curve_id {
                     let curve_index = self.curve_map.get(curve_id).ok_or_else(|| {
                         InputError::new(format!("Curve '{}' not found for valve", curve_id))
                     })?;
                     let curve = &self.curves[*curve_index];
-                    valve.valve_curve = Some(ValveCurve::new(
-                        curve,
-                        &self.options.flow_units,
-                        &self.options.unit_system,
-                    )?);
+                    match valve.valve_type {
+                        ValveType::GPV => {
+                            valve.gpv_curve = Some(ValveCurve::new(
+                                curve,
+                                &self.options.flow_units,
+                                &self.options.unit_system,
+                            )?);
+                        }
+                        ValveType::PCV => {
+                            valve.pcv_curve = Some(curve.clone());
+                        }
+                        _ => {}
+                    }
                 }
             }
             if let LinkType::Pipe(pipe) = &mut link.link_type {
@@ -494,7 +504,8 @@ impl Network {
                 curve_id,
                 valve_type,
                 minor_loss,
-                valve_curve: None,
+                gpv_curve: None,
+                pcv_curve: None,
             }),
             initial_status: LinkStatus::Active,
             vertices: None,

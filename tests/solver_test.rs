@@ -302,3 +302,23 @@ fn test_solve_tankmodel_network() {
         &expected_flows,
     );
 }
+
+#[test]
+// Bug with PCV valve minor loss and SI units
+fn test_solve_pcv_valve_minor_loss_si_units() {
+    let mut simulation =
+        Simulation::from_file("tests/pcv-si.inp").expect("Failed to create simulation");
+    let result = simulation
+        .solve_hydraulics(false)
+        .expect("Failed to solve hydraulics");
+
+    let expected_heads: Vec<(&str, f64)> = vec![("N1", 5.00), ("N2", 4.00)];
+    let expected_flows: Vec<(&str, f64)> = vec![("v1", 1.45)];
+
+    verify_heads_and_flows(
+        &simulation.network,
+        &result,
+        &expected_heads,
+        &expected_flows,
+    );
+}
