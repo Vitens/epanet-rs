@@ -81,7 +81,9 @@ pub enum RuleConditionOperator {
     And,
 }
 
-#[derive(strum::EnumString, strum::Display, Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[derive(
+    strum::EnumString, strum::Display, Debug, Deserialize, Serialize, Clone, PartialEq, Eq,
+)]
 pub enum ComparisonOperator {
     #[strum(serialize = "IS", serialize = "=")]
     Eq,
@@ -240,4 +242,3 @@ pub struct RuleAction {
     /// Rule active by default (part of ELSE clause)
     pub default_active: bool,
 }
-

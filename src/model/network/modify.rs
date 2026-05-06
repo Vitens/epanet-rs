@@ -896,12 +896,12 @@ impl Network {
             Some(None) => Some((None, ResolvedValveCurve::None)),
             Some(Some(curve_id)) => {
                 let resolved = match new_valve_type {
-                    ValveType::GPV => ResolvedValveCurve::Gpv(
-                        self.resolve_gpv_curve(Some(curve_id.as_ref()))?,
-                    ),
-                    ValveType::PCV => ResolvedValveCurve::Pcv(
-                        self.resolve_pcv_curve(Some(curve_id.as_ref()))?,
-                    ),
+                    ValveType::GPV => {
+                        ResolvedValveCurve::Gpv(self.resolve_gpv_curve(Some(curve_id.as_ref()))?)
+                    }
+                    ValveType::PCV => {
+                        ResolvedValveCurve::Pcv(self.resolve_pcv_curve(Some(curve_id.as_ref()))?)
+                    }
                     _ => ResolvedValveCurve::None,
                 };
                 Some((Some(curve_id.clone()), resolved))
@@ -933,34 +933,17 @@ impl Network {
 
         link.convert_to_standard(&self.options);
 
-        if let LinkType::Valve(valve) = &mut link.link_type {
-            if let Some(diameter) = update.diameter {
-                valve.diameter = diameter;
-            }
-            if let Some(setting) = update.setting {
-                valve.setting = setting;
-            }
-            if let Some(minor_loss) = update.minor_loss {
-                valve.minor_loss = minor_loss;
-            match new_valve_type {
-                ValveType::PSV => {
-                    valve.setting += start_elevation;
-                }
-                ValveType::PRV => {
-                    valve.setting += end_elevation;
-                }
-                _ => {}
-            }
-            if let Some((new_curve_id, new_valve_curve)) = curve_change {
-                valve.curve_id = new_curve_id;
-                // clear both caches and set whichever applies for the new type
-                valve.gpv_curve = None;
-                valve.pcv_curve = None;
-                match new_valve_curve {
-                    ResolvedValveCurve::Gpv(c) => valve.gpv_curve = c,
-                    ResolvedValveCurve::Pcv(c) => valve.pcv_curve = c,
-                    ResolvedValveCurve::None => {}
-                }
+        if let LinkType::Valve(valve) = &mut link.link_type
+            && let Some((new_curve_id, new_valve_curve)) = curve_change
+        {
+            valve.curve_id = new_curve_id;
+            // clear both caches and set whichever applies for the new type
+            valve.gpv_curve = None;
+            valve.pcv_curve = None;
+            match new_valve_curve {
+                ResolvedValveCurve::Gpv(c) => valve.gpv_curve = c,
+                ResolvedValveCurve::Pcv(c) => valve.pcv_curve = c,
+                ResolvedValveCurve::None => {}
             }
         }
 
@@ -1512,10 +1495,7 @@ impl Network {
     /// Resolve a curve id to a unit-converted [`ValveCurve`] used by GPV
     /// valves. The curve x/y values are converted from user units to the
     /// internal CFS/feet representation.
-    fn resolve_gpv_curve(
-        &self,
-        curve_id: Option<&str>,
-    ) -> Result<Option<ValveCurve>, InputError> {
+    fn resolve_gpv_curve(&self, curve_id: Option<&str>) -> Result<Option<ValveCurve>, InputError> {
         let Some(curve_id) = curve_id else {
             return Ok(None);
         };

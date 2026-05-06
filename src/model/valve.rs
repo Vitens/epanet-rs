@@ -364,7 +364,6 @@ impl Valve {
 
 impl UnitConversion for Valve {
     fn convert_to_standard(&mut self, options: &SimulationOptions) {
-
         if options.unit_system == UnitSystem::US {
             self.diameter /= 12.0; // convert in to ft
             // convert valve setting from PSI to feet

@@ -1209,24 +1209,29 @@ impl Network {
             "CLOSED" => ConditionValue::Status(LinkStatus::Closed),
             "ACTIVE" => ConditionValue::Status(LinkStatus::Active),
             _ => {
-              // if the condition target is a system time attribute
-              if matches!(target, RuleConditionTarget::System { attribute: SystemAttribute::Time } | RuleConditionTarget::System { attribute: SystemAttribute::ClockTime }) {
-                let seconds = parse_time_str(value, parts.next())?;
-                ConditionValue::Number(seconds as f64)
-              } else {
-                if let Ok(value) = value.parse::<f64>() {
-                  ConditionValue::Number(value)
+                // if the condition target is a system time attribute
+                if matches!(
+                    target,
+                    RuleConditionTarget::System {
+                        attribute: SystemAttribute::Time
+                    } | RuleConditionTarget::System {
+                        attribute: SystemAttribute::ClockTime
+                    }
+                ) {
+                    let seconds = parse_time_str(value, parts.next())?;
+                    ConditionValue::Number(seconds as f64)
                 } else {
-                  return Err(InputError::new(format!(
-                      "Invalid rule condition value {}",
-                      value
-                    )));
+                    if let Ok(value) = value.parse::<f64>() {
+                        ConditionValue::Number(value)
+                    } else {
+                        return Err(InputError::new(format!(
+                            "Invalid rule condition value {}",
+                            value
+                        )));
+                    }
                 }
-              }
             }
         };
-
-        
 
         Ok(RuleCondition {
             operator,
@@ -2159,8 +2164,14 @@ mod tests {
             }
             _ => panic!("Expected tank level condition"),
         }
-        assert!(matches!(&rule_1.conditions[0].comparison, ComparisonOperator::Gt));
-        assert!(matches!(rule_1.conditions[0].value, ConditionValue::Number(19.1)));
+        assert!(matches!(
+            &rule_1.conditions[0].comparison,
+            ComparisonOperator::Gt
+        ));
+        assert!(matches!(
+            rule_1.conditions[0].value,
+            ConditionValue::Number(19.1)
+        ));
         assert_eq!(rule_1.actions[0].link_id, "335".into());
         assert_eq!(rule_1.actions[0].status, Some(LinkStatus::Closed));
         assert_eq!(rule_1.actions[1].link_id, "330".into());
@@ -2169,24 +2180,60 @@ mod tests {
         assert_eq!(&*rule_2.id, "2");
         assert_eq!(rule_2.conditions.len(), 3);
         assert_eq!(rule_2.actions.len(), 1);
-        assert!(matches!(&rule_2.conditions[0].comparison, ComparisonOperator::Ge));
-        assert!(matches!(rule_2.conditions[0].value, ConditionValue::Number(28800.0)));
-        assert!(matches!(&rule_2.conditions[1].comparison, ComparisonOperator::Lt));
-        assert!(matches!(rule_2.conditions[1].value, ConditionValue::Number(64800.0)));
-        assert!(matches!(&rule_2.conditions[2].comparison, ComparisonOperator::Lt));
-        assert!(matches!(rule_2.conditions[2].value, ConditionValue::Number(12.0)));
+        assert!(matches!(
+            &rule_2.conditions[0].comparison,
+            ComparisonOperator::Ge
+        ));
+        assert!(matches!(
+            rule_2.conditions[0].value,
+            ConditionValue::Number(28800.0)
+        ));
+        assert!(matches!(
+            &rule_2.conditions[1].comparison,
+            ComparisonOperator::Lt
+        ));
+        assert!(matches!(
+            rule_2.conditions[1].value,
+            ConditionValue::Number(64800.0)
+        ));
+        assert!(matches!(
+            &rule_2.conditions[2].comparison,
+            ComparisonOperator::Lt
+        ));
+        assert!(matches!(
+            rule_2.conditions[2].value,
+            ConditionValue::Number(12.0)
+        ));
         assert_eq!(rule_2.actions[0].link_id, "335".into());
         assert_eq!(rule_2.actions[0].status, Some(LinkStatus::Open));
 
         assert_eq!(&*rule_3.id, "3");
         assert_eq!(rule_3.conditions.len(), 3);
         assert_eq!(rule_3.actions.len(), 1);
-        assert!(matches!(&rule_3.conditions[0].operator, RuleConditionOperator::And));
-        assert!(matches!(&rule_3.conditions[1].operator, RuleConditionOperator::Or));
-        assert!(matches!(&rule_3.conditions[2].operator, RuleConditionOperator::And));
-        assert!(matches!(rule_3.conditions[0].value, ConditionValue::Number(64800.0)));
-        assert!(matches!(rule_3.conditions[1].value, ConditionValue::Number(28800.0)));
-        assert!(matches!(rule_3.conditions[2].value, ConditionValue::Number(14.0)));
+        assert!(matches!(
+            &rule_3.conditions[0].operator,
+            RuleConditionOperator::And
+        ));
+        assert!(matches!(
+            &rule_3.conditions[1].operator,
+            RuleConditionOperator::Or
+        ));
+        assert!(matches!(
+            &rule_3.conditions[2].operator,
+            RuleConditionOperator::And
+        ));
+        assert!(matches!(
+            rule_3.conditions[0].value,
+            ConditionValue::Number(64800.0)
+        ));
+        assert!(matches!(
+            rule_3.conditions[1].value,
+            ConditionValue::Number(28800.0)
+        ));
+        assert!(matches!(
+            rule_3.conditions[2].value,
+            ConditionValue::Number(14.0)
+        ));
         assert_eq!(rule_3.actions[0].link_id, "335".into());
         assert_eq!(rule_3.actions[0].status, Some(LinkStatus::Open));
     }
@@ -2207,9 +2254,16 @@ mod tests {
     #[test]
     fn test_read_rule_condition_clocktime() {
         let network = test_network(true);
-        let condition = network.read_rule_condition("IF SYSTEM CLOCKTIME >= 8 AM").unwrap();
+        let condition = network
+            .read_rule_condition("IF SYSTEM CLOCKTIME >= 8 AM")
+            .unwrap();
         assert_eq!(condition.operator, RuleConditionOperator::And);
-        assert_eq!(condition.target, RuleConditionTarget::System { attribute: SystemAttribute::ClockTime });
+        assert_eq!(
+            condition.target,
+            RuleConditionTarget::System {
+                attribute: SystemAttribute::ClockTime
+            }
+        );
         assert_eq!(condition.comparison, ComparisonOperator::Ge);
         assert_eq!(condition.value, ConditionValue::Number(28800.0));
     }
@@ -2217,9 +2271,17 @@ mod tests {
     #[test]
     fn test_read_rule_condition_link_flow() {
         let network = test_network(true);
-        let condition = network.read_rule_condition("IF LINK L1 FLOW ABOVE 100").unwrap();
+        let condition = network
+            .read_rule_condition("IF LINK L1 FLOW ABOVE 100")
+            .unwrap();
         assert_eq!(condition.operator, RuleConditionOperator::And);
-        assert_eq!(condition.target, RuleConditionTarget::Link { id: "L1".into(), attribute: LinkAttribute::Flow });
+        assert_eq!(
+            condition.target,
+            RuleConditionTarget::Link {
+                id: "L1".into(),
+                attribute: LinkAttribute::Flow
+            }
+        );
         assert_eq!(condition.comparison, ComparisonOperator::Gt);
         assert_eq!(condition.value, ConditionValue::Number(100.0));
     }
@@ -2227,9 +2289,17 @@ mod tests {
     #[test]
     fn test_read_rule_condition_link_status() {
         let network = test_network(true);
-        let condition = network.read_rule_condition("IF LINK L1 STATUS IS OPEN").unwrap();
+        let condition = network
+            .read_rule_condition("IF LINK L1 STATUS IS OPEN")
+            .unwrap();
         assert_eq!(condition.operator, RuleConditionOperator::And);
-        assert_eq!(condition.target, RuleConditionTarget::Link { id: "L1".into(), attribute: LinkAttribute::Status });
+        assert_eq!(
+            condition.target,
+            RuleConditionTarget::Link {
+                id: "L1".into(),
+                attribute: LinkAttribute::Status
+            }
+        );
         assert_eq!(condition.comparison, ComparisonOperator::Eq);
         assert_eq!(condition.value, ConditionValue::Status(LinkStatus::Open));
     }
@@ -2237,9 +2307,17 @@ mod tests {
     #[test]
     fn test_read_rule_condition_link_setting() {
         let network = test_network(true);
-        let condition = network.read_rule_condition("IF PUMP L1 SETTING IS 1.5").unwrap();
+        let condition = network
+            .read_rule_condition("IF PUMP L1 SETTING IS 1.5")
+            .unwrap();
         assert_eq!(condition.operator, RuleConditionOperator::And);
-        assert_eq!(condition.target, RuleConditionTarget::Link { id: "L1".into(), attribute: LinkAttribute::Setting });
+        assert_eq!(
+            condition.target,
+            RuleConditionTarget::Link {
+                id: "L1".into(),
+                attribute: LinkAttribute::Setting
+            }
+        );
         assert_eq!(condition.comparison, ComparisonOperator::Eq);
         assert_eq!(condition.value, ConditionValue::Number(1.5));
     }
