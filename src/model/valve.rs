@@ -52,9 +52,11 @@ impl LinkTrait for Valve {
             return LinkCoefficients::simple(1.0 / BIG_VALUE, q);
         }
 
-        // if the valve is open or fixed open
+        // if the valve is open or fixed open, use the minor loss coefficient to compute the coefficients
         if status == LinkStatus::Open || status == LinkStatus::FixedOpen {
-            return LinkCoefficients::simple(1.0 / SMALL_VALUE, q);
+            let km = 0.02517 * self.minor_loss / self.diameter.powi(4);
+            let (g_inv, y) = self.valve_coefficients(q, km);
+            return LinkCoefficients::simple(g_inv, y);
         }
 
         match self.valve_type {

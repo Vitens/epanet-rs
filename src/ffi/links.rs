@@ -523,6 +523,7 @@ pub unsafe extern "C" fn EN_setlinkvalue(
                         ..Default::default()
                     },
                 ),
+
                 // for pumps, the setting is the pump speed
                 LinkType::Pump(_) => simulation.network.update_pump(
                     &link_id,
