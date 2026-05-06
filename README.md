@@ -4,6 +4,8 @@ A fast, modern and safe re-implementation of the EPANET2 hydraulic solver, writt
 
 [![Rust](https://github.com/vitens/epanet-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/AbelHeinsbroek/epanet-rs/actions/workflows/rust.yml)
 [![crate](https://img.shields.io/crates/v/epanet-rs.svg)](https://crates.io/crates/epanet-rs)
+![docs.rs](https://img.shields.io/docsrs/epanet-rs)
+
 
 Dual-licensed under [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT).
 

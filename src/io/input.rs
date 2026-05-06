@@ -54,11 +54,13 @@ impl Network {
     }
 
     pub fn read_file(&mut self, file: &str) -> Result<(), InputError> {
-        let file_extension = file.split('.').next_back()
-        .ok_or_else(|| {
-            InputError::new(format!("Cannot determine file extension for: {}", file))
-        })?
-        .to_lowercase();
+        let file_extension = file
+            .split('.')
+            .next_back()
+            .ok_or_else(|| {
+                InputError::new(format!("Cannot determine file extension for: {}", file))
+            })?
+            .to_lowercase();
 
         match file_extension.as_str() {
             "inp" => self.read_inp(file),
