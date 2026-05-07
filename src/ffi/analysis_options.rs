@@ -6,7 +6,7 @@ use crate::ffi::project::{Project, get_simulation_mut};
 use crate::ffi::enums::{DemandModel as ENDemandModel, SimOption, TimeParameter};
 use crate::model::options::DemandModel;
 
-use std::os::raw::{c_int, c_long, c_double};
+use std::os::raw::{c_double, c_int, c_long};
 
 /// # Safety
 ///
@@ -115,20 +115,20 @@ pub unsafe extern "C" fn EN_setoption(
     };
 
     match option {
-      SimOption::Trials => {
-        simulation.network.options.max_trials = value as usize;
-      }
-      SimOption::Accuracy => {
-        simulation.network.options.accuracy = value as f64;
-      }
-      SimOption::EmitExpon => {
-        simulation.network.options.emitter_exponent = value as f64;
-      }
-      SimOption::DemandMult => {
-        simulation.network.options.demand_multiplier = value as f64;
-      }
-      // TODO: implement setoption for other options
-      _ => {}
+        SimOption::Trials => {
+            simulation.network.options.max_trials = value as usize;
+        }
+        SimOption::Accuracy => {
+            simulation.network.options.accuracy = value;
+        }
+        SimOption::EmitExpon => {
+            simulation.network.options.emitter_exponent = value;
+        }
+        SimOption::DemandMult => {
+            simulation.network.options.demand_multiplier = value;
+        }
+        // TODO: implement setoption for other options
+        _ => {}
     }
 
     ErrorCode::Ok

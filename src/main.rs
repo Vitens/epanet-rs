@@ -34,8 +34,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    Test {
-    },
+    Test {},
     /// Run the hydraulic solver on a network
     Run {
         /// Input file (EPANET .inp format)
@@ -269,7 +268,6 @@ fn convert_network(input_file: &str, output_file: &str) {
     info!("Network saved in {:?}", end_time.duration_since(load_time));
 }
 
-
 fn run_test() {
     let mut network = Network::default();
     network.read_file("/Users/Abel/pause.inp").unwrap();
@@ -279,11 +277,9 @@ fn run_test() {
     let idx = *simulation.network.node_map.get("au2400-out").unwrap();
 
     for _ in 0..25 {
-      simulation.run_hydraulics().unwrap();
-      let state = simulation.state.as_mut().unwrap();
-      let head = state.heads[idx];
-      println!("Head: {:.2}", head / 3.2808);
+        simulation.run_hydraulics().unwrap();
+        let state = simulation.state.as_mut().unwrap();
+        let head = state.heads[idx];
+        println!("Head: {:.2}", head / 3.2808);
     }
-
-
 }
