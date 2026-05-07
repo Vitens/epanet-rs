@@ -8,6 +8,7 @@ use simplelog::{
 };
 
 use epanet_rs::model::network::Network;
+use epanet_rs::model::network::modify::*;
 use epanet_rs::simulation::Simulation;
 use epanet_rs::utils::validate_epanet::validate_with_epanet;
 
@@ -33,6 +34,8 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    Test {
+    },
     /// Run the hydraulic solver on a network
     Run {
         /// Input file (EPANET .inp format)
@@ -92,7 +95,7 @@ fn main() -> Result<(), String> {
                 LevelFilter::Info
             }
         }
-        _ => LevelFilter::Info,
+        _ => LevelFilter::Warn,
     };
 
     let logconfig = ConfigBuilder::new()
@@ -109,6 +112,10 @@ fn main() -> Result<(), String> {
 
     // Run the command
     match cli.command {
+        Commands::Test { .. } => {
+            run_test();
+            Ok(())
+        }
         Commands::Run {
             input_file,
             output_file,
@@ -260,4 +267,23 @@ fn convert_network(input_file: &str, output_file: &str) {
 
     let end_time = Instant::now();
     info!("Network saved in {:?}", end_time.duration_since(load_time));
+}
+
+
+fn run_test() {
+    let mut network = Network::default();
+    network.read_file("/Users/Abel/pause.inp").unwrap();
+    let mut simulation = Simulation::new(network);
+    simulation.initialize_hydraulics().unwrap();
+
+    let idx = *simulation.network.node_map.get("au2400-out").unwrap();
+
+    for _ in 0..25 {
+      simulation.run_hydraulics().unwrap();
+      let state = simulation.state.as_mut().unwrap();
+      let head = state.heads[idx];
+      println!("Head: {:.2}", head / 3.2808);
+    }
+
+
 }
