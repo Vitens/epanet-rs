@@ -43,9 +43,6 @@ impl LinkTrait for Pipe {
         _: f64,
         _: f64,
     ) -> LinkCoefficients {
-        if self.check_valve && q < 0.0 {
-            return LinkCoefficients::new_status(1.0 / BIG_VALUE, q, LinkStatus::TempClosed);
-        }
         // for closed pipes use headloss formula hloss = BIG_VALUE * q
         if status == LinkStatus::Closed || status == LinkStatus::TempClosed {
             return LinkCoefficients::simple(1.0 / BIG_VALUE, q);
@@ -53,7 +50,13 @@ impl LinkTrait for Pipe {
 
         if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
             let (g_inv, y) = self.dw_coefficients(q, r);
-            return LinkCoefficients::simple(g_inv, y);
+            if !self.check_valve {
+                return LinkCoefficients::simple(g_inv, y);
+            }
+            let mut hgrad = 1.0 / g_inv;
+            let mut hloss = y * hgrad;
+            Pipe::add_cv_head_loss(q, &mut hloss, &mut hgrad);
+            return LinkCoefficients::simple(1.0 / hgrad, hloss / hgrad);
         }
 
         // take the absolute value of the flow
@@ -80,6 +83,10 @@ impl LinkTrait for Pipe {
         }
         // adjust the headloss to the sign of the flow
         hloss *= q.signum();
+
+        if self.check_valve {
+            Pipe::add_cv_head_loss(q, &mut hloss, &mut hgrad);
+        }
 
         // return the coefficients
         LinkCoefficients::simple(1.0 / hgrad, hloss / hgrad)
@@ -127,6 +134,17 @@ impl LinkTrait for Pipe {
 }
 
 impl Pipe {
+    /// EPANET 3 continuous check-valve barrier added on top of normal pipe head loss.
+    /// Matches `HeadLossModel::addCVHeadLoss` in
+    /// [epanet-dev `headlossmodel.cpp`](https://github.com/OpenWaterAnalytics/epanet-dev/blob/develop/src/Models/headlossmodel.cpp).
+    #[inline]
+    fn add_cv_head_loss(q: Cfs, hloss: &mut f64, hgrad: &mut f64) {
+        let a = BIG_VALUE * q;
+        let b = (a * a + CV_HEAD_EPSILON).sqrt();
+        *hloss += (a - b) * 0.5;
+        *hgrad += BIG_VALUE * (1.0 - a / b) * 0.5;
+    }
+
     /// Calculate the coefficients for the Darcy Weisbach headloss formula
     fn dw_coefficients(&self, q: f64, r: f64) -> (f64, f64) {
         let q_abs = q.abs();

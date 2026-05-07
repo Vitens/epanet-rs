@@ -42,7 +42,7 @@ pub struct IterationStatistics {
 
 impl IterationStatistics {
     pub fn relative_change(&self, options: &SimulationOptions) -> f64 {
-        if self.sum_q > options.accuracy {
+        if self.sum_q > 2.0 * options.accuracy {
             self.sum_dq / (self.sum_q + Q_ZERO)
         } else {
             self.sum_dq
