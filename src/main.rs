@@ -269,17 +269,6 @@ fn convert_network(input_file: &str, output_file: &str) {
 }
 
 fn run_test() {
-    let mut network = Network::default();
-    network.read_file("/Users/Abel/pause.inp").unwrap();
-    let mut simulation = Simulation::new(network);
-    simulation.initialize_hydraulics().unwrap();
-
-    let idx = *simulation.network.node_map.get("au2400-out").unwrap();
-
-    for _ in 0..25 {
-        simulation.run_hydraulics().unwrap();
-        let state = simulation.state.as_mut().unwrap();
-        let head = state.heads[idx];
-        println!("Head: {:.2}", head / 3.2808);
-    }
+  // test code here
+  println!("Test");
 }
