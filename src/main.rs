@@ -8,7 +8,6 @@ use simplelog::{
 };
 
 use epanet_rs::model::network::Network;
-use epanet_rs::model::network::modify::*;
 use epanet_rs::simulation::Simulation;
 use epanet_rs::utils::validate_epanet::validate_with_epanet;
 
@@ -269,6 +268,6 @@ fn convert_network(input_file: &str, output_file: &str) {
 }
 
 fn run_test() {
-  // test code here
-  println!("Test");
+    // test code here
+    println!("Test");
 }
