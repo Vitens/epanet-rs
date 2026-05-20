@@ -3,6 +3,7 @@
 
 pub mod control;
 pub mod curve;
+pub mod demand;
 pub mod junction;
 pub mod link;
 pub mod network;

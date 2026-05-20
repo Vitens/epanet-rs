@@ -109,10 +109,12 @@ impl Network {
         for node in self.nodes.iter_mut() {
             match &mut node.node_type {
                 NodeType::Junction(junction) => {
-                    junction.pattern_index = junction
-                        .pattern
-                        .as_ref()
-                        .and_then(|id| self.pattern_map.get(id).copied());
+                    for demand in junction.demands.iter_mut() {
+                        demand.pattern_index = demand
+                            .pattern
+                            .as_ref()
+                            .and_then(|id| self.pattern_map.get(id).copied());
+                    }
                 }
                 NodeType::Reservoir(reservoir) => {
                     reservoir.head_pattern_index = reservoir

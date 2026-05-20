@@ -4,10 +4,13 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::str::FromStr;
 
+use hashbrown::HashSet;
+
 use crate::constants::*;
 use crate::error::*;
 use crate::model::control::{Control, ControlCondition};
 use crate::model::curve::{Curve, HeadCurve, ValveCurve};
+use crate::model::demand::Demand;
 use crate::model::junction::Junction;
 use crate::model::link::{Link, LinkStatus, LinkType};
 use crate::model::network::Network;
@@ -101,6 +104,11 @@ impl Network {
         let mut state = ReadState::None;
         let mut line_number: usize = 0;
 
+        // set of junction ids for which demands have been cleared
+        // which can happen on the first line of the DEMANDS section of
+        // the relevant junction
+        let mut demands_cleared : HashSet<Box<str>> = HashSet::new();
+
         // open the INP file
         let file = File::open(inp)
             .map_err(|e| InputError::new(format!("Failed to open file '{}': {}", inp, e)))?;
@@ -159,7 +167,7 @@ impl Network {
                     ReadState::Reservoirs => self.add_node(self.read_reservoir(line)?),
                     ReadState::Pumps => self.add_link(self.read_pump(line)?),
                     ReadState::Curves => self.read_curve(line),
-                    ReadState::Demands => self.read_demand(line),
+                    ReadState::Demands => self.read_demand(line, &mut demands_cleared),
                     ReadState::Patterns => self.read_pattern(line),
                     ReadState::Emitters => self.read_emitter(line),
                     ReadState::None => {
@@ -313,10 +321,13 @@ impl Network {
             id,
             elevation,
             node_type: NodeType::Junction(Junction {
-                basedemand: demand,
-                pattern,
-                pattern_index: None,
                 emitter_coefficient: 0.0,
+                demands: vec![Demand {
+                    basedemand: demand,
+                    pattern: pattern,
+                    pattern_index: None,
+                    name: None,
+                }],
             }),
             coordinates: None,
         })
@@ -728,7 +739,7 @@ impl Network {
     }
 
     /// Read a demand from a parts iterator and set the basedemand for the junction
-    fn read_demand(&mut self, line: &str) -> Result<(), InputError> {
+    fn read_demand(&mut self, line: &str, demands_cleared: &mut HashSet<Box<str>>) -> Result<(), InputError> {
         let mut parts = parse_line(line);
         let id: Box<str> = parts.next().ok_or_missing("node id")?.into();
         let demand = parts
@@ -745,8 +756,17 @@ impl Network {
 
         match &mut node.node_type {
             NodeType::Junction(junction) => {
-                junction.basedemand = demand;
-                junction.pattern = pattern;
+                // clear existing demands as this section replaces the existing demands
+                if !demands_cleared.contains(&id) {
+                    junction.demands.clear();
+                    demands_cleared.insert(id);
+                }
+                junction.demands.push(Demand {
+                    basedemand: demand,
+                    pattern: pattern,
+                    pattern_index: None,
+                    name: None,
+                });
                 Ok(())
             }
             _ => Err(InputError::new(format!(
@@ -1428,9 +1448,12 @@ mod tests {
                     id: "N1".into(),
                     elevation: 0.0,
                     node_type: NodeType::Junction(Junction {
-                        basedemand: 0.0,
-                        pattern: None,
-                        pattern_index: None,
+                        demands: vec![Demand {
+                            basedemand: 0.0,
+                            pattern: None,
+                            pattern_index: None,
+                            name: None,
+                        }],
                         emitter_coefficient: 0.0,
                     }),
                     coordinates: None,
@@ -1441,9 +1464,12 @@ mod tests {
                     id: "N2".into(),
                     elevation: 0.0,
                     node_type: NodeType::Junction(Junction {
-                        basedemand: 0.0,
-                        pattern: None,
-                        pattern_index: None,
+                        demands: vec![Demand {
+                            basedemand: 0.0,
+                            pattern: None,
+                            pattern_index: None,
+                            name: None,
+                        }],
                         emitter_coefficient: 0.0,
                     }),
                     coordinates: None,
@@ -1486,8 +1512,8 @@ mod tests {
             panic!("Expected Junction node type");
         };
 
-        assert_eq!(junction.basedemand, 25.0);
-        assert!(junction.pattern.is_none());
+        assert_eq!(junction.demands[0].basedemand, 25.0);
+        assert!(junction.demands[0].pattern.is_none());
     }
 
     #[test]
@@ -1502,8 +1528,8 @@ mod tests {
             panic!("Expected Junction node type");
         };
 
-        assert_eq!(junction.basedemand, 100.0);
-        assert_eq!(junction.pattern.as_deref(), Some("PAT1"));
+        assert_eq!(junction.demands[0].basedemand, 100.0);
+        assert_eq!(junction.demands[0].pattern.as_deref(), Some("PAT1"));
     }
 
     #[test]
@@ -1516,7 +1542,7 @@ mod tests {
             panic!("Expected Junction node type");
         };
 
-        assert!(junction.pattern.is_none());
+        assert!(junction.demands[0].pattern.is_none());
     }
 
     #[test]
@@ -1529,7 +1555,7 @@ mod tests {
             panic!("Expected Junction node type");
         };
 
-        assert_eq!(junction.basedemand, 0.0);
+        assert_eq!(junction.demands[0].basedemand, 0.0);
     }
     // ==================== Valve Tests ====================
 
@@ -2240,7 +2266,7 @@ mod tests {
 
     #[test]
     fn test_read_rule_action() {
-        let mut network = test_network(true);
+        let network = test_network(true);
 
         let action = network
             .read_rule_action("THEN LINK L1 STATUS IS CLOSED", true)
