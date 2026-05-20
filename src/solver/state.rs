@@ -1,12 +1,15 @@
 //! Per-step mutable solver state (flows, heads, demands, statuses, settings, resistances).
 
+use simplelog::debug;
+
 use crate::model::link::{LinkStatus, LinkTrait};
 use crate::model::network::Network;
 use crate::model::node::NodeType;
-
+use crate::utils::time::seconds_to_hhmmss;
 use crate::model::control::ControlCondition;
 use crate::model::options::DemandModel;
 use crate::model::units::{Cfs, Ft3};
+
 
 /// The solver state is the initial/final state of the solver for a single step
 #[derive(Debug, Clone)]
@@ -112,13 +115,18 @@ impl SolverState {
                 let NodeType::Junction(junction) = &n.node_type else {
                     return 0.0;
                 };
-                let pat_idx = junction.pattern_index.or(default_pattern_idx);
-                let pattern = pat_idx.map(|idx| &network.patterns[idx]);
-                let multiplier = match pattern {
-                    Some(p) => p.multipliers[pattern_index % p.multipliers.len()],
-                    None => 1.0,
-                };
-                junction.basedemand * multiplier * network.options.demand_multiplier
+                // loop over all demand categories to calculate the total demand
+                let mut total_demand = 0.0;
+                for demand in junction.demands.iter() {
+                  let pat_idx = demand.pattern_index.or(default_pattern_idx);
+                  let pattern = pat_idx.map(|idx| &network.patterns[idx]);
+                  let multiplier = match pattern {
+                      Some(p) => p.multipliers[pattern_index % p.multipliers.len()],
+                      None => 1.0,
+                  };
+                  total_demand += demand.basedemand * multiplier * network.options.demand_multiplier
+                }
+                total_demand
             })
             .collect::<Vec<Cfs>>();
 
@@ -147,6 +155,7 @@ impl SolverState {
                 continue;
             }
             if control.is_active(self, network, time, clocktime) {
+                debug!("<yellow>Activating control: {:?} at time {}</>", control, seconds_to_hhmmss(clocktime));
                 control.activate(self, network);
             }
         }

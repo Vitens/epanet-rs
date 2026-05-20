@@ -48,10 +48,10 @@ impl Tank {
             return 0;
         }
         if delta_volume > 0.0 && flow > 0.0 {
-            return (delta_volume / flow).ceil() as usize;
+            return (delta_volume / flow).round() as usize;
         }
         if delta_volume < 0.0 && flow < 0.0 {
-            return (delta_volume / flow).ceil() as usize;
+            return (delta_volume / flow).round() as usize;
         }
 
         usize::MAX

@@ -70,6 +70,13 @@ pub fn seconds_to_hhmm(seconds: usize) -> String {
     format!("{:02}:{:02}", hours, minutes)
 }
 
+pub fn seconds_to_hhmmss(seconds: usize) -> String {
+    let hours = seconds / 3600;
+    let minutes = (seconds % 3600) / 60;
+    let seconds = seconds % 60;
+    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

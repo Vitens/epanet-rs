@@ -159,7 +159,12 @@ network.add_reservoir("R1", &ReservoirData {
 
 network.add_junction("J1", &JunctionData {
     elevation: 50.0,
-    basedemand: 1.0,
+    demands: vec![epanet_rs::model::demand::Demand {
+        basedemand: 1.0,
+        pattern: None,
+        pattern_index: None,
+        name: None,
+    }],
     ..Default::default()
 })?;
 

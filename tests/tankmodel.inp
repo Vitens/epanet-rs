@@ -55,7 +55,7 @@ constant	1
  Statistic          	NONE
 
 [REPORT]
- Status             	No
+ Status             	FULL
  Summary            	No
  Page               	0
  Nodes                  All

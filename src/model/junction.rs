@@ -4,15 +4,14 @@ use crate::constants::{BIG_VALUE, MperFT, PSIperFT, RQ_TOL, SMALL_VALUE};
 use crate::model::options::SimulationOptions;
 use crate::model::units::{Cfs, UnitConversion, UnitSystem};
 
+use crate::model::demand::Demand;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Junction {
-    pub basedemand: Cfs,
     pub emitter_coefficient: f64,
-    pub pattern: Option<Box<str>>,
-    #[serde(skip)]
-    pub pattern_index: Option<usize>,
+    pub demands: Vec<Demand>,
 }
 
 impl Junction {
@@ -71,7 +70,10 @@ impl Junction {
 
 impl UnitConversion for Junction {
     fn convert_to_standard(&mut self, options: &SimulationOptions) {
-        self.basedemand /= options.flow_units.per_cfs();
+        // convert the demands to the standard unit system
+        for demand in self.demands.iter_mut() {
+            demand.convert_to_standard(options);
+        }
         // convert the emitter coefficient to the standard unit system
         if self.emitter_coefficient > 0.0 {
             let pressure_factor = if options.unit_system == UnitSystem::US {
@@ -87,7 +89,10 @@ impl UnitConversion for Junction {
         }
     }
     fn convert_from_standard(&mut self, options: &SimulationOptions) {
-        self.basedemand *= options.flow_units.per_cfs();
+        // convert the demands from the standard unit system
+        for demand in self.demands.iter_mut() {
+            demand.convert_from_standard(options);
+        }
         // convert the emitter coefficient from the standard unit system
         if self.emitter_coefficient > 0.0 {
             let pressure_factor = if options.unit_system == UnitSystem::US {

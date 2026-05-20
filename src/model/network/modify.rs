@@ -19,9 +19,13 @@ network.add_pattern("P1", &PatternData {
 
 network.add_junction("J1", &JunctionData {
   elevation: 100.0,
-  basedemand: 10.0,
+  demands: vec![epanet_rs::model::demand::Demand {
+    basedemand: 10.0,
+    pattern: Some("P1".into()),
+    pattern_index: None,
+    name: None,
+  }],
   emitter_coefficient: 0.0,
-  pattern: Some("P1".into()),
   coordinates: Some((100.0, 200.0)),
 }).unwrap();
 
@@ -31,13 +35,17 @@ network.update_junction("J1", &JunctionUpdate {
   basedemand: None,
   emitter_coefficient: None,
   pattern: Some(None),
+  demands: None,
   coordinates: None,
 });
 */
 
+use hashbrown::HashMap;
+
 use crate::error::InputError;
 use crate::model::control::ControlCondition;
 use crate::model::curve::{Curve, HeadCurve, ValveCurve};
+use crate::model::demand::Demand;
 use crate::model::junction::Junction;
 use crate::model::link::{Link, LinkStatus, LinkType};
 use crate::model::network::Network;
@@ -54,9 +62,8 @@ use crate::model::valve::{Valve, ValveType};
 #[derive(Default)]
 pub struct JunctionData {
     pub elevation: f64,
-    pub basedemand: f64,
+    pub demands: Vec<Demand>,
     pub emitter_coefficient: f64,
-    pub pattern: Option<Box<str>>,
     pub coordinates: Option<(f64, f64)>,
 }
 
@@ -64,11 +71,10 @@ pub struct JunctionData {
 #[derive(Default)]
 pub struct JunctionUpdate {
     pub elevation: Option<f64>,
+    pub demands: Option<Vec<Demand>>,
     pub basedemand: Option<f64>,
-    pub emitter_coefficient: Option<f64>,
-    /// Demand pattern id. `None` leaves the pattern untouched, `Some(None)`
-    /// clears an existing pattern, `Some(Some(id))` sets the pattern.
     pub pattern: Option<Option<Box<str>>>,
+    pub emitter_coefficient: Option<f64>,
     pub coordinates: Option<(f64, f64)>,
 }
 
@@ -253,24 +259,12 @@ impl Network {
 
     /// Add a new junction to the network.
     pub fn add_junction(&mut self, id: &str, data: &JunctionData) -> Result<(), InputError> {
-        // resolve the pattern index
-        let pattern_index = if let Some(pattern) = &data.pattern {
-            Some(
-                self.pattern_map
-                    .get(pattern)
-                    .ok_or(InputError::PatternNotFound {
-                        pattern_id: pattern.clone(),
-                    })?,
-            )
-        } else {
-            None
-        };
+        let mut demands = data.demands.clone();
+        Self::resolve_demand_patterns(&self.pattern_map, &mut demands)?;
 
         let junction = Junction {
-            basedemand: data.basedemand,
             emitter_coefficient: data.emitter_coefficient,
-            pattern: data.pattern.clone(),
-            pattern_index: pattern_index.copied(),
+            demands,
         };
 
         let mut node = Node {
@@ -385,8 +379,8 @@ impl Network {
             }
         };
 
+        let pattern_map = &self.pattern_map;
         let node = &mut self.nodes[*node_index];
-        // check if the node is a tank
         if !matches!(node.node_type, NodeType::Junction(_)) {
             return Err(InputError::NodeNotAJunction { node_id: id.into() });
         }
@@ -401,16 +395,25 @@ impl Network {
                 node.coordinates = Some(coordinates);
             }
 
-            junction.basedemand = update.basedemand.unwrap_or(junction.basedemand);
-
             junction.emitter_coefficient = update
                 .emitter_coefficient
                 .unwrap_or(junction.emitter_coefficient);
 
-            if let Some((new_pattern, new_index)) = pattern_change {
-                junction.pattern = new_pattern;
-                junction.pattern_index = new_index;
+            if let Some(demands) = &update.demands {
+                junction.demands = demands.clone();
             }
+
+            if let Some(basedemand) = update.basedemand {
+                Self::primary_demand_mut(junction).basedemand = basedemand;
+            }
+
+            if let Some((new_pattern, new_index)) = pattern_change {
+                let demand = Self::primary_demand_mut(junction);
+                demand.pattern = new_pattern;
+                demand.pattern_index = new_index;
+            }
+
+            Self::resolve_demand_patterns(pattern_map, &mut junction.demands)?;
         }
         // convert back to standard units
         node.convert_to_standard(&self.options);
@@ -1324,7 +1327,10 @@ impl Network {
                 })?;
 
         let referenced = self.nodes.iter().any(|n| match &n.node_type {
-            NodeType::Junction(j) => j.pattern.as_deref() == Some(id),
+            NodeType::Junction(j) => j
+                .demands
+                .iter()
+                .any(|d| d.pattern.as_deref() == Some(id)),
             NodeType::Reservoir(r) => r.head_pattern.as_deref() == Some(id),
             _ => false,
         });
@@ -1474,6 +1480,39 @@ impl Network {
     }
 
     // --- private helpers ---
+
+    fn resolve_demand_patterns(
+        pattern_map: &HashMap<Box<str>, usize>,
+        demands: &mut [Demand],
+    ) -> Result<(), InputError> {
+        for demand in demands.iter_mut() {
+            demand.pattern_index = demand
+                .pattern
+                .as_ref()
+                .map(|pattern_id| {
+                    pattern_map
+                        .get(pattern_id)
+                        .ok_or(InputError::PatternNotFound {
+                            pattern_id: pattern_id.clone(),
+                        })
+                        .copied()
+                })
+                .transpose()?;
+        }
+        Ok(())
+    }
+
+    fn primary_demand_mut(junction: &mut Junction) -> &mut Demand {
+        if junction.demands.is_empty() {
+            junction.demands.push(Demand {
+                basedemand: 0.0,
+                pattern: None,
+                pattern_index: None,
+                name: None,
+            });
+        }
+        &mut junction.demands[0]
+    }
 
     fn resolve_head_curve(&self, curve_id: Option<&str>) -> Result<Option<HeadCurve>, InputError> {
         let Some(curve_id) = curve_id else {
@@ -1626,6 +1665,15 @@ mod tests {
     use crate::model::tank::Tank;
     use crate::model::units::FlowUnits;
 
+    fn demands(basedemand: f64, pattern: Option<&str>) -> Vec<Demand> {
+        vec![Demand {
+            basedemand,
+            pattern: pattern.map(Into::into),
+            pattern_index: None,
+            name: None,
+        }]
+    }
+
     // --- helpers for tank/reservoir tests (no public add_tank/add_reservoir yet) ---
 
     fn test_tank_node(id: &str, elevation: f64) -> Node {
@@ -1668,9 +1716,8 @@ mod tests {
         let mut network = Network::default();
         let data = JunctionData {
             elevation: 100.0,
-            basedemand: 10.0,
+            demands: demands(10.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -1683,6 +1730,7 @@ mod tests {
 
         let update = JunctionUpdate {
             elevation: Some(200.0),
+            demands: None,
             basedemand: Some(20.0),
             emitter_coefficient: Some(0.5),
             pattern: None,
@@ -1693,7 +1741,7 @@ mod tests {
         let NodeType::Junction(junction) = &network.nodes[0].node_type else {
             panic!("Expected Junction node type");
         };
-        assert_eq!(junction.basedemand, 20.0);
+        assert_eq!(junction.demands[0].basedemand, 20.0);
         assert!((junction.emitter_coefficient - 9.231479).abs() < 1e-6);
         assert_eq!(network.properties_version, 1);
     }
@@ -1711,9 +1759,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 10.0,
+                    demands: demands(10.0, Some("P1")),
                     emitter_coefficient: 0.0,
-                    pattern: Some("P1".into()),
                     coordinates: None,
                 },
             )
@@ -1733,9 +1780,9 @@ mod tests {
         let NodeType::Junction(junction) = &network.nodes[0].node_type else {
             panic!("Expected Junction node type");
         };
-        assert_eq!(junction.pattern.as_deref(), Some("P1"));
-        assert_eq!(junction.pattern_index, Some(0));
-        assert_eq!(junction.basedemand, 20.0);
+        assert_eq!(junction.demands[0].pattern.as_deref(), Some("P1"));
+        assert_eq!(junction.demands[0].pattern_index, Some(0));
+        assert_eq!(junction.demands[0].basedemand, 20.0);
     }
 
     #[test]
@@ -1751,9 +1798,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 10.0,
+                    demands: demands(10.0, Some("P1")),
                     emitter_coefficient: 0.0,
-                    pattern: Some("P1".into()),
                     coordinates: None,
                 },
             )
@@ -1772,8 +1818,8 @@ mod tests {
         let NodeType::Junction(junction) = &network.nodes[0].node_type else {
             panic!("Expected Junction node type");
         };
-        assert!(junction.pattern.is_none());
-        assert!(junction.pattern_index.is_none());
+        assert!(junction.demands[0].pattern.is_none());
+        assert!(junction.demands[0].pattern_index.is_none());
     }
 
     #[test]
@@ -1789,9 +1835,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 10.0,
+                    demands: demands(10.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -1810,8 +1855,8 @@ mod tests {
         let NodeType::Junction(junction) = &network.nodes[0].node_type else {
             panic!("Expected Junction node type");
         };
-        assert_eq!(junction.pattern.as_deref(), Some("P1"));
-        assert_eq!(junction.pattern_index, Some(0));
+        assert_eq!(junction.demands[0].pattern.as_deref(), Some("P1"));
+        assert_eq!(junction.demands[0].pattern_index, Some(0));
     }
 
     #[test]
@@ -1822,9 +1867,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 10.0,
+                    demands: demands(10.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -1847,9 +1891,8 @@ mod tests {
         let mut network = Network::new(FlowUnits::CMH, HeadlossFormula::HazenWilliams);
         let data = JunctionData {
             elevation: 100.0,
-            basedemand: 10.0,
+            demands: demands(10.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -2039,9 +2082,8 @@ mod tests {
         let mut network = Network::default();
         let data = JunctionData {
             elevation: 100.0,
-            basedemand: 0.0,
+            demands: demands(0.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -2069,9 +2111,8 @@ mod tests {
         let mut network = Network::default();
         let data = JunctionData {
             elevation: 100.0,
-            basedemand: 0.0,
+            demands: demands(0.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -2240,9 +2281,8 @@ mod tests {
         let mut network = Network::default();
         let data = JunctionData {
             elevation: 0.0,
-            basedemand: 0.0,
+            demands: demands(0.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -2430,9 +2470,8 @@ mod tests {
         let mut network = Network::default();
         let data = JunctionData {
             elevation: 0.0,
-            basedemand: 0.0,
+            demands: demands(0.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -2501,9 +2540,8 @@ mod tests {
                     id,
                     &JunctionData {
                         elevation: 100.0,
-                        basedemand: 0.0,
+                        demands: demands(0.0, None),
                         emitter_coefficient: 0.0,
-                        pattern: None,
                         coordinates: None,
                     },
                 )
@@ -2750,9 +2788,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -2762,9 +2799,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 200.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3135,9 +3171,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3147,9 +3182,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 200.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3202,9 +3236,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3214,9 +3247,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 200.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3488,9 +3520,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3500,9 +3531,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 200.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3556,9 +3586,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3568,9 +3597,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 200.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3657,9 +3685,8 @@ mod tests {
                 "J3",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3694,9 +3721,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3934,9 +3960,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3961,9 +3986,8 @@ mod tests {
                 "J3",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3999,9 +4023,8 @@ mod tests {
                 "J3",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -4063,9 +4086,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -4093,9 +4115,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -4105,9 +4126,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -4334,9 +4354,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 1.0,
+                    demands: demands(1.0, Some("P2")),
                     emitter_coefficient: 0.0,
-                    pattern: Some("P2".into()),
                     coordinates: None,
                 },
             )
@@ -4358,7 +4377,7 @@ mod tests {
         let NodeType::Junction(j) = &network.nodes[0].node_type else {
             panic!()
         };
-        assert_eq!(j.pattern_index, Some(0));
+        assert_eq!(j.demands[0].pattern_index, Some(0));
         let NodeType::Reservoir(r) = &network.nodes[1].node_type else {
             panic!()
         };
@@ -4381,9 +4400,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 1.0,
+                    demands: demands(1.0, Some("P1")),
                     emitter_coefficient: 0.0,
-                    pattern: Some("P1".into()),
                     coordinates: None,
                 },
             )

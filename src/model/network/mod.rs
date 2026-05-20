@@ -109,10 +109,12 @@ impl Network {
         for node in self.nodes.iter_mut() {
             match &mut node.node_type {
                 NodeType::Junction(junction) => {
-                    junction.pattern_index = junction
-                        .pattern
-                        .as_ref()
-                        .and_then(|id| self.pattern_map.get(id).copied());
+                    for demand in junction.demands.iter_mut() {
+                        demand.pattern_index = demand
+                            .pattern
+                            .as_ref()
+                            .and_then(|id| self.pattern_map.get(id).copied());
+                    }
                 }
                 NodeType::Reservoir(reservoir) => {
                     reservoir.head_pattern_index = reservoir
@@ -282,6 +284,16 @@ impl UnitConversion for Network {
             link.convert_to_standard(options);
         }
 
+        // convert controls to standard units
+        for control in self.controls.iter_mut() {
+            control.convert_to_standard(options);
+        }
+        for control in self.controls.iter_mut() {
+            if let Some(link_index) = self.link_map.get(&control.link_id).copied() {
+                control.convert_setting_to_standard(&self.links[link_index], options);
+            }
+        }
+
         // convert the options to standard units
         self.options.convert_to_standard();
     }
@@ -293,6 +305,15 @@ impl UnitConversion for Network {
         // convert the links from standard units
         for link in self.links.iter_mut() {
             link.convert_from_standard(options);
+        }
+        // convert controls from standard units
+        for control in self.controls.iter_mut() {
+            if let Some(link_index) = self.link_map.get(&control.link_id).copied() {
+                control.convert_setting_from_standard(&self.links[link_index], options);
+            }
+        }
+        for control in self.controls.iter_mut() {
+            control.convert_from_standard(options);
         }
         // convert the options from standard units
         self.options.convert_from_standard();

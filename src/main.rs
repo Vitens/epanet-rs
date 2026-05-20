@@ -93,6 +93,7 @@ fn main() -> Result<(), String> {
                 LevelFilter::Info
             }
         }
+        Commands::Validate {..} => LevelFilter::Info,
         _ => LevelFilter::Warn,
     };
 

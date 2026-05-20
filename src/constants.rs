@@ -27,6 +27,8 @@ pub const RQ_TOL: f64 = 1e-7;
 pub const Q_TOL: f64 = 0.0001;
 /// Tolerance for head difference
 pub const H_TOL: f64 = 0.0005;
+/// Tolerance for level difference
+pub const L_TOL: f64 = 0.0001;
 
 /// Gallons per minute per cubic feet per second
 pub const GPMperCFS: f64 = 448.831;
