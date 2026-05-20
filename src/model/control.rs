@@ -1,7 +1,7 @@
 //! Simple `Control` rules that open/close links based on time, tank level or nodal pressure.
 
-use crate::constants::{H_TOL, PSIperFT};
-use crate::model::link::{Link, LinkStatus, LinkType};
+use crate::constants::{H_TOL, L_TOL, PSIperFT};
+use crate::model::link::{Link, LinkStatus, LinkType, LinkTrait};
 use crate::model::network::Network;
 use crate::model::node::NodeType;
 use crate::model::options::SimulationOptions;
@@ -134,7 +134,7 @@ impl Control {
                     return false;
                 };
                 let value = state.heads[*tank_index] - tank.elevation;
-                value - *target >= -H_TOL
+                value - *target >= -L_TOL
             }
             ControlCondition::LowLevel { tank_index, target } => {
                 let node = &network.nodes[*tank_index];
@@ -142,22 +142,27 @@ impl Control {
                     return false;
                 };
                 let value = state.heads[*tank_index] - tank.elevation;
-                value - *target <= H_TOL
+                value - *target <= L_TOL
             }
         }
     }
 
     pub fn activate(&self, state: &mut SolverState, network: &Network) -> bool {
         let link_index = network.link_map.get(&self.link_id).unwrap();
+        let link = &network.links[*link_index];
 
         if let Some(status) = self.status {
             let changed = state.statuses[*link_index] != status;
             state.statuses[*link_index] = status;
+            // reset the flow of the link to the initial flow
+            state.flows[*link_index] = link.initial_flow();
             return changed;
         }
         if let Some(setting) = self.setting {
             let changed = state.settings[*link_index] != setting;
             state.settings[*link_index] = setting;
+            // reset the flow of the link to the initial flow
+            state.flows[*link_index] = link.initial_flow();
             return changed;
         }
         false
