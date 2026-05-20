@@ -6,7 +6,6 @@ use std::str::FromStr;
 
 use hashbrown::HashSet;
 
-use crate::constants::*;
 use crate::error::*;
 use crate::model::control::{Control, ControlCondition};
 use crate::model::curve::{Curve, HeadCurve, ValveCurve};
@@ -201,7 +200,6 @@ impl Network {
         self.resolve_pattern_indices();
         self.convert_to_standard(&self.options.clone());
         self.update_links()?;
-        self.convert_control_settings();
 
         Ok(())
     }
@@ -263,44 +261,6 @@ impl Network {
             // tank links_to/links_from are maintained by Network::add_link
         }
         Ok(())
-    }
-
-    /// Convert control settings from user units to internal units.
-    /// Must be called after convert_to_standard so that valve settings are
-    /// already in internal units (feet of head for PRV/PSV/PBV, CFS for FCV).
-    fn convert_control_settings(&mut self) {
-        let unit_system = &self.options.unit_system;
-        let flow_units = &self.options.flow_units;
-
-        for control in &mut self.controls {
-            let Some(setting) = control.setting else {
-                continue;
-            };
-            let Some(&link_index) = self.link_map.get(&control.link_id) else {
-                continue;
-            };
-            let link = &self.links[link_index];
-
-            if let LinkType::Valve(valve) = &link.link_type {
-                match valve.valve_type {
-                    // PRV/PSV/PBV settings are stored as pressure (in feet of
-                    // head); the solver adds the anchor-node elevation when
-                    // it consumes the setting.
-                    ValveType::PRV | ValveType::PSV | ValveType::PBV => {
-                        let mut s = setting;
-                        if *unit_system == UnitSystem::US {
-                            s /= PSIperFT;
-                        }
-                        s /= unit_system.per_feet();
-                        control.setting = Some(s);
-                    }
-                    ValveType::FCV => {
-                        control.setting = Some(setting / flow_units.per_cfs());
-                    }
-                    _ => {}
-                }
-            }
-        }
     }
 
     /// Read a junction from a parts iterator
