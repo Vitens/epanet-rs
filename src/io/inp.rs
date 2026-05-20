@@ -55,8 +55,11 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
                     "{:<10} {:<12} {:<12} {}",
                     node.id,
                     node.elevation,
-                    junction.demands.get(0).map(|d| d.basedemand).unwrap_or(0.0),
-                    junction.demands.get(0).map(|d| d.pattern.as_deref().unwrap_or("")).unwrap_or(""),
+                    junction.demands.first().map(|d| d.basedemand).unwrap_or(0.0),
+                    junction
+                        .demands.first()
+                        .map(|d| d.pattern.as_deref().unwrap_or(""))
+                        .unwrap_or(""),
                 ),
             );
         }
@@ -248,11 +251,16 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
 
     for node in network.nodes.iter() {
         if let NodeType::Junction(junction) = &node.node_type {
-
             for demand in junction.demands.iter() {
                 write_line(
                     &mut buffer,
-                    &format!("{:<10} {:<12} {:<12};{}", node.id, demand.basedemand, demand.pattern.as_deref().unwrap_or(""), demand.name.as_deref().unwrap_or("")),
+                    &format!(
+                        "{:<10} {:<12} {:<12};{}",
+                        node.id,
+                        demand.basedemand,
+                        demand.pattern.as_deref().unwrap_or(""),
+                        demand.name.as_deref().unwrap_or("")
+                    ),
                 );
             }
         }

@@ -242,8 +242,7 @@ impl HydraulicSolver {
             // - relative change is less than the accuracy
             // - no status changes
             // - maximum flow change is less than the maximum flow change allowed
-            if
-                stats.relative_change(&network.options) < network.options.accuracy
+            if stats.relative_change(&network.options) < network.options.accuracy
                 && !stats.status_changed
                 && stats.max_dq_converted(&network.options) < max_flow_change
             {

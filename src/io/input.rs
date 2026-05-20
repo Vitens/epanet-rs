@@ -106,7 +106,7 @@ impl Network {
         // set of junction ids for which demands have been cleared
         // which can happen on the first line of the DEMANDS section of
         // the relevant junction
-        let mut demands_cleared : HashSet<Box<str>> = HashSet::new();
+        let mut demands_cleared: HashSet<Box<str>> = HashSet::new();
 
         // open the INP file
         let file = File::open(inp)
@@ -284,7 +284,7 @@ impl Network {
                 emitter_coefficient: 0.0,
                 demands: vec![Demand {
                     basedemand: demand,
-                    pattern: pattern,
+                    pattern,
                     pattern_index: None,
                     name: None,
                 }],
@@ -699,7 +699,11 @@ impl Network {
     }
 
     /// Read a demand from a parts iterator and set the basedemand for the junction
-    fn read_demand(&mut self, line: &str, demands_cleared: &mut HashSet<Box<str>>) -> Result<(), InputError> {
+    fn read_demand(
+        &mut self,
+        line: &str,
+        demands_cleared: &mut HashSet<Box<str>>,
+    ) -> Result<(), InputError> {
         let mut parts = parse_line(line);
         let id: Box<str> = parts.next().ok_or_missing("node id")?.into();
         let demand = parts
@@ -723,7 +727,7 @@ impl Network {
                 }
                 junction.demands.push(Demand {
                     basedemand: demand,
-                    pattern: pattern,
+                    pattern,
                     pattern_index: None,
                     name: None,
                 });

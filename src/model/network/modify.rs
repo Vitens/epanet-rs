@@ -1327,10 +1327,7 @@ impl Network {
                 })?;
 
         let referenced = self.nodes.iter().any(|n| match &n.node_type {
-            NodeType::Junction(j) => j
-                .demands
-                .iter()
-                .any(|d| d.pattern.as_deref() == Some(id)),
+            NodeType::Junction(j) => j.demands.iter().any(|d| d.pattern.as_deref() == Some(id)),
             NodeType::Reservoir(r) => r.head_pattern.as_deref() == Some(id),
             _ => false,
         });

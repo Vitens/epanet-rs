@@ -1,7 +1,7 @@
 //! Simple `Control` rules that open/close links based on time, tank level or nodal pressure.
 
 use crate::constants::{H_TOL, L_TOL, PSIperFT};
-use crate::model::link::{Link, LinkStatus, LinkType, LinkTrait};
+use crate::model::link::{Link, LinkStatus, LinkTrait, LinkType};
 use crate::model::network::Network;
 use crate::model::node::NodeType;
 use crate::model::options::SimulationOptions;
@@ -13,12 +13,28 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum ControlCondition {
     /// Pressure target stored as feet of head above node elevation.
-    HighPressure { node_index: usize, target: Ft },
-    LowPressure { node_index: usize, target: Ft },
-    HighLevel { tank_index: usize, target: Ft },
-    LowLevel { tank_index: usize, target: Ft },
-    Time { seconds: usize },
-    ClockTime { seconds: usize },
+    HighPressure {
+        node_index: usize,
+        target: Ft,
+    },
+    LowPressure {
+        node_index: usize,
+        target: Ft,
+    },
+    HighLevel {
+        tank_index: usize,
+        target: Ft,
+    },
+    LowLevel {
+        tank_index: usize,
+        target: Ft,
+    },
+    Time {
+        seconds: usize,
+    },
+    ClockTime {
+        seconds: usize,
+    },
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
