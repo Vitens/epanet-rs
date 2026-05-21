@@ -21,7 +21,12 @@ exclude = [
 ]
 
 [lib]
+name = "epanet_rs"
 crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+python = ["dep:pyo3", "dep:polars", "dep:pyo3-polars"]
 
 [dependencies]
 faer = { version = "0.23.2", features = ["linalg", "perf-warn"] }
@@ -37,6 +42,9 @@ simplelog = { version = "0.12.2", features = ["paris"] }
 time = { version = "0.3", features = ["macros"] }
 strum = { version = "0.28", features = ["derive"] }
 thiserror = "2.0.18"
+pyo3 = { version = "0.27", features = ["extension-module"], optional = true }
+polars = { version = "0.53", default-features = false, features = ["dtype-full"], optional = true }
+pyo3-polars = { version = "0.26", optional = true }
 
 [profile.release]
 debug = "line-tables-only"

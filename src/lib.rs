@@ -206,3 +206,21 @@ pub mod model;
 pub mod simulation;
 pub mod solver;
 pub mod utils;
+
+#[cfg(feature = "python")]
+pub mod python;
+
+#[cfg(feature = "python")]
+use pyo3::prelude::*;
+
+#[cfg(feature = "python")]
+#[pymodule]
+mod _core {
+    use crate::python::{PyHydraulicResults, PySimulation};
+
+    #[pymodule_export]
+    use PyHydraulicResults as HydraulicResults;
+
+    #[pymodule_export]
+    use PySimulation as Simulation;
+}
