@@ -83,6 +83,14 @@ impl Network {
         for link in network.links.iter_mut() {
             link.convert_from_standard(&network.options);
         }
+        for control in network.controls.iter_mut() {
+            if let Some(link_index) = network.link_map.get(&control.link_id).copied() {
+                control.convert_setting_from_standard(&network.links[link_index], &network.options);
+            }
+        }
+        for control in network.controls.iter_mut() {
+            control.convert_from_standard(&network.options);
+        }
         network.options.convert_from_standard();
 
         let file_extension = file.split('.').next_back().unwrap();

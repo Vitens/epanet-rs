@@ -55,8 +55,16 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
                     "{:<10} {:<12} {:<12} {}",
                     node.id,
                     node.elevation,
-                    junction.basedemand,
-                    junction.pattern.as_deref().unwrap_or("")
+                    junction
+                        .demands
+                        .first()
+                        .map(|d| d.basedemand)
+                        .unwrap_or(0.0),
+                    junction
+                        .demands
+                        .first()
+                        .map(|d| d.pattern.as_deref().unwrap_or(""))
+                        .unwrap_or(""),
                 ),
             );
         }
@@ -172,14 +180,15 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
             let mut parameters = String::new();
 
             if pump.head_curve_id.is_some() {
-                parameters.push_str(&format!("HEAD {}", pump.head_curve_id.as_deref().unwrap()));
+                parameters.push_str(&format!("HEAD {} ", pump.head_curve_id.as_deref().unwrap()));
             }
             if pump.speed != 1.0 {
-                parameters.push_str(&format!("SPEED {}", pump.speed));
+                parameters.push_str(&format!("SPEED {} ", pump.speed));
             }
             if pump.power != 0.0 {
-                parameters.push_str(&format!("POWER {}", pump.power));
+                parameters.push_str(&format!("POWER {} ", pump.power));
             }
+            parameters = parameters.trim().to_string();
 
             write_line(
                 &mut buffer,
@@ -247,15 +256,18 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
 
     for node in network.nodes.iter() {
         if let NodeType::Junction(junction) = &node.node_type {
-            write_line(
-                &mut buffer,
-                &format!(
-                    "{:<10} {:<12} {:<12}",
-                    node.id,
-                    junction.basedemand,
-                    junction.pattern.as_deref().unwrap_or("")
-                ),
-            );
+            for demand in junction.demands.iter() {
+                write_line(
+                    &mut buffer,
+                    &format!(
+                        "{:<10} {:<12} {:<12};{}",
+                        node.id,
+                        demand.basedemand,
+                        demand.pattern.as_deref().unwrap_or(""),
+                        demand.name.as_deref().unwrap_or("")
+                    ),
+                );
+            }
         }
     }
     // write emitters
@@ -412,7 +424,7 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
         &mut buffer,
         &format!(
             "Pattern {}",
-            network.options.pattern.as_deref().unwrap_or("")
+            network.options.pattern.as_deref().unwrap_or("1")
         ),
     );
     write_line(

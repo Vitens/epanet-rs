@@ -3,6 +3,7 @@
 
 pub mod control;
 pub mod curve;
+pub mod demand;
 pub mod junction;
 pub mod link;
 pub mod network;
@@ -12,6 +13,7 @@ pub mod pattern;
 pub mod pipe;
 pub mod pump;
 pub mod reservoir;
+pub mod rule;
 pub mod tank;
 pub mod units;
 pub mod valve;

@@ -5,6 +5,7 @@ use hashbrown::{HashMap, HashSet};
 use crate::model::curve::Curve;
 use crate::model::link::{Link, LinkType};
 use crate::model::node::{Node, NodeType};
+use crate::model::rule::Rule;
 use crate::model::valve::ValveType;
 
 use crate::model::control::{Control, ControlCondition};
@@ -43,6 +44,9 @@ pub struct Network {
     /// Controls in the network
     pub controls: Vec<Control>,
 
+    /// Rules in the network
+    pub rules: Vec<Rule>,
+
     // Skip serialization of the node_map and link_map to avoid bloating the file size with unnecessary data.
     #[serde(skip)]
     pub node_map: HashMap<Box<str>, usize>,
@@ -52,6 +56,8 @@ pub struct Network {
     pub curve_map: HashMap<Box<str>, usize>,
     #[serde(skip)]
     pub pattern_map: HashMap<Box<str>, usize>,
+    #[serde(skip)]
+    pub rule_map: HashMap<Box<str>, usize>,
     #[serde(skip)]
     pub contains_pressure_control_valve: bool,
 
@@ -103,10 +109,12 @@ impl Network {
         for node in self.nodes.iter_mut() {
             match &mut node.node_type {
                 NodeType::Junction(junction) => {
-                    junction.pattern_index = junction
-                        .pattern
-                        .as_ref()
-                        .and_then(|id| self.pattern_map.get(id).copied());
+                    for demand in junction.demands.iter_mut() {
+                        demand.pattern_index = demand
+                            .pattern
+                            .as_ref()
+                            .and_then(|id| self.pattern_map.get(id).copied());
+                    }
                 }
                 NodeType::Reservoir(reservoir) => {
                     reservoir.head_pattern_index = reservoir
@@ -135,6 +143,7 @@ impl<'de> Deserialize<'de> for Network {
             curves: Vec<Curve>,
             patterns: Vec<Pattern>,
             controls: Vec<Control>,
+            rules: Vec<Rule>,
         }
 
         let mut data = NetworkData::deserialize(deserializer)?;
@@ -167,6 +176,13 @@ impl<'de> Deserialize<'de> for Network {
             .map(|(i, p)| (p.id.clone(), i))
             .collect();
 
+        let rule_map: HashMap<Box<str>, usize> = data
+            .rules
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.id.clone(), i))
+            .collect();
+
         let mut contains_pressure_control_valve = false;
         for link in data.links.iter_mut() {
             link.start_node = *node_map.get(&link.start_node_id).unwrap();
@@ -186,9 +202,11 @@ impl<'de> Deserialize<'de> for Network {
             curves: data.curves,
             patterns: data.patterns,
             controls: data.controls,
+            rules: data.rules,
             node_map,
             link_map,
             curve_map,
+            rule_map,
             pattern_map,
             contains_pressure_control_valve,
             topology_version: 0,
@@ -204,7 +222,7 @@ impl<'de> Deserialize<'de> for Network {
     }
 }
 
-/// Crate-private utility methods to add nodes and links
+/// Crate-private utility methods to add nodes, links and rules
 impl Network {
     pub(crate) fn add_node(&mut self, node: Node) -> Result<(), InputError> {
         if self.node_map.contains_key(&node.id) {
@@ -242,6 +260,17 @@ impl Network {
         self.topology_version += 1;
         Ok(())
     }
+    pub(crate) fn add_rule(&mut self, rule: Rule) -> Result<(), InputError> {
+        if self.rule_map.contains_key(&rule.id) {
+            return Err(InputError::new(format!(
+                "Rule with id {} already exists",
+                rule.id
+            )));
+        }
+        self.rule_map.insert(rule.id.clone(), self.rules.len());
+        self.rules.push(rule);
+        Ok(())
+    }
 }
 
 impl UnitConversion for Network {
@@ -255,6 +284,16 @@ impl UnitConversion for Network {
             link.convert_to_standard(options);
         }
 
+        // convert controls to standard units
+        for control in self.controls.iter_mut() {
+            control.convert_to_standard(options);
+        }
+        for control in self.controls.iter_mut() {
+            if let Some(link_index) = self.link_map.get(&control.link_id).copied() {
+                control.convert_setting_to_standard(&self.links[link_index], options);
+            }
+        }
+
         // convert the options to standard units
         self.options.convert_to_standard();
     }
@@ -266,6 +305,15 @@ impl UnitConversion for Network {
         // convert the links from standard units
         for link in self.links.iter_mut() {
             link.convert_from_standard(options);
+        }
+        // convert controls from standard units
+        for control in self.controls.iter_mut() {
+            if let Some(link_index) = self.link_map.get(&control.link_id).copied() {
+                control.convert_setting_from_standard(&self.links[link_index], options);
+            }
+        }
+        for control in self.controls.iter_mut() {
+            control.convert_from_standard(options);
         }
         // convert the options from standard units
         self.options.convert_from_standard();

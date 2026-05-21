@@ -19,9 +19,13 @@ network.add_pattern("P1", &PatternData {
 
 network.add_junction("J1", &JunctionData {
   elevation: 100.0,
-  basedemand: 10.0,
+  demands: vec![epanet_rs::model::demand::Demand {
+    basedemand: 10.0,
+    pattern: Some("P1".into()),
+    pattern_index: None,
+    name: None,
+  }],
   emitter_coefficient: 0.0,
-  pattern: Some("P1".into()),
   coordinates: Some((100.0, 200.0)),
 }).unwrap();
 
@@ -31,13 +35,17 @@ network.update_junction("J1", &JunctionUpdate {
   basedemand: None,
   emitter_coefficient: None,
   pattern: Some(None),
+  demands: None,
   coordinates: None,
 });
 */
 
+use hashbrown::HashMap;
+
 use crate::error::InputError;
 use crate::model::control::ControlCondition;
 use crate::model::curve::{Curve, HeadCurve, ValveCurve};
+use crate::model::demand::Demand;
 use crate::model::junction::Junction;
 use crate::model::link::{Link, LinkStatus, LinkType};
 use crate::model::network::Network;
@@ -54,9 +62,8 @@ use crate::model::valve::{Valve, ValveType};
 #[derive(Default)]
 pub struct JunctionData {
     pub elevation: f64,
-    pub basedemand: f64,
+    pub demands: Vec<Demand>,
     pub emitter_coefficient: f64,
-    pub pattern: Option<Box<str>>,
     pub coordinates: Option<(f64, f64)>,
 }
 
@@ -64,11 +71,10 @@ pub struct JunctionData {
 #[derive(Default)]
 pub struct JunctionUpdate {
     pub elevation: Option<f64>,
+    pub demands: Option<Vec<Demand>>,
     pub basedemand: Option<f64>,
-    pub emitter_coefficient: Option<f64>,
-    /// Demand pattern id. `None` leaves the pattern untouched, `Some(None)`
-    /// clears an existing pattern, `Some(Some(id))` sets the pattern.
     pub pattern: Option<Option<Box<str>>>,
+    pub emitter_coefficient: Option<f64>,
     pub coordinates: Option<(f64, f64)>,
 }
 
@@ -253,24 +259,12 @@ impl Network {
 
     /// Add a new junction to the network.
     pub fn add_junction(&mut self, id: &str, data: &JunctionData) -> Result<(), InputError> {
-        // resolve the pattern index
-        let pattern_index = if let Some(pattern) = &data.pattern {
-            Some(
-                self.pattern_map
-                    .get(pattern)
-                    .ok_or(InputError::PatternNotFound {
-                        pattern_id: pattern.clone(),
-                    })?,
-            )
-        } else {
-            None
-        };
+        let mut demands = data.demands.clone();
+        Self::resolve_demand_patterns(&self.pattern_map, &mut demands)?;
 
         let junction = Junction {
-            basedemand: data.basedemand,
             emitter_coefficient: data.emitter_coefficient,
-            pattern: data.pattern.clone(),
-            pattern_index: pattern_index.copied(),
+            demands,
         };
 
         let mut node = Node {
@@ -385,8 +379,8 @@ impl Network {
             }
         };
 
+        let pattern_map = &self.pattern_map;
         let node = &mut self.nodes[*node_index];
-        // check if the node is a tank
         if !matches!(node.node_type, NodeType::Junction(_)) {
             return Err(InputError::NodeNotAJunction { node_id: id.into() });
         }
@@ -401,16 +395,25 @@ impl Network {
                 node.coordinates = Some(coordinates);
             }
 
-            junction.basedemand = update.basedemand.unwrap_or(junction.basedemand);
-
             junction.emitter_coefficient = update
                 .emitter_coefficient
                 .unwrap_or(junction.emitter_coefficient);
 
-            if let Some((new_pattern, new_index)) = pattern_change {
-                junction.pattern = new_pattern;
-                junction.pattern_index = new_index;
+            if let Some(demands) = &update.demands {
+                junction.demands = demands.clone();
             }
+
+            if let Some(basedemand) = update.basedemand {
+                Self::primary_demand_mut(junction).basedemand = basedemand;
+            }
+
+            if let Some((new_pattern, new_index)) = pattern_change {
+                let demand = Self::primary_demand_mut(junction);
+                demand.pattern = new_pattern;
+                demand.pattern_index = new_index;
+            }
+
+            Self::resolve_demand_patterns(pattern_map, &mut junction.demands)?;
         }
         // convert back to standard units
         node.convert_to_standard(&self.options);
@@ -653,9 +656,10 @@ impl Network {
         self.add_link(link)
     }
 
-    /// Add a new valve to the network. Any `curve_id` is resolved eagerly. For
-    /// PSV/PRV valves the stored setting is offset by the attached node's
-    /// elevation, matching the input file loader's behaviour.
+    /// Add a new valve to the network. Any `curve_id` is resolved eagerly.
+    /// PSV/PRV valves store their setting as pressure (in feet of head) at
+    /// the anchor node; the solver adds the anchor's elevation at the point
+    /// of use, so the stored setting is independent of node elevation.
     pub fn add_valve(&mut self, id: &str, data: &ValveData) -> Result<(), InputError> {
         let start_node =
             *self
@@ -676,7 +680,14 @@ impl Network {
         // if data.valve_type == ValveType::GPV && data.curve_id.is_none() {
         //   return Err(InputError::new("GPV valves require a curve id"));
         // }
-        let valve_curve = self.resolve_valve_curve(data.curve_id.as_deref())?;
+        // resolve the curve based on valve type. GPV curves are converted to
+        // standard units, while PCV curves are stored as-is because they
+        // represent dimensionless percentage relationships.
+        let (gpv_curve, pcv_curve) = match data.valve_type {
+            ValveType::GPV => (self.resolve_gpv_curve(data.curve_id.as_deref())?, None),
+            ValveType::PCV => (None, self.resolve_pcv_curve(data.curve_id.as_deref())?),
+            _ => (None, None),
+        };
 
         let valve = Valve {
             diameter: data.diameter,
@@ -684,7 +695,8 @@ impl Network {
             curve_id: data.curve_id.clone(),
             valve_type: data.valve_type.clone(),
             minor_loss: data.minor_loss,
-            valve_curve: None,
+            gpv_curve: None,
+            pcv_curve: None,
         };
 
         let mut link = Link {
@@ -700,20 +712,14 @@ impl Network {
 
         link.convert_to_standard(&self.options);
 
-        // apply the node-elevation offset to PSV/PRV settings and attach the curve
+        // attach the curve and flag the network as containing PSV/PRV (no
+        // elevation offset is applied — the setting is stored as pressure).
         if let LinkType::Valve(valve) = &mut link.link_type {
-            match valve.valve_type {
-                ValveType::PSV => {
-                    valve.setting += self.nodes[start_node].elevation;
-                    self.contains_pressure_control_valve = true;
-                }
-                ValveType::PRV => {
-                    valve.setting += self.nodes[end_node].elevation;
-                    self.contains_pressure_control_valve = true;
-                }
-                _ => {}
+            if matches!(valve.valve_type, ValveType::PSV | ValveType::PRV) {
+                self.contains_pressure_control_valve = true;
             }
-            valve.valve_curve = valve_curve;
+            valve.gpv_curve = gpv_curve;
+            valve.pcv_curve = pcv_curve;
         }
 
         self.add_link(link)
@@ -811,8 +817,8 @@ impl Network {
     /// Update properties of an existing valve. `curve_id` follows the
     /// `Option<Option<_>>` convention: `None` leaves the curve untouched,
     /// `Some(None)` clears it, `Some(Some(id))` sets it (GPV valves cannot
-    /// have their curve cleared). The PSV/PRV elevation offset is
-    /// automatically re-applied when the `setting` is changed. Changing
+    /// have their curve cleared). PSV/PRV settings are stored as pressure
+    /// (in feet of head) and are independent of node elevation. Changing
     /// `valve_type` requires a new `setting` (the stored value has no
     /// meaning under a different type); switching to `GPV` also requires a
     /// `curve_id` to be supplied.
@@ -828,9 +834,9 @@ impl Network {
 
         // capture the current valve_type and resolve the target valve_type so we
         // can validate the update before mutating anything.
-        let (old_valve_type, _had_curve) =
+        let (old_valve_type, old_curve_id) =
             if let LinkType::Valve(valve) = &self.links[link_index].link_type {
-                (valve.valve_type.clone(), valve.curve_id.is_some())
+                (valve.valve_type.clone(), valve.curve_id.clone())
             } else {
                 unreachable!()
             };
@@ -868,45 +874,51 @@ impl Network {
         }
 
         // resolve the new curve (if a curve change is requested) before we take
-        // a mutable borrow on the link.
-        let curve_change: Option<(Option<Box<str>>, Option<ValveCurve>)> = match &update.curve_id {
-            None => None,
-            Some(None) => Some((None, None)),
+        // a mutable borrow on the link. The resolved curve type depends on the
+        // (possibly new) valve type: GPV uses a unit-converted ValveCurve,
+        // while PCV uses a raw Curve (its values are dimensionless percentages).
+        // When the valve type changes but curve_id is left unchanged, we still
+        // need to re-build the cached curve under the new type's semantics.
+        let curve_change: Option<(Option<Box<str>>, ResolvedValveCurve)> = match &update.curve_id {
+            None => {
+                if type_changed {
+                    let resolved = match (new_valve_type.clone(), old_curve_id.as_deref()) {
+                        (ValveType::GPV, Some(cid)) => {
+                            ResolvedValveCurve::Gpv(self.resolve_gpv_curve(Some(cid))?)
+                        }
+                        (ValveType::PCV, Some(cid)) => {
+                            ResolvedValveCurve::Pcv(self.resolve_pcv_curve(Some(cid))?)
+                        }
+                        _ => ResolvedValveCurve::None,
+                    };
+                    Some((old_curve_id.clone(), resolved))
+                } else {
+                    None
+                }
+            }
+            Some(None) => Some((None, ResolvedValveCurve::None)),
             Some(Some(curve_id)) => {
-                let resolved = self.resolve_valve_curve(Some(curve_id.as_ref()))?;
+                let resolved = match new_valve_type {
+                    ValveType::GPV => {
+                        ResolvedValveCurve::Gpv(self.resolve_gpv_curve(Some(curve_id.as_ref()))?)
+                    }
+                    ValveType::PCV => {
+                        ResolvedValveCurve::Pcv(self.resolve_pcv_curve(Some(curve_id.as_ref()))?)
+                    }
+                    _ => ResolvedValveCurve::None,
+                };
                 Some((Some(curve_id.clone()), resolved))
             }
         };
 
-        // capture start/end node elevations (already in standard units) for PSV/PRV
-        let start_elevation = self.nodes[self.links[link_index].start_node].elevation;
-        let end_elevation = self.nodes[self.links[link_index].end_node].elevation;
-
         let link = &mut self.links[link_index];
 
-        let stored_setting = if let LinkType::Valve(valve) = &link.link_type {
-            valve.setting
-        } else {
-            unreachable!()
-        };
-
-        // strip the old PSV/PRV elevation offset before converting to user units.
-        // The offset for the (possibly new) type is re-applied after the
-        // to-standard step below, matching add_valve's semantics.
-        if let LinkType::Valve(valve) = &mut link.link_type {
-            match old_valve_type {
-                ValveType::PSV => {
-                    valve.setting = stored_setting - start_elevation;
-                }
-                ValveType::PRV => {
-                    valve.setting = stored_setting - end_elevation;
-                }
-                _ => {}
-            }
-        }
-
-        // convert_from_standard uses valve.valve_type, which is still the OLD
-        // type here so the existing `setting` is interpreted correctly.
+        // PSV/PRV settings are stored as pressure (no elevation offset), so
+        // converting to/from user units is a straight unit conversion driven
+        // by the valve's current valve_type. We use the OLD type for the
+        // `from_standard` step below so the existing `setting` is interpreted
+        // correctly, and the NEW type for the `to_standard` step so the
+        // updated `setting` is interpreted in new-type semantics.
         link.convert_from_standard(&self.options);
 
         if let LinkType::Valve(valve) = &mut link.link_type {
@@ -915,30 +927,28 @@ impl Network {
             }
             if let Some(setting) = update.setting {
                 valve.setting = setting;
+                // set the valve status to active
+                link.initial_status = LinkStatus::Active;
             }
             if let Some(minor_loss) = update.minor_loss {
                 valve.minor_loss = minor_loss;
             }
-            // switch to the NEW type before converting back to standard so that
-            // the new `setting` is interpreted in new-type semantics.
             valve.valve_type = new_valve_type.clone();
         }
 
         link.convert_to_standard(&self.options);
 
-        if let LinkType::Valve(valve) = &mut link.link_type {
-            match new_valve_type {
-                ValveType::PSV => {
-                    valve.setting += start_elevation;
-                }
-                ValveType::PRV => {
-                    valve.setting += end_elevation;
-                }
-                _ => {}
-            }
-            if let Some((new_curve_id, new_valve_curve)) = curve_change {
-                valve.curve_id = new_curve_id;
-                valve.valve_curve = new_valve_curve;
+        if let LinkType::Valve(valve) = &mut link.link_type
+            && let Some((new_curve_id, new_valve_curve)) = curve_change
+        {
+            valve.curve_id = new_curve_id;
+            // clear both caches and set whichever applies for the new type
+            valve.gpv_curve = None;
+            valve.pcv_curve = None;
+            match new_valve_curve {
+                ResolvedValveCurve::Gpv(c) => valve.gpv_curve = c,
+                ResolvedValveCurve::Pcv(c) => valve.pcv_curve = c,
+                ResolvedValveCurve::None => {}
             }
         }
 
@@ -1000,20 +1010,9 @@ impl Network {
         let old_start = link.start_node;
         let old_end = link.end_node;
 
-        // remember the valve_type so we can re-offset PSV/PRV settings if the
-        // attached node (and thus its elevation) is swapped out
-        let valve_type = if let LinkType::Valve(valve) = &link.link_type {
-            Some(valve.valve_type.clone())
-        } else {
-            None
-        };
-
         let mut topology_changed = false;
 
         if let Some((start_id, start_idx)) = new_start {
-            let old_elev = self.nodes[old_start].elevation;
-            let new_elev = self.nodes[start_idx].elevation;
-
             // detach from old tank's links_from and attach to new tank's links_from
             remove_tank_link(
                 &mut self.nodes[old_start],
@@ -1030,19 +1029,12 @@ impl Network {
             link.start_node = start_idx;
             link.start_node_id = start_id;
 
-            // keep PSV setting offset in sync with its start-node elevation
-            if valve_type.as_ref() == Some(&ValveType::PSV)
-                && let LinkType::Valve(valve) = &mut link.link_type
-            {
-                valve.setting += new_elev - old_elev;
-            }
+            // PSV/PRV settings are stored as pressure (independent of node
+            // elevation), so swapping endpoints does not alter the setting.
             topology_changed = true;
         }
 
         if let Some((end_id, end_idx)) = new_end {
-            let old_elev = self.nodes[old_end].elevation;
-            let new_elev = self.nodes[end_idx].elevation;
-
             remove_tank_link(
                 &mut self.nodes[old_end],
                 link_index,
@@ -1058,12 +1050,6 @@ impl Network {
             link.end_node = end_idx;
             link.end_node_id = end_id;
 
-            // keep PRV setting offset in sync with its end-node elevation
-            if valve_type.as_ref() == Some(&ValveType::PRV)
-                && let LinkType::Valve(valve) = &mut link.link_type
-            {
-                valve.setting += new_elev - old_elev;
-            }
             topology_changed = true;
         }
 
@@ -1341,7 +1327,7 @@ impl Network {
                 })?;
 
         let referenced = self.nodes.iter().any(|n| match &n.node_type {
-            NodeType::Junction(j) => j.pattern.as_deref() == Some(id),
+            NodeType::Junction(j) => j.demands.iter().any(|d| d.pattern.as_deref() == Some(id)),
             NodeType::Reservoir(r) => r.head_pattern.as_deref() == Some(id),
             _ => false,
         });
@@ -1428,11 +1414,19 @@ impl Network {
                     self.updated_links.insert(i);
                 }
                 LinkType::Valve(valve) if valve.curve_id.as_deref() == Some(id) => {
-                    valve.valve_curve = Some(ValveCurve::new(
-                        curve,
-                        &self.options.flow_units,
-                        &self.options.unit_system,
-                    )?);
+                    match valve.valve_type {
+                        ValveType::GPV => {
+                            valve.gpv_curve = Some(ValveCurve::new(
+                                curve,
+                                &self.options.flow_units,
+                                &self.options.unit_system,
+                            )?);
+                        }
+                        ValveType::PCV => {
+                            valve.pcv_curve = Some(curve.clone());
+                        }
+                        _ => {}
+                    }
                     self.updated_links.insert(i);
                 }
                 _ => {}
@@ -1484,6 +1478,39 @@ impl Network {
 
     // --- private helpers ---
 
+    fn resolve_demand_patterns(
+        pattern_map: &HashMap<Box<str>, usize>,
+        demands: &mut [Demand],
+    ) -> Result<(), InputError> {
+        for demand in demands.iter_mut() {
+            demand.pattern_index = demand
+                .pattern
+                .as_ref()
+                .map(|pattern_id| {
+                    pattern_map
+                        .get(pattern_id)
+                        .ok_or(InputError::PatternNotFound {
+                            pattern_id: pattern_id.clone(),
+                        })
+                        .copied()
+                })
+                .transpose()?;
+        }
+        Ok(())
+    }
+
+    fn primary_demand_mut(junction: &mut Junction) -> &mut Demand {
+        if junction.demands.is_empty() {
+            junction.demands.push(Demand {
+                basedemand: 0.0,
+                pattern: None,
+                pattern_index: None,
+                name: None,
+            });
+        }
+        &mut junction.demands[0]
+    }
+
     fn resolve_head_curve(&self, curve_id: Option<&str>) -> Result<Option<HeadCurve>, InputError> {
         let Some(curve_id) = curve_id else {
             return Ok(None);
@@ -1503,10 +1530,10 @@ impl Network {
         )?))
     }
 
-    fn resolve_valve_curve(
-        &self,
-        curve_id: Option<&str>,
-    ) -> Result<Option<ValveCurve>, InputError> {
+    /// Resolve a curve id to a unit-converted [`ValveCurve`] used by GPV
+    /// valves. The curve x/y values are converted from user units to the
+    /// internal CFS/feet representation.
+    fn resolve_gpv_curve(&self, curve_id: Option<&str>) -> Result<Option<ValveCurve>, InputError> {
         let Some(curve_id) = curve_id else {
             return Ok(None);
         };
@@ -1524,6 +1551,33 @@ impl Network {
             &self.options.unit_system,
         )?))
     }
+
+    /// Resolve a curve id to a raw [`Curve`] used by PCV valves. PCV curves
+    /// describe a dimensionless percent-open vs. flow-ratio relationship and
+    /// are therefore stored unmodified.
+    fn resolve_pcv_curve(&self, curve_id: Option<&str>) -> Result<Option<Curve>, InputError> {
+        let Some(curve_id) = curve_id else {
+            return Ok(None);
+        };
+        let curve_index =
+            *self
+                .curve_map
+                .get(curve_id)
+                .ok_or_else(|| InputError::CurveNotFound {
+                    curve_id: curve_id.into(),
+                })?;
+        Ok(Some(self.curves[curve_index].clone()))
+    }
+}
+
+/// Result of resolving a curve id for a valve. The variant carried depends
+/// on the valve's type because GPV and PCV valves cache different
+/// representations of the underlying curve (see [`Valve::gpv_curve`] and
+/// [`Valve::pcv_curve`]).
+enum ResolvedValveCurve {
+    Gpv(Option<ValveCurve>),
+    Pcv(Option<Curve>),
+    None,
 }
 
 /// Validate a raw curve's x/y arrays: both must be non-empty, of equal
@@ -1608,6 +1662,15 @@ mod tests {
     use crate::model::tank::Tank;
     use crate::model::units::FlowUnits;
 
+    fn demands(basedemand: f64, pattern: Option<&str>) -> Vec<Demand> {
+        vec![Demand {
+            basedemand,
+            pattern: pattern.map(Into::into),
+            pattern_index: None,
+            name: None,
+        }]
+    }
+
     // --- helpers for tank/reservoir tests (no public add_tank/add_reservoir yet) ---
 
     fn test_tank_node(id: &str, elevation: f64) -> Node {
@@ -1650,9 +1713,8 @@ mod tests {
         let mut network = Network::default();
         let data = JunctionData {
             elevation: 100.0,
-            basedemand: 10.0,
+            demands: demands(10.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -1665,6 +1727,7 @@ mod tests {
 
         let update = JunctionUpdate {
             elevation: Some(200.0),
+            demands: None,
             basedemand: Some(20.0),
             emitter_coefficient: Some(0.5),
             pattern: None,
@@ -1675,7 +1738,7 @@ mod tests {
         let NodeType::Junction(junction) = &network.nodes[0].node_type else {
             panic!("Expected Junction node type");
         };
-        assert_eq!(junction.basedemand, 20.0);
+        assert_eq!(junction.demands[0].basedemand, 20.0);
         assert!((junction.emitter_coefficient - 9.231479).abs() < 1e-6);
         assert_eq!(network.properties_version, 1);
     }
@@ -1693,9 +1756,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 10.0,
+                    demands: demands(10.0, Some("P1")),
                     emitter_coefficient: 0.0,
-                    pattern: Some("P1".into()),
                     coordinates: None,
                 },
             )
@@ -1715,9 +1777,9 @@ mod tests {
         let NodeType::Junction(junction) = &network.nodes[0].node_type else {
             panic!("Expected Junction node type");
         };
-        assert_eq!(junction.pattern.as_deref(), Some("P1"));
-        assert_eq!(junction.pattern_index, Some(0));
-        assert_eq!(junction.basedemand, 20.0);
+        assert_eq!(junction.demands[0].pattern.as_deref(), Some("P1"));
+        assert_eq!(junction.demands[0].pattern_index, Some(0));
+        assert_eq!(junction.demands[0].basedemand, 20.0);
     }
 
     #[test]
@@ -1733,9 +1795,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 10.0,
+                    demands: demands(10.0, Some("P1")),
                     emitter_coefficient: 0.0,
-                    pattern: Some("P1".into()),
                     coordinates: None,
                 },
             )
@@ -1754,8 +1815,8 @@ mod tests {
         let NodeType::Junction(junction) = &network.nodes[0].node_type else {
             panic!("Expected Junction node type");
         };
-        assert!(junction.pattern.is_none());
-        assert!(junction.pattern_index.is_none());
+        assert!(junction.demands[0].pattern.is_none());
+        assert!(junction.demands[0].pattern_index.is_none());
     }
 
     #[test]
@@ -1771,9 +1832,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 10.0,
+                    demands: demands(10.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -1792,8 +1852,8 @@ mod tests {
         let NodeType::Junction(junction) = &network.nodes[0].node_type else {
             panic!("Expected Junction node type");
         };
-        assert_eq!(junction.pattern.as_deref(), Some("P1"));
-        assert_eq!(junction.pattern_index, Some(0));
+        assert_eq!(junction.demands[0].pattern.as_deref(), Some("P1"));
+        assert_eq!(junction.demands[0].pattern_index, Some(0));
     }
 
     #[test]
@@ -1804,9 +1864,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 10.0,
+                    demands: demands(10.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -1829,9 +1888,8 @@ mod tests {
         let mut network = Network::new(FlowUnits::CMH, HeadlossFormula::HazenWilliams);
         let data = JunctionData {
             elevation: 100.0,
-            basedemand: 10.0,
+            demands: demands(10.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -2021,9 +2079,8 @@ mod tests {
         let mut network = Network::default();
         let data = JunctionData {
             elevation: 100.0,
-            basedemand: 0.0,
+            demands: demands(0.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -2051,9 +2108,8 @@ mod tests {
         let mut network = Network::default();
         let data = JunctionData {
             elevation: 100.0,
-            basedemand: 0.0,
+            demands: demands(0.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -2222,9 +2278,8 @@ mod tests {
         let mut network = Network::default();
         let data = JunctionData {
             elevation: 0.0,
-            basedemand: 0.0,
+            demands: demands(0.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -2412,9 +2467,8 @@ mod tests {
         let mut network = Network::default();
         let data = JunctionData {
             elevation: 0.0,
-            basedemand: 0.0,
+            demands: demands(0.0, None),
             emitter_coefficient: 0.0,
-            pattern: None,
             coordinates: None,
         };
         network.add_junction("J1", &data).unwrap();
@@ -2483,9 +2537,8 @@ mod tests {
                     id,
                     &JunctionData {
                         elevation: 100.0,
-                        basedemand: 0.0,
+                        demands: demands(0.0, None),
                         emitter_coefficient: 0.0,
-                        pattern: None,
                         coordinates: None,
                     },
                 )
@@ -2721,9 +2774,10 @@ mod tests {
     // --- add_valve tests ---
 
     #[test]
-    fn test_add_prv_applies_end_elevation_offset() {
-        // user adds a PRV with setting 50 psi (US units). Internal setting should
-        // be the converted pressure plus the end node's elevation (in feet).
+    fn test_add_prv_stores_pressure_setting() {
+        // user adds a PRV with setting 50 psi (US units). Internal setting is
+        // the pressure expressed in feet of head (no elevation offset — the
+        // solver adds the anchor-node elevation at the point of use).
         let mut network = Network::default();
         // J1 at 100 ft, J2 at 200 ft
         network
@@ -2731,9 +2785,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -2743,9 +2796,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 200.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -2771,8 +2823,8 @@ mod tests {
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
         };
-        // 50 psi -> 50 / PSIperFT ft, plus end-node elevation (J2 = 200 ft)
-        let expected = 50.0 / crate::constants::PSIperFT + 200.0;
+        // 50 psi -> 50 / PSIperFT ft (no elevation offset)
+        let expected = 50.0 / crate::constants::PSIperFT;
         assert!((valve.setting - expected).abs() < 1e-6);
         assert!(network.contains_pressure_control_valve);
     }
@@ -3109,16 +3161,15 @@ mod tests {
     // --- update_valve tests ---
 
     #[test]
-    fn test_update_valve_setting_reapplies_prv_offset() {
+    fn test_update_valve_setting_stores_pressure_for_prv() {
         let mut network = Network::default();
         network
             .add_junction(
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3128,9 +3179,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 200.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3168,7 +3218,8 @@ mod tests {
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
         };
-        let expected = 80.0 / crate::constants::PSIperFT + 200.0;
+        // 80 psi expressed in feet of head, no elevation offset
+        let expected = 80.0 / crate::constants::PSIperFT;
         assert!((valve.setting - expected).abs() < 1e-6);
     }
 
@@ -3182,9 +3233,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3194,9 +3244,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 200.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3413,7 +3462,8 @@ mod tests {
             panic!("Expected Valve link type");
         };
         assert_eq!(valve.curve_id.as_deref(), Some("C1"));
-        assert!(valve.valve_curve.is_some());
+        assert!(valve.gpv_curve.is_some());
+        assert!(valve.pcv_curve.is_none());
     }
 
     #[test]
@@ -3455,20 +3505,20 @@ mod tests {
             panic!("Expected Valve link type");
         };
         assert!(valve.curve_id.is_none());
-        assert!(valve.valve_curve.is_none());
+        assert!(valve.gpv_curve.is_none());
+        assert!(valve.pcv_curve.is_none());
     }
 
     #[test]
-    fn test_update_valve_type_change_tcv_to_prv_applies_offset() {
+    fn test_update_valve_type_change_tcv_to_prv_stores_pressure_setting() {
         let mut network = Network::default();
         network
             .add_junction(
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3478,9 +3528,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 200.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3520,8 +3569,8 @@ mod tests {
             panic!("Expected Valve link type");
         };
         assert_eq!(valve.valve_type, ValveType::PRV);
-        // 50 psi -> ft, plus end-node elevation (J2 = 200 ft)
-        let expected = 50.0 / crate::constants::PSIperFT + 200.0;
+        // 50 psi expressed in feet of head (no elevation offset)
+        let expected = 50.0 / crate::constants::PSIperFT;
         assert!((valve.setting - expected).abs() < 1e-6);
         assert!(network.contains_pressure_control_valve);
     }
@@ -3534,9 +3583,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3546,9 +3594,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 200.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3635,9 +3682,8 @@ mod tests {
                 "J3",
                 &JunctionData {
                     elevation: 100.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3672,9 +3718,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -3714,86 +3759,6 @@ mod tests {
             "T1 should no longer be a destination"
         );
         assert_eq!(t2.links_to, vec![0], "T2 should now be a destination");
-    }
-
-    #[test]
-    fn test_update_link_prv_setting_follows_end_node_elevation() {
-        let mut network = Network::default();
-        network
-            .add_junction(
-                "J1",
-                &JunctionData {
-                    elevation: 100.0,
-                    basedemand: 0.0,
-                    emitter_coefficient: 0.0,
-                    pattern: None,
-                    coordinates: None,
-                },
-            )
-            .unwrap();
-        network
-            .add_junction(
-                "J2",
-                &JunctionData {
-                    elevation: 200.0,
-                    basedemand: 0.0,
-                    emitter_coefficient: 0.0,
-                    pattern: None,
-                    coordinates: None,
-                },
-            )
-            .unwrap();
-        network
-            .add_junction(
-                "J3",
-                &JunctionData {
-                    elevation: 300.0,
-                    basedemand: 0.0,
-                    emitter_coefficient: 0.0,
-                    pattern: None,
-                    coordinates: None,
-                },
-            )
-            .unwrap();
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::PRV,
-                    setting: 50.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
-        let setting_before = if let LinkType::Valve(valve) = &network.links[0].link_type {
-            valve.setting
-        } else {
-            unreachable!()
-        };
-
-        network
-            .update_link(
-                "V1",
-                &LinkUpdate {
-                    start_node: None,
-                    end_node: Some("J3".into()),
-                    vertices: None,
-                    initial_status: None,
-                },
-            )
-            .unwrap();
-
-        let LinkType::Valve(valve) = &network.links[0].link_type else {
-            panic!("Expected Valve link type");
-        };
-        // the internal setting should have shifted by +100 ft (J3 - J2 elevations)
-        assert!((valve.setting - (setting_before + 100.0)).abs() < 1e-6);
     }
 
     #[test]
@@ -3992,9 +3957,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -4019,9 +3983,8 @@ mod tests {
                 "J3",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -4057,9 +4020,8 @@ mod tests {
                 "J3",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -4121,9 +4083,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -4151,9 +4112,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -4163,9 +4123,8 @@ mod tests {
                 "J2",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 0.0,
+                    demands: demands(0.0, None),
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -4392,9 +4351,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 1.0,
+                    demands: demands(1.0, Some("P2")),
                     emitter_coefficient: 0.0,
-                    pattern: Some("P2".into()),
                     coordinates: None,
                 },
             )
@@ -4416,7 +4374,7 @@ mod tests {
         let NodeType::Junction(j) = &network.nodes[0].node_type else {
             panic!()
         };
-        assert_eq!(j.pattern_index, Some(0));
+        assert_eq!(j.demands[0].pattern_index, Some(0));
         let NodeType::Reservoir(r) = &network.nodes[1].node_type else {
             panic!()
         };
@@ -4439,9 +4397,8 @@ mod tests {
                 "J1",
                 &JunctionData {
                     elevation: 0.0,
-                    basedemand: 1.0,
+                    demands: demands(1.0, Some("P1")),
                     emitter_coefficient: 0.0,
-                    pattern: Some("P1".into()),
                     coordinates: None,
                 },
             )

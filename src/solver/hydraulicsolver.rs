@@ -42,7 +42,7 @@ pub struct IterationStatistics {
 
 impl IterationStatistics {
     pub fn relative_change(&self, options: &SimulationOptions) -> f64 {
-        if self.sum_q > options.accuracy {
+        if self.sum_q > 2.0 * options.accuracy {
             self.sum_dq / (self.sum_q + Q_ZERO)
         } else {
             self.sum_dq
@@ -216,12 +216,12 @@ impl HydraulicSolver {
             let mut stats = self.update_links(network, &mut state, &link_coefficients);
             self.update_emitter_flows(network, &mut state, &mut stats);
 
+            // close/open links connected to tanks based on tank level
+            self.update_tank_links(network, &mut state);
+
             if network.options.demand_model == DemandModel::PDA {
                 self.update_demand_flows(network, &mut state, &mut stats);
             }
-
-            // close/open links connected to tanks based on tank level
-            self.update_tank_links(network, &mut state);
 
             debug!(
                 ">> Iteration {}: Relative change: {:.6}, Status changed: {}",
@@ -238,12 +238,11 @@ impl HydraulicSolver {
             let max_flow_change = network.options.max_flow_change.unwrap_or(BIG_VALUE);
 
             // check for convergence:
-            // - not the first iteration
+
             // - relative change is less than the accuracy
             // - no status changes
             // - maximum flow change is less than the maximum flow change allowed
-            if iteration > 1
-                && stats.relative_change(&network.options) < network.options.accuracy
+            if stats.relative_change(&network.options) < network.options.accuracy
                 && !stats.status_changed
                 && stats.max_dq_converted(&network.options) < max_flow_change
             {
@@ -332,6 +331,8 @@ impl HydraulicSolver {
                 state.flows[i],
                 state.heads[link.start_node],
                 state.heads[link.end_node],
+                network.nodes[link.start_node].elevation,
+                network.nodes[link.end_node].elevation,
             );
             if let Some(status) = new_status {
                 if state.statuses[i] != LinkStatus::TempClosed

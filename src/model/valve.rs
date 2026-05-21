@@ -1,7 +1,7 @@
 //! `Valve` link and `ValveType` variants (PRV, PSV, PBV, FCV, TCV, GPV) with their control logic.
 
 use crate::constants::*;
-use crate::model::curve::ValveCurve;
+use crate::model::curve::{Curve, ValveCurve};
 use crate::model::link::{LinkCoefficients, LinkStatus, LinkTrait, NodeModification};
 use crate::model::options::SimulationOptions;
 use crate::model::units::{Ft, UnitConversion, UnitSystem};
@@ -26,7 +26,9 @@ pub struct Valve {
     pub valve_type: ValveType,
     pub minor_loss: f64,
     #[serde(skip)]
-    pub valve_curve: Option<ValveCurve>,
+    pub gpv_curve: Option<ValveCurve>,
+    #[serde(skip)]
+    pub pcv_curve: Option<Curve>,
 }
 
 impl LinkTrait for Valve {
@@ -39,6 +41,8 @@ impl LinkTrait for Valve {
         status: LinkStatus,
         excess_flow_upstream: f64,
         excess_flow_downstream: f64,
+        elevation_upstream: f64,
+        elevation_downstream: f64,
     ) -> LinkCoefficients {
         // if the valve is closed, fixed closed, or XPressure, return a high resistance valve
         if status == LinkStatus::Closed
@@ -48,9 +52,11 @@ impl LinkTrait for Valve {
             return LinkCoefficients::simple(1.0 / BIG_VALUE, q);
         }
 
-        // if the valve is open or fixed open
+        // if the valve is open or fixed open, use the minor loss coefficient to compute the coefficients
         if status == LinkStatus::Open || status == LinkStatus::FixedOpen {
-            return LinkCoefficients::simple(1.0 / SMALL_VALUE, q);
+            let km = 0.02517 * self.minor_loss / self.diameter.powi(4);
+            let (g_inv, y) = self.valve_coefficients(q, km);
+            return LinkCoefficients::simple(g_inv, y);
         }
 
         match self.valve_type {
@@ -81,17 +87,22 @@ impl LinkTrait for Valve {
                     LinkCoefficients::simple(1.0 / hgrad, hloss / hgrad)
                 }
             }
-            // Pressure Reducing Valve (PRV)
+            // Pressure Reducing Valve (PRV) — setting is pressure (in feet of head)
+            // at the downstream node; convert to absolute head.
             ValveType::PRV => {
                 if status == LinkStatus::Active {
-                    self.prv_coefficients(setting, excess_flow_downstream)
+                    let target_head = setting + elevation_downstream;
+                    self.prv_coefficients(target_head, excess_flow_downstream)
                 } else {
                     LinkCoefficients::simple(1.0 / SMALL_VALUE, q)
                 }
             }
+            // Pressure Sustaining Valve (PSV) — setting is pressure (in feet of head)
+            // at the upstream node; convert to absolute head.
             ValveType::PSV => {
                 if status == LinkStatus::Active {
-                    self.psv_coefficients(setting, excess_flow_upstream)
+                    let target_head = setting + elevation_upstream;
+                    self.psv_coefficients(target_head, excess_flow_upstream)
                 } else {
                     LinkCoefficients::simple(1.0 / SMALL_VALUE, q)
                 }
@@ -111,10 +122,18 @@ impl LinkTrait for Valve {
         q: f64,
         head_upstream: f64,
         head_downstream: f64,
+        elevation_upstream: f64,
+        elevation_downstream: f64,
     ) -> Option<LinkStatus> {
         match self.valve_type {
-            ValveType::PRV => self.prv_status(setting, status, q, head_upstream, head_downstream),
-            ValveType::PSV => self.psv_status(setting, status, q, head_upstream, head_downstream),
+            ValveType::PRV => {
+                let target_head = setting + elevation_downstream;
+                self.prv_status(target_head, status, q, head_upstream, head_downstream)
+            }
+            ValveType::PSV => {
+                let target_head = setting + elevation_upstream;
+                self.psv_status(target_head, status, q, head_upstream, head_downstream)
+            }
             _ => None,
         }
     }
@@ -241,7 +260,7 @@ impl Valve {
 
     /// Compute the coefficients for general purpose valve with a flow q
     fn gpv_coefficients(&self, q: f64) -> LinkCoefficients {
-        let curve = self.valve_curve.as_ref().unwrap();
+        let curve = self.gpv_curve.as_ref().unwrap();
 
         let q_abs = q.abs().max(TINY);
 
@@ -304,7 +323,7 @@ impl Valve {
         }
 
         // Valve is partially open
-        let ratio = if let Some(curve) = &self.valve_curve {
+        let ratio = if let Some(curve) = &self.pcv_curve {
             // Use the valve curve to compute the ratio
             let (h0, r) = curve.coefficients(setting);
             let ratio = h0 + r * setting;

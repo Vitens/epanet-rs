@@ -1,3 +1,4 @@
+use epanet_rs::model::demand::Demand;
 use epanet_rs::model::link::LinkStatus;
 use epanet_rs::model::network::Network;
 use epanet_rs::model::network::modify::*;
@@ -37,9 +38,13 @@ fn test_network_creation() {
                 id,
                 &JunctionData {
                     elevation,
-                    basedemand,
+                    demands: vec![Demand {
+                        basedemand,
+                        pattern: None,
+                        pattern_index: None,
+                        name: None,
+                    }],
                     emitter_coefficient: 0.0,
-                    pattern: None,
                     coordinates: None,
                 },
             )
@@ -112,6 +117,4 @@ fn test_network_creation() {
 
     let result = simulation.solve_hydraulics(false).unwrap();
     assert!((result.heads[0][1] - 106.35).abs() < 0.01);
-
-    // switch link "G" to a valve
 }

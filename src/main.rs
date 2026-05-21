@@ -23,7 +23,7 @@ const BANNER: [&str; 6] = [
 #[derive(Parser, Debug)]
 #[command(
     author = "Abel Heinsbroek (Vitens N.V.)",
-    version = "0.1.0",
+    version = "0.2.1",
     about = "A very fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust"
 )]
 struct Cli {
@@ -33,6 +33,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    Test {},
     /// Run the hydraulic solver on a network
     Run {
         /// Input file (EPANET .inp format)
@@ -92,7 +93,8 @@ fn main() -> Result<(), String> {
                 LevelFilter::Info
             }
         }
-        _ => LevelFilter::Info,
+        Commands::Validate { .. } => LevelFilter::Info,
+        _ => LevelFilter::Warn,
     };
 
     let logconfig = ConfigBuilder::new()
@@ -109,6 +111,10 @@ fn main() -> Result<(), String> {
 
     // Run the command
     match cli.command {
+        Commands::Test { .. } => {
+            run_test();
+            Ok(())
+        }
         Commands::Run {
             input_file,
             output_file,
@@ -260,4 +266,9 @@ fn convert_network(input_file: &str, output_file: &str) {
 
     let end_time = Instant::now();
     info!("Network saved in {:?}", end_time.duration_since(load_time));
+}
+
+fn run_test() {
+    // test code here
+    println!("Test");
 }

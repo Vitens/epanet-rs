@@ -3,6 +3,7 @@
 use crate::ffi::enums::NodeProperty;
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation, get_simulation_mut};
+use crate::model::demand::Demand;
 use crate::model::network::modify::{
     JunctionData, JunctionUpdate, NodeUpdate, ReservoirData, TankData, TankUpdate,
 };
@@ -43,9 +44,13 @@ pub unsafe extern "C" fn EN_addnode(
             node_id,
             &JunctionData {
                 elevation: 0.0,
-                basedemand: 0.0,
+                demands: vec![Demand {
+                    basedemand: 0.0,
+                    pattern: None,
+                    pattern_index: None,
+                    name: None,
+                }],
                 emitter_coefficient: 0.0,
-                pattern: None,
                 coordinates: None,
             },
         ),
@@ -267,13 +272,22 @@ pub unsafe extern "C" fn EN_getnodevalue(
     let value = match property {
         NodeProperty::Elevation => node.elevation * unit_system.per_feet(),
         NodeProperty::BaseDemand => match &node.node_type {
-            NodeType::Junction(junction) => junction.basedemand * flow_units.per_cfs(),
+            NodeType::Junction(junction) => junction
+                .demands
+                .first()
+                .map(|d| d.basedemand * flow_units.per_cfs())
+                .unwrap_or(0.0),
             _ => 0.0,
         },
         NodeProperty::Pattern => match &node.node_type {
             NodeType::Junction(junction) => junction
-                .pattern_index
-                .map(|index| (index + 1) as f64)
+                .demands
+                .first()
+                .map(|d| {
+                    d.pattern_index
+                        .map(|index| (index + 1) as f64)
+                        .unwrap_or(123.0)
+                })
                 .unwrap_or(123.0),
             NodeType::Reservoir(reservoir) => reservoir
                 .head_pattern_index

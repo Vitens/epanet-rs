@@ -40,17 +40,20 @@ impl LinkTrait for Pipe {
         status: LinkStatus,
         _: f64,
         _: f64,
+        _: f64,
+        _: f64,
     ) -> LinkCoefficients {
-        if self.check_valve && q < 0.0 {
-            return LinkCoefficients::new_status(1.0 / BIG_VALUE, q, LinkStatus::TempClosed);
-        }
         // for closed pipes use headloss formula hloss = BIG_VALUE * q
         if status == LinkStatus::Closed || status == LinkStatus::TempClosed {
             return LinkCoefficients::simple(1.0 / BIG_VALUE, q);
         }
 
         if self.headloss_formula == HeadlossFormula::DarcyWeisbach {
-            let (g_inv, y) = self.dw_coefficients(q, r);
+            let (mut g_inv, mut y) = self.dw_coefficients(q, r);
+            if self.check_valve {
+                // add continuous check-valve barrier to prevent negative flows
+                (g_inv, y) = Pipe::add_cv_head_loss(q, g_inv, y);
+            }
             return LinkCoefficients::simple(g_inv, y);
         }
 
@@ -79,8 +82,12 @@ impl LinkTrait for Pipe {
         // adjust the headloss to the sign of the flow
         hloss *= q.signum();
 
-        // return the coefficients
-        LinkCoefficients::simple(1.0 / hgrad, hloss / hgrad)
+        let mut g_inv = 1.0 / hgrad;
+        let mut y = hloss / hgrad;
+        if self.check_valve {
+            (g_inv, y) = Pipe::add_cv_head_loss(q, g_inv, y);
+        }
+        LinkCoefficients::simple(g_inv, y)
     }
 
     fn resistance(&self) -> f64 {
@@ -109,6 +116,8 @@ impl LinkTrait for Pipe {
         _: f64,
         _: f64,
         _: f64,
+        _: f64,
+        _: f64,
     ) -> Option<LinkStatus> {
         if status == LinkStatus::TempClosed {
             return Some(LinkStatus::Open); // reopen the pipe if it was temporarily closed
@@ -123,6 +132,18 @@ impl LinkTrait for Pipe {
 }
 
 impl Pipe {
+    /// Continuous check-valve barrier added on top of normal pipe head loss preventing reverse flow, replaces valve checks in EPANET2.3
+    #[inline]
+    fn add_cv_head_loss(q: Cfs, g_inv: f64, y: f64) -> (f64, f64) {
+        let hgrad = 1.0 / g_inv;
+        let hloss = y * hgrad;
+        let a = BIG_VALUE * q;
+        let b = (a * a + CV_HEAD_EPSILON).sqrt();
+        let hloss = hloss + (a - b) * 0.5;
+        let hgrad = hgrad + BIG_VALUE * (1.0 - a / b) * 0.5;
+        (1.0 / hgrad, hloss / hgrad)
+    }
+
     /// Calculate the coefficients for the Darcy Weisbach headloss formula
     fn dw_coefficients(&self, q: f64, r: f64) -> (f64, f64) {
         let q_abs = q.abs();

@@ -6,6 +6,9 @@
 pub const Q_ZERO: f64 = 1e-6;
 /// Small value for small numbers
 pub const SMALL_VALUE: f64 = 1e-6;
+/// Smoothing epsilon for EPANET 3–style check-valve barrier head (ft).
+/// Matches `HEAD_EPSILON` in EPANET 3 [`Core/constants.h`](https://github.com/OpenWaterAnalytics/epanet-dev/blob/develop/src/Core/constants.h).
+pub const CV_HEAD_EPSILON: f64 = 1e-6;
 /// Big value for large numbers
 pub const BIG_VALUE: f64 = 1e8;
 /// Tiny value for very small numbers
@@ -24,6 +27,8 @@ pub const RQ_TOL: f64 = 1e-7;
 pub const Q_TOL: f64 = 0.0001;
 /// Tolerance for head difference
 pub const H_TOL: f64 = 0.0005;
+/// Tolerance for level difference
+pub const L_TOL: f64 = 0.0001;
 
 /// Gallons per minute per cubic feet per second
 pub const GPMperCFS: f64 = 448.831;

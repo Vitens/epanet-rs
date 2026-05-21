@@ -31,6 +31,7 @@
 - [x] Setup unit and integration testing, improve coverage
 - [x] Setup automated benchmarks
 - [ ] Create EPANET2_3 API compatibility layer
+- [ ] Allow setting multiple demand patterns/categories per junction
 - [ ] Implement headerror convergence criteria
 - [ ] Update convergence criteria for PDA
 - [ ] Implement RULES

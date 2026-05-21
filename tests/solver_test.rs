@@ -1,6 +1,7 @@
 //! Integration test for the hydraulic solver using pump.inp
 
-use epanet_rs::model::network::Network;
+use epanet_rs::model::link::LinkStatus;
+use epanet_rs::model::network::{LinkUpdate, Network};
 use epanet_rs::simulation::Simulation;
 use epanet_rs::solver::result::SolverResult;
 
@@ -295,6 +296,58 @@ fn test_solve_tankmodel_network() {
 
     let expected_heads: Vec<(&str, f64)> = vec![("Tank", 133.17), ("N1", 133.13), ("N2", 133.12)];
     let expected_flows: Vec<(&str, f64)> = vec![("P1", 90.00), ("P2", 50.00)];
+    verify_heads_and_flows(
+        &simulation.network,
+        &result,
+        &expected_heads,
+        &expected_flows,
+    );
+}
+
+#[test]
+// Bug with PCV valve minor loss and SI units
+fn test_solve_pcv_valve_minor_loss_si_units() {
+    let mut simulation =
+        Simulation::from_file("tests/pcv-si.inp").expect("Failed to create simulation");
+    let result = simulation
+        .solve_hydraulics(false)
+        .expect("Failed to solve hydraulics");
+
+    let expected_heads: Vec<(&str, f64)> = vec![("N1", 5.00), ("N2", 4.00)];
+    let expected_flows: Vec<(&str, f64)> = vec![("v1", 1.45)];
+
+    verify_heads_and_flows(
+        &simulation.network,
+        &result,
+        &expected_heads,
+        &expected_flows,
+    );
+}
+
+#[test]
+// Bug with PCV valve losing setting when initial status is changed
+fn test_solve_pcv_valve_minor_loss_si_units_status_change() {
+    let mut simulation =
+        Simulation::from_file("tests/pcv-si.inp").expect("Failed to create simulation");
+
+    simulation
+        .network
+        .update_link(
+            "v1",
+            &LinkUpdate {
+                initial_status: Some(LinkStatus::Open),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    let result = simulation
+        .solve_hydraulics(false)
+        .expect("Failed to solve hydraulics");
+
+    let expected_heads: Vec<(&str, f64)> = vec![("N1", 5.00), ("N2", 4.00)];
+    let expected_flows: Vec<(&str, f64)> = vec![("v1", 49.52)];
+
     verify_heads_and_flows(
         &simulation.network,
         &result,
