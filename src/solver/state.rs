@@ -140,18 +140,11 @@ impl SolverState {
         let clocktime = (time + network.options.time_options.start_clocktime) % (24 * 3600);
 
         for control in &network.controls {
-            // skip controls that are not pressure or level controls
+            // skip pressure controls as those are applied in the solver
             if matches!(
                 control.condition,
                 ControlCondition::LowPressure { .. } | ControlCondition::HighPressure { .. }
             ) {
-                continue;
-            }
-            if matches!(
-                control.condition,
-                ControlCondition::LowLevel { .. } | ControlCondition::HighLevel { .. }
-            ) && time == 0
-            {
                 continue;
             }
             if control.is_active(self, network, time, clocktime) {
