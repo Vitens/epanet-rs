@@ -2239,7 +2239,7 @@ mod tests {
         assert_eq!(action.link_id, "L1".into());
         assert_eq!(action.status, Some(LinkStatus::Closed));
         assert_eq!(action.setting, None);
-        assert_eq!(action.default_active, true);
+        assert!(action.default_active);
     }
     #[test]
     fn test_read_rule_condition_clocktime() {
