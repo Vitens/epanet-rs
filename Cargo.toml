@@ -2,8 +2,23 @@
 name = "epanet-rs"
 version = "0.2.2"
 edition = "2024"
+rust-version = "1.85"
 description = "A fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust."
 license = "MIT OR Apache-2.0"
+authors = ["Abel Heinsbroek"]
+readme = "README.md"
+repository = "https://github.com/vitens/epanet-rs"
+homepage = "https://github.com/vitens/epanet-rs"
+documentation = "https://docs.rs/epanet-rs"
+keywords = ["epanet", "hydraulic", "water", "solver", "simulation"]
+categories = ["simulation", "science"]
+exclude = [
+    ".github/**",
+    "benchmarks/**",
+    "tests/**",
+    "TODO.md",
+    "rust-toolchain.toml",
+]
 
 [lib]
 crate-type = ["rlib", "cdylib"]

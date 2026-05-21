@@ -2,7 +2,7 @@
 
 A fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust.
 
-[![Rust](https://github.com/vitens/epanet-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/AbelHeinsbroek/epanet-rs/actions/workflows/rust.yml)
+[![Rust](https://github.com/vitens/epanet-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/vitens/epanet-rs/actions/workflows/rust.yml)
 [![crate](https://img.shields.io/crates/v/epanet-rs.svg)](https://crates.io/crates/epanet-rs)
 ![docs.rs](https://img.shields.io/docsrs/epanet-rs)
 

@@ -23,7 +23,7 @@ const BANNER: [&str; 6] = [
 #[derive(Parser, Debug)]
 #[command(
     author = "Abel Heinsbroek (Vitens N.V.)",
-    version = "0.2.1",
+    version = "0.2.2",
     about = "A very fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust"
 )]
 struct Cli {
@@ -267,8 +267,8 @@ fn convert_network(input_file: &str, output_file: &str) {
     let end_time = Instant::now();
     info!("Network saved in {:?}", end_time.duration_since(load_time));
 }
-
 fn run_test() {
     // test code here
     println!("Test");
 }
+
