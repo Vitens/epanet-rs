@@ -1,3 +1,4 @@
 /target
+.venv/
 .DS_Store
 .vscode
