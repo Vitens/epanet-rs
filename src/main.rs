@@ -271,4 +271,3 @@ fn run_test() {
     // test code here
     println!("Test");
 }
-
