@@ -55,9 +55,14 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
                     "{:<10} {:<12} {:<12} {}",
                     node.id,
                     node.elevation,
-                    junction.demands.first().map(|d| d.basedemand).unwrap_or(0.0),
                     junction
-                        .demands.first()
+                        .demands
+                        .first()
+                        .map(|d| d.basedemand)
+                        .unwrap_or(0.0),
+                    junction
+                        .demands
+                        .first()
                         .map(|d| d.pattern.as_deref().unwrap_or(""))
                         .unwrap_or(""),
                 ),

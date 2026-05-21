@@ -273,14 +273,16 @@ pub unsafe extern "C" fn EN_getnodevalue(
         NodeProperty::Elevation => node.elevation * unit_system.per_feet(),
         NodeProperty::BaseDemand => match &node.node_type {
             NodeType::Junction(junction) => junction
-                .demands.first()
+                .demands
+                .first()
                 .map(|d| d.basedemand * flow_units.per_cfs())
                 .unwrap_or(0.0),
             _ => 0.0,
         },
         NodeProperty::Pattern => match &node.node_type {
             NodeType::Junction(junction) => junction
-                .demands.first()
+                .demands
+                .first()
                 .map(|d| {
                     d.pattern_index
                         .map(|index| (index + 1) as f64)
