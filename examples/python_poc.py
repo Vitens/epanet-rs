@@ -7,34 +7,22 @@ import sys
 from pathlib import Path
 
 import polars as pl
+import matplotlib.pyplot as plt
 
 from epanet_rs import Simulation
 
 
 def main() -> None:
-    inp_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("tests/pump.inp")
 
-    simulation = Simulation(str(inp_path))
+    simulation = Simulation("benchmarks/L-TOWN.inp")
     results = simulation.solve()
 
     df = results.dataframe()
-    last_time = df["time"].max()
 
-    print(f"Loaded and solved: {inp_path}")
-    print(f"Report steps: {results.report_steps}")
-    print("\nNodes (last report step):")
-    print(
-        df.filter(pl.col("time") == last_time, pl.col("element_type") == "node")
-        .sort("element_id")
-        .head(10)
-    )
-    print("\nLinks (last report step):")
-    print(
-        df.filter(pl.col("time") == last_time, pl.col("element_type") == "link")
-        .sort("element_id")
-        .head(10)
-    )
+    d = df.filter(pl.col("element_id") == "T1")
 
+    plt.plot(d["time"], d["head"])
+    plt.show()
 
 if __name__ == "__main__":
     main()
