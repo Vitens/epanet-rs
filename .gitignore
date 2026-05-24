@@ -1,4 +1,7 @@
 /target
 .venv/
+__pycache__/
+*.py[cod]
+*.so
 .DS_Store
 .vscode
