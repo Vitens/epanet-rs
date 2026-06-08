@@ -47,11 +47,12 @@ pub unsafe extern "C" fn EN_initH(ph: *mut Project, _initflag: c_int) -> ErrorCo
 ///
 /// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn EN_runH(ph: *mut Project, _time: c_int) -> ErrorCode {
+pub unsafe extern "C" fn EN_runH(ph: *mut Project, time: c_int) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
     if simulation.solver.is_none() {
         return ErrorCode::HydraulicSolverNotOpened;
     }
+    simulation.time = time as usize;
     let result = simulation.run_hydraulics();
 
     match result {

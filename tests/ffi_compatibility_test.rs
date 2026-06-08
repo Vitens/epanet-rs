@@ -5,22 +5,22 @@
 //! 2. Output parameters initialized to 0 before validation
 //! 3. Invalid property codes return error (not success with -123.0)
 
-use epanet_rs::ffi::error_codes::ErrorCode;
-use epanet_rs::ffi::project::Project;
-use epanet_rs::ffi::nodes::{EN_getnodevalue, EN_getnodeindex};
-use epanet_rs::ffi::links::{EN_getlinkvalue, EN_getlinkindex};
-use epanet_rs::ffi::patterns::{EN_getpatternvalue, EN_getpatternindex};
-use epanet_rs::ffi::curves::{EN_getcurvevalue, EN_getcurveindex};
-use epanet_rs::ffi::project::{EN_createproject, EN_deleteproject, EN_open};
+use epanet_rs::ffi::curves::EN_getcurvevalue;
 use epanet_rs::ffi::enums::NodeProperty;
+use epanet_rs::ffi::error_codes::ErrorCode;
+use epanet_rs::ffi::links::{EN_getlinkindex, EN_getlinkvalue};
+use epanet_rs::ffi::nodes::{EN_getnodeindex, EN_getnodevalue};
+use epanet_rs::ffi::patterns::EN_getpatternvalue;
+use epanet_rs::ffi::project::Project;
+use epanet_rs::ffi::project::{EN_createproject, EN_deleteproject, EN_open};
 
-use std::os::raw::{c_double, c_int};
 use std::ffi::CString;
+use std::os::raw::{c_double, c_int};
 
 /// Helper to create a test project with the pump.inp network
 unsafe fn create_test_project() -> *mut Project {
     let mut ph: *mut Project = std::ptr::null_mut();
-    let err = EN_createproject(&mut ph);
+    let err = unsafe { EN_createproject(&mut ph) };
     assert_eq!(err, ErrorCode::Ok);
     assert!(!ph.is_null());
 
@@ -29,14 +29,14 @@ unsafe fn create_test_project() -> *mut Project {
     let rpt_file = CString::new("").unwrap();
     let out_file = CString::new("").unwrap();
 
-    let err = EN_open(ph, inp_file.as_ptr(), rpt_file.as_ptr(), out_file.as_ptr());
+    let err = unsafe { EN_open(ph, inp_file.as_ptr(), rpt_file.as_ptr(), out_file.as_ptr()) };
     assert_eq!(err, ErrorCode::Ok);
 
     ph
 }
 
 unsafe fn destroy_test_project(ph: *mut Project) {
-    let err = EN_deleteproject(ph);
+    let err = unsafe { EN_deleteproject(ph) };
     assert_eq!(err, ErrorCode::Ok);
 }
 
@@ -57,12 +57,12 @@ fn test_pattern_index_returns_zero_when_none() {
         assert!(node_idx > 0);
 
         // Query pattern property for a node without a pattern
-        let mut pattern_idx: c_double = -999.0;  // Initialize to sentinel
+        let mut pattern_idx: c_double = -999.0; // Initialize to sentinel
         let err = EN_getnodevalue(
             ph,
             node_idx,
             NodeProperty::Pattern as c_int,
-            &mut pattern_idx
+            &mut pattern_idx,
         );
 
         assert_eq!(err, ErrorCode::Ok, "Should succeed");
@@ -94,7 +94,7 @@ fn test_pattern_index_returns_positive_when_assigned() {
             ph,
             node_idx,
             NodeProperty::Pattern as c_int,
-            &mut pattern_idx
+            &mut pattern_idx,
         );
 
         assert_eq!(err, ErrorCode::Ok);
@@ -127,12 +127,7 @@ fn test_output_initialized_on_null_project() {
         // Initialize to sentinel value
         let mut value: c_double = -999.0;
 
-        let err = EN_getnodevalue(
-            null_ph,
-            1,
-            NodeProperty::Elevation as c_int,
-            &mut value
-        );
+        let err = EN_getnodevalue(null_ph, 1, NodeProperty::Elevation as c_int, &mut value);
 
         // Should return error
         assert_ne!(err, ErrorCode::Ok);
@@ -155,9 +150,9 @@ fn test_output_initialized_on_invalid_index() {
 
         let err = EN_getnodevalue(
             ph,
-            99999,  // Invalid index
+            99999, // Invalid index
             NodeProperty::Elevation as c_int,
-            &mut value
+            &mut value,
         );
 
         // Should return error
@@ -190,12 +185,7 @@ fn test_output_initialized_handles_null_pointer_safely() {
         // when the pointer IS valid.
 
         let mut value: c_double = -999.0;
-        let err = EN_getnodevalue(
-            ph,
-            node_idx,
-            NodeProperty::Elevation as c_int,
-            &mut value
-        );
+        let err = EN_getnodevalue(ph, node_idx, NodeProperty::Elevation as c_int, &mut value);
 
         // Should succeed and value should be set
         assert_eq!(err, ErrorCode::Ok);
@@ -214,10 +204,9 @@ fn test_link_output_initialized_on_error() {
         let mut value: c_double = -999.0;
 
         let err = EN_getlinkvalue(
-            ph,
-            99999,  // Invalid index
-            0,      // Any property
-            &mut value
+            ph, 99999, // Invalid index
+            0,     // Any property
+            &mut value,
         );
 
         assert_ne!(err, ErrorCode::Ok);
@@ -239,10 +228,8 @@ fn test_pattern_output_initialized_on_error() {
         let mut value: c_double = -999.0;
 
         let err = EN_getpatternvalue(
-            ph,
-            99999,  // Invalid index
-            1,
-            &mut value
+            ph, 99999, // Invalid index
+            1, &mut value,
         );
 
         assert_ne!(err, ErrorCode::Ok);
@@ -265,11 +252,8 @@ fn test_curve_output_initialized_on_error() {
         let mut y: c_double = -999.0;
 
         let err = EN_getcurvevalue(
-            ph,
-            99999,  // Invalid index
-            1,
-            &mut x,
-            &mut y
+            ph, 99999, // Invalid index
+            1, &mut x, &mut y,
         );
 
         assert_ne!(err, ErrorCode::Ok);
@@ -292,10 +276,7 @@ fn test_index_output_initialized_on_error() {
         let err = EN_getnodeindex(ph, invalid_id.as_ptr(), &mut index);
 
         assert_ne!(err, ErrorCode::Ok);
-        assert_eq!(
-            index, 0,
-            "Index output should be initialized to 0 on error"
-        );
+        assert_eq!(index, 0, "Index output should be initialized to 0 on error");
 
         destroy_test_project(ph);
     }
@@ -320,12 +301,7 @@ fn test_invalid_node_property_returns_error() {
         let invalid_property: c_int = 99999;
         let mut value: c_double = -999.0;
 
-        let err = EN_getnodevalue(
-            ph,
-            node_idx,
-            invalid_property,
-            &mut value
-        );
+        let err = EN_getnodevalue(ph, node_idx, invalid_property, &mut value);
 
         // Critical: Must return error, not Ok with -123.0
         assert_eq!(
@@ -356,22 +332,12 @@ fn test_invalid_node_property_code_251() {
 
         // Test various invalid property codes
         // NodeProperty goes from 0-32, test values outside that range
-        let invalid_codes = vec![
-            999,
-            1000,
-            12345,
-            -999,
-        ];
+        let invalid_codes = vec![999, 1000, 12345, -999];
 
         for invalid_code in invalid_codes {
             let mut value: c_double = -999.0;
 
-            let err = EN_getnodevalue(
-                ph,
-                node_idx,
-                invalid_code,
-                &mut value
-            );
+            let err = EN_getnodevalue(ph, node_idx, invalid_code, &mut value);
 
             assert_eq!(
                 err,
@@ -386,10 +352,7 @@ fn test_invalid_node_property_code_251() {
             );
 
             // Output should be initialized
-            assert_eq!(
-                value, 0.0,
-                "Output should be initialized to 0.0"
-            );
+            assert_eq!(value, 0.0, "Output should be initialized to 0.0");
         }
 
         destroy_test_project(ph);
@@ -411,12 +374,7 @@ fn test_link_invalid_property_also_returns_error() {
         let invalid_property: c_int = 99999;
         let mut value: c_double = -999.0;
 
-        let err = EN_getlinkvalue(
-            ph,
-            link_idx,
-            invalid_property,
-            &mut value
-        );
+        let err = EN_getlinkvalue(ph, link_idx, invalid_property, &mut value);
 
         // EN_getlinkvalue should also return error for invalid property
         assert_eq!(
@@ -449,7 +407,7 @@ fn test_valid_properties_still_work() {
             ph,
             node_idx,
             NodeProperty::Elevation as c_int,
-            &mut elevation
+            &mut elevation,
         );
 
         assert_eq!(err, ErrorCode::Ok, "Valid property should succeed");
@@ -520,14 +478,15 @@ fn test_regression_pattern_never_returns_123() {
         let ph = create_test_project();
 
         // Check all nodes in the network
-        for node_idx in 1..20 {  // Assuming < 20 nodes
+        for node_idx in 1..20 {
+            // Assuming < 20 nodes
             let mut pattern_idx: c_double = -999.0;
 
             let err = EN_getnodevalue(
                 ph,
                 node_idx,
                 NodeProperty::Pattern as c_int,
-                &mut pattern_idx
+                &mut pattern_idx,
             );
 
             if err == ErrorCode::Ok {
