@@ -202,6 +202,10 @@ pub unsafe extern "C" fn EN_setoption(
 ) -> ErrorCode {
     let simulation = get_simulation_mut!(ph);
 
+    if !value.is_finite() {
+        return ErrorCode::IllegalNumericValue;
+    }
+
     // EN_UNBALANCED is handled before the non-negative check in EPANET. It is not
     // available in this implementation (no ExtraIter field).
     if option == SimOption::Unbalanced as c_int {
