@@ -2521,8 +2521,19 @@ fn test_en_saveinpfile_null_path() {
 #[test]
 fn test_en_saveinpfile_no_network() {
     let ph = create_empty_project();
-    let out = CString::new("/tmp/test_no_network.inp").unwrap();
-    let err = unsafe { EN_saveinpfile(ph, out.as_ptr()) };
+
+    let out_path = std::env::temp_dir().join(format!(
+        "epanet_rs_test_no_network_{}.inp",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("System time before UNIX epoch")
+            .as_nanos()
+    ));
+
+    let out_file = CString::new(out_path.to_str().expect("Temp path contains invalid UTF-8"))
+        .expect("Path contains null byte");
+
+    let err = unsafe { EN_saveinpfile(ph, out_file.as_ptr()) };
     assert_eq!(
         err,
         ErrorCode::NoNetworkData,
