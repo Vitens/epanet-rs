@@ -929,7 +929,12 @@ impl Network {
         match time_option.as_str() {
             "DURATION" => self.options.time_options.duration = seconds,
             "HYDRAULIC TIMESTEP" => self.options.time_options.hydraulic_timestep = seconds,
-            "PATTERN TIMESTEP" => self.options.time_options.pattern_timestep = seconds,
+            // A zero pattern timestep would cause a divide-by-zero when applying
+            // patterns, so fall back to the one hour default like EPANET does.
+            "PATTERN TIMESTEP" => {
+                self.options.time_options.pattern_timestep =
+                    if seconds == 0 { 3600 } else { seconds }
+            }
             "REPORT TIMESTEP" => self.options.time_options.report_timestep = seconds,
             "PATTERN START" => self.options.time_options.pattern_start = seconds,
             "START CLOCKTIME" => self.options.time_options.start_clocktime = seconds,
@@ -1931,6 +1936,14 @@ mod tests {
         network.read_times("PATTERN TIMESTEP  2  HOURS").unwrap();
 
         assert_eq!(network.options.time_options.pattern_timestep, 2 * 3600);
+    }
+
+    #[test]
+    fn test_read_times_pattern_timestep_zero_defaults_to_one_hour() {
+        let mut network = test_network(false);
+        network.read_times("PATTERN TIMESTEP  0").unwrap();
+
+        assert_eq!(network.options.time_options.pattern_timestep, 3600);
     }
 
     #[test]
