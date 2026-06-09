@@ -1818,7 +1818,8 @@ fn test_en_setoption_demandpattern_valid() {
     let add_err = unsafe { epanet_rs::ffi::patterns::EN_addpattern(ph, pat_id.as_ptr()) };
     assert_eq!(add_err, ErrorCode::Ok);
     let mut pat_idx: c_int = 0;
-    let err = unsafe { epanet_rs::ffi::patterns::EN_getpatternindex(ph, pat_id.as_ptr(), &mut pat_idx) };
+    let err =
+        unsafe { epanet_rs::ffi::patterns::EN_getpatternindex(ph, pat_id.as_ptr(), &mut pat_idx) };
     assert_eq!(err, ErrorCode::Ok);
     assert!(pat_idx > 0);
     // Set demand pattern
@@ -2067,7 +2068,8 @@ fn test_regression_no_pattern_returns_zero() {
         let err = unsafe { EN_getnodeindex(ph, id.as_ptr(), &mut idx) };
         if err == ErrorCode::Ok {
             let mut pattern: c_double = -999.0;
-            let err = unsafe { EN_getnodevalue(ph, idx, NodeProperty::Pattern as c_int, &mut pattern) };
+            let err =
+                unsafe { EN_getnodevalue(ph, idx, NodeProperty::Pattern as c_int, &mut pattern) };
 
             if err == ErrorCode::Ok {
                 assert_ne!(pattern, 123.0, "Should never return 123.0 sentinel");
@@ -2361,7 +2363,9 @@ fn test_en_getcurvevalue_invalid_point_index() {
     assert_eq!(err, ErrorCode::Ok);
     let x_vals: Vec<c_double> = vec![1.0, 2.0];
     let y_vals: Vec<c_double> = vec![3.0, 4.0];
-    let err = unsafe { epanet_rs::ffi::curves::EN_setcurve(ph, cidx, x_vals.as_ptr(), y_vals.as_ptr(), 2) };
+    let err = unsafe {
+        epanet_rs::ffi::curves::EN_setcurve(ph, cidx, x_vals.as_ptr(), y_vals.as_ptr(), 2)
+    };
     assert_eq!(err, ErrorCode::Ok);
     // point index 99 is beyond the 2-point curve (1-based)
     let mut x: c_double = -999.0;
