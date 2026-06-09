@@ -52,6 +52,9 @@ pub unsafe extern "C" fn EN_runH(ph: *mut Project, time: c_int) -> ErrorCode {
     if simulation.solver.is_none() {
         return ErrorCode::HydraulicSolverNotOpened;
     }
+    if time < 0 {
+        return ErrorCode::IllegalNumericValue;
+    }
     simulation.time = time as usize;
     let result = simulation.run_hydraulics();
 
