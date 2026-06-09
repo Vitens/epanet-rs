@@ -199,7 +199,17 @@ fn test_en_closeh_valid() {
 fn test_en_saveinpfile_valid() {
     let ph = create_loaded_project();
 
-    let out_file = CString::new("/tmp/test_output.inp").unwrap();
+    let out_path = std::env::temp_dir().join(format!(
+        "epanet_rs_test_output_{}.inp",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("System time before UNIX epoch")
+            .as_nanos()
+    ));
+
+    let out_file = CString::new(out_path.to_str().expect("Temp path contains invalid UTF-8"))
+        .expect("Path contains null byte");
+
     let err = unsafe { EN_saveinpfile(ph, out_file.as_ptr()) };
     assert_eq!(err, ErrorCode::Ok, "Should save INP file");
 
