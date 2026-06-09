@@ -96,6 +96,17 @@ pub unsafe extern "C" fn EN_setdemandmodel(
         None => return ErrorCode::InvalidParameterCode,
     };
 
+    if !minimum_pressure.is_finite()
+        || !required_pressure.is_finite()
+        || !pressure_exponent.is_finite()
+    {
+        return ErrorCode::IllegalNumericValue;
+    }
+
+    if minimum_pressure < 0.0 || required_pressure <= minimum_pressure || pressure_exponent <= 0.0 {
+        return ErrorCode::IllegalPdaPressureLimits;
+    }
+
     match demand_model {
         ENDemandModel::Pda => {
             simulation.network.options.demand_model = DemandModel::PDA;
