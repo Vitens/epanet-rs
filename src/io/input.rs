@@ -199,6 +199,7 @@ impl Network {
         }
         self.resolve_pattern_indices();
         self.convert_to_standard(&self.options.clone());
+        self.adjust_timesteps();
         self.update_links()?;
 
         Ok(())
@@ -936,6 +937,35 @@ impl Network {
             _ => (),
         }
         Ok(())
+    }
+
+    /// Adjusts timesteps according to EPANET compatibility rules.
+    /// Based on EPANET's adjustdata() function in input3.c.
+    ///
+    /// Adjustments made:
+    /// - Pattern timestep: defaults to 3600 if 0 (prevents division by zero)
+    /// - Report timestep: defaults to pattern timestep if 0
+    /// - Hydraulic timestep: defaults to 3600 if 0, capped at min(pattern, report)
+    fn adjust_timesteps(&mut self) {
+        let time_opts = &mut self.options.time_options;
+
+        if time_opts.pattern_timestep == 0 {
+            eprintln!("Warning: PATTERN TIMESTEP was 0, adjusting to 3600 seconds (1 hour)");
+            time_opts.pattern_timestep = 3600;
+        }
+
+        if time_opts.report_timestep == 0 {
+            time_opts.report_timestep = time_opts.pattern_timestep;
+        }
+
+        if time_opts.hydraulic_timestep == 0 {
+            time_opts.hydraulic_timestep = 3600;
+        }
+
+        time_opts.hydraulic_timestep = time_opts
+            .hydraulic_timestep
+            .min(time_opts.pattern_timestep)
+            .min(time_opts.report_timestep);
     }
 
     /// Attempts to read a rule from a linebuffer
@@ -1931,6 +1961,72 @@ mod tests {
         network.read_times("PATTERN TIMESTEP  2  HOURS").unwrap();
 
         assert_eq!(network.options.time_options.pattern_timestep, 2 * 3600);
+    }
+
+    #[test]
+    fn test_adjust_timesteps_pattern_zero() {
+        let mut network = test_network(false);
+        network.options.time_options.pattern_timestep = 0;
+
+        network.adjust_timesteps();
+
+        assert_eq!(network.options.time_options.pattern_timestep, 3600);
+    }
+
+    #[test]
+    fn test_adjust_timesteps_report_zero() {
+        let mut network = test_network(false);
+        network.options.time_options.report_timestep = 0;
+        network.options.time_options.pattern_timestep = 7200;
+
+        network.adjust_timesteps();
+
+        assert_eq!(network.options.time_options.report_timestep, 7200);
+    }
+
+    #[test]
+    fn test_adjust_timesteps_hydraulic_capped() {
+        let mut network = test_network(false);
+        network.options.time_options.hydraulic_timestep = 7200;
+        network.options.time_options.pattern_timestep = 3600;
+        network.options.time_options.report_timestep = 3600;
+
+        network.adjust_timesteps();
+
+        assert_eq!(network.options.time_options.hydraulic_timestep, 3600);
+    }
+
+    #[test]
+    fn test_adjust_timesteps_hydraulic_zero() {
+        let mut network = test_network(false);
+        network.options.time_options.hydraulic_timestep = 0;
+
+        network.adjust_timesteps();
+
+        assert_eq!(network.options.time_options.hydraulic_timestep, 3600);
+    }
+
+    #[test]
+    fn test_adjust_timesteps_hydraulic_capped_by_report() {
+        let mut network = test_network(false);
+        network.options.time_options.hydraulic_timestep = 7200;
+        network.options.time_options.pattern_timestep = 10800;
+        network.options.time_options.report_timestep = 1800;
+
+        network.adjust_timesteps();
+
+        assert_eq!(network.options.time_options.hydraulic_timestep, 1800);
+    }
+
+    #[test]
+    fn test_pattern_timestep_zero_after_parsing() {
+        let mut network = test_network(false);
+
+        network.read_times("PATTERN TIMESTEP 0").unwrap();
+        assert_eq!(network.options.time_options.pattern_timestep, 0);
+
+        network.adjust_timesteps();
+        assert_eq!(network.options.time_options.pattern_timestep, 3600);
     }
 
     #[test]
