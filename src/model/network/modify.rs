@@ -277,7 +277,7 @@ impl Network {
         // convert the node to standard units
         node.convert_to_standard(&self.options);
         // add the node to the network
-        self.add_node(node)?;
+        self.insert_node(node)?;
 
         Ok(())
     }
@@ -317,7 +317,7 @@ impl Network {
         node.convert_to_standard(&self.options);
 
         // add the node to the network
-        self.add_node(node)?;
+        self.insert_node(node)?;
 
         Ok(())
     }
@@ -351,7 +351,7 @@ impl Network {
 
         // convert the reservoir node to standard units
         node.convert_to_standard(&self.options);
-        self.add_node(node)?;
+        self.insert_node(node)?;
 
         Ok(())
     }
@@ -606,7 +606,7 @@ impl Network {
             pipe.minor_loss = 0.02517 * pipe.minor_loss / pipe.diameter.powi(4);
         }
 
-        self.add_link(link)
+        self.insert_link(link)
     }
 
     /// Add a new pump to the network. Any `head_curve_id` is resolved eagerly.
@@ -653,7 +653,7 @@ impl Network {
             pump.head_curve = head_curve;
         }
 
-        self.add_link(link)
+        self.insert_link(link)
     }
 
     /// Add a new valve to the network. Any `curve_id` is resolved eagerly.
@@ -722,7 +722,7 @@ impl Network {
             valve.pcv_curve = pcv_curve;
         }
 
-        self.add_link(link)
+        self.insert_link(link)
     }
 
     /// Update properties of an existing pipe. Only provided fields are changed.
@@ -2132,7 +2132,7 @@ mod tests {
     #[test]
     fn test_update_node_elevation_keeps_tank_elevation_in_sync() {
         let mut network = Network::default();
-        network.add_node(test_tank_node("T1", 100.0)).unwrap();
+        network.insert_node(test_tank_node("T1", 100.0)).unwrap();
 
         network
             .update_node(
@@ -2171,7 +2171,7 @@ mod tests {
     #[test]
     fn test_update_tank_all_fields() {
         let mut network = Network::default();
-        network.add_node(test_tank_node("T1", 100.0)).unwrap();
+        network.insert_node(test_tank_node("T1", 100.0)).unwrap();
         let props_before = network.properties_version;
 
         network
@@ -2210,7 +2210,7 @@ mod tests {
     #[test]
     fn test_update_tank_partial_leaves_other_fields_unchanged() {
         let mut network = Network::default();
-        network.add_node(test_tank_node("T1", 100.0)).unwrap();
+        network.insert_node(test_tank_node("T1", 100.0)).unwrap();
 
         network
             .update_tank(
@@ -2244,7 +2244,7 @@ mod tests {
         let mut network = Network::new(FlowUnits::CMH, HeadlossFormula::HazenWilliams);
         // add a tank directly in standard (ft) units so we have a known baseline
         network
-            .add_node(test_tank_node("T1", 100.0 / MperFT))
+            .insert_node(test_tank_node("T1", 100.0 / MperFT))
             .unwrap();
 
         network
@@ -2328,7 +2328,7 @@ mod tests {
     #[test]
     fn test_update_reservoir_elevation_and_coordinates() {
         let mut network = Network::default();
-        network.add_node(test_reservoir_node("R1", 50.0)).unwrap();
+        network.insert_node(test_reservoir_node("R1", 50.0)).unwrap();
         let props_before = network.properties_version;
 
         network
@@ -2356,7 +2356,7 @@ mod tests {
             multipliers: vec![1.0, 2.0],
         });
         network.pattern_map.insert("P1".into(), 0);
-        network.add_node(test_reservoir_node("R1", 50.0)).unwrap();
+        network.insert_node(test_reservoir_node("R1", 50.0)).unwrap();
 
         network
             .update_reservoir(
@@ -2389,7 +2389,7 @@ mod tests {
             reservoir.head_pattern = Some("P1".into());
             reservoir.head_pattern_index = Some(0);
         }
-        network.add_node(node).unwrap();
+        network.insert_node(node).unwrap();
 
         network
             .update_reservoir(
@@ -2412,7 +2412,7 @@ mod tests {
     #[test]
     fn test_update_reservoir_pattern_not_found() {
         let mut network = Network::default();
-        network.add_node(test_reservoir_node("R1", 50.0)).unwrap();
+        network.insert_node(test_reservoir_node("R1", 50.0)).unwrap();
 
         let err = network
             .update_reservoir(
@@ -2441,7 +2441,7 @@ mod tests {
             reservoir.head_pattern = Some("P1".into());
             reservoir.head_pattern_index = Some(0);
         }
-        network.add_node(node).unwrap();
+        network.insert_node(node).unwrap();
 
         network
             .update_reservoir(
@@ -2505,7 +2505,7 @@ mod tests {
     #[test]
     fn test_reset_changes_clears_updated_sets() {
         let mut network = Network::default();
-        network.add_node(test_tank_node("T1", 100.0)).unwrap();
+        network.insert_node(test_tank_node("T1", 100.0)).unwrap();
         network
             .update_tank(
                 "T1",
@@ -2661,7 +2661,7 @@ mod tests {
     #[test]
     fn test_add_pipe_updates_tank_link_lists() {
         let mut network = Network::default();
-        network.add_node(test_tank_node("T1", 100.0)).unwrap();
+        network.insert_node(test_tank_node("T1", 100.0)).unwrap();
         add_two_junctions(&mut network);
 
         network
@@ -3711,8 +3711,8 @@ mod tests {
     #[test]
     fn test_update_link_moves_tank_link_list_entry() {
         let mut network = Network::default();
-        network.add_node(test_tank_node("T1", 100.0)).unwrap();
-        network.add_node(test_tank_node("T2", 100.0)).unwrap();
+        network.insert_node(test_tank_node("T1", 100.0)).unwrap();
+        network.insert_node(test_tank_node("T2", 100.0)).unwrap();
         network
             .add_junction(
                 "J1",
@@ -3834,7 +3834,7 @@ mod tests {
     #[test]
     fn test_remove_link_detaches_tank_links() {
         let mut network = Network::default();
-        network.add_node(test_tank_node("T1", 100.0)).unwrap();
+        network.insert_node(test_tank_node("T1", 100.0)).unwrap();
         add_two_junctions(&mut network);
 
         network
@@ -3862,7 +3862,7 @@ mod tests {
         // Two tank-terminating pipes; remove the first so swap_remove moves
         // the last one into slot 0 and the tank lists must be retargeted.
         let mut network = Network::default();
-        network.add_node(test_tank_node("T1", 100.0)).unwrap();
+        network.insert_node(test_tank_node("T1", 100.0)).unwrap();
         add_two_junctions(&mut network);
 
         network
@@ -4201,7 +4201,7 @@ mod tests {
     fn test_remove_node_unconditional_drops_tank_level_controls() {
         use crate::model::control::{Control, ControlCondition};
         let mut network = Network::default();
-        network.add_node(test_tank_node("T1", 100.0)).unwrap();
+        network.insert_node(test_tank_node("T1", 100.0)).unwrap();
         network.controls.push(Control {
             condition: ControlCondition::HighLevel {
                 tank_index: 0,

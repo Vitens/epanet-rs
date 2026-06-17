@@ -159,12 +159,12 @@ impl Network {
                         self.title = Some(line.trim().into());
                         Ok(())
                     }
-                    ReadState::Junctions => self.add_node(self.read_junction(line)?),
-                    ReadState::Valves => self.add_link(self.read_valve(line)?),
-                    ReadState::Pipes => self.add_link(self.read_pipe(line)?),
-                    ReadState::Tanks => self.add_node(self.read_tank(line)?),
-                    ReadState::Reservoirs => self.add_node(self.read_reservoir(line)?),
-                    ReadState::Pumps => self.add_link(self.read_pump(line)?),
+                    ReadState::Junctions => self.insert_node(self.read_junction(line)?),
+                    ReadState::Valves => self.insert_link(self.read_valve(line)?),
+                    ReadState::Pipes => self.insert_link(self.read_pipe(line)?),
+                    ReadState::Tanks => self.insert_node(self.read_tank(line)?),
+                    ReadState::Reservoirs => self.insert_node(self.read_reservoir(line)?),
+                    ReadState::Pumps => self.insert_link(self.read_pump(line)?),
                     ReadState::Curves => self.read_curve(line),
                     ReadState::Demands => self.read_demand(line, &mut demands_cleared),
                     ReadState::Patterns => self.read_pattern(line),
@@ -1408,7 +1408,7 @@ mod tests {
         let mut network = Network::default();
         if with_nodes {
             network
-                .add_node(Node {
+                .insert_node(Node {
                     id: "N1".into(),
                     elevation: 0.0,
                     node_type: NodeType::Junction(Junction {
@@ -1424,7 +1424,7 @@ mod tests {
                 })
                 .unwrap();
             network
-                .add_node(Node {
+                .insert_node(Node {
                     id: "N2".into(),
                     elevation: 0.0,
                     node_type: NodeType::Junction(Junction {
@@ -1440,7 +1440,7 @@ mod tests {
                 })
                 .unwrap();
             network
-                .add_link(Link {
+                .insert_link(Link {
                     id: "L1".into(),
                     link_type: LinkType::Pipe(Pipe {
                         length: 100.0,
@@ -2083,7 +2083,7 @@ mod tests {
     fn test_read_rules_with_clocktime_and_tank_level() {
         let mut network = test_network(true);
         network
-            .add_link(Link {
+            .insert_link(Link {
                 id: "335".into(),
                 link_type: LinkType::Pump(Pump {
                     speed: 1.0,
@@ -2100,7 +2100,7 @@ mod tests {
             })
             .unwrap();
         network
-            .add_link(Link {
+            .insert_link(Link {
                 id: "330".into(),
                 link_type: LinkType::Pipe(Pipe {
                     length: 100.0,

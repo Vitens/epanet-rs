@@ -224,7 +224,7 @@ impl<'de> Deserialize<'de> for Network {
 
 /// Crate-private utility methods to add nodes, links and rules
 impl Network {
-    pub(crate) fn add_node(&mut self, node: Node) -> Result<(), InputError> {
+    pub(crate) fn insert_node(&mut self, node: Node) -> Result<(), InputError> {
         if self.node_map.contains_key(&node.id) {
             return Err(InputError::NodeExists {
                 node_id: node.id.clone(),
@@ -236,7 +236,7 @@ impl Network {
         self.topology_version += 1;
         Ok(())
     }
-    pub(crate) fn add_link(&mut self, link: Link) -> Result<(), InputError> {
+    pub(crate) fn insert_link(&mut self, link: Link) -> Result<(), InputError> {
         if self.link_map.contains_key(&link.id) {
             return Err(InputError::LinkExists {
                 link_id: link.id.clone(),
