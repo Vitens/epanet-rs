@@ -1,11 +1,10 @@
 //! Hydraulic solver based on the Global Gradient Algorithm (Todini & Pilati, 1987).
 
-use faer::linalg::cholesky::llt::factor::LltError::NonPositivePivot;
-use faer::prelude::*;
-use faer::sparse::linalg::LltError;
-use faer::sparse::linalg::solvers::{Llt, SymbolicLlt};
+use faer::dyn_stack::{MemBuffer, MemStack, StackReq};
+use faer::linalg::cholesky::llt::factor::{LltError, LltRegularization};
+use faer::sparse::linalg::cholesky::{SymbolicCholesky, SymbolicCholeskyRaw};
 use faer::sparse::{SparseColMat, SymbolicSparseColMat};
-use faer::{Mat, Side};
+use faer::{Conj, Mat, Par, Side};
 
 use crate::solver::matrix::*;
 use crate::solver::state::SolverState;
@@ -59,9 +58,9 @@ pub struct HydraulicSolver {
     pub node_to_unknown: Vec<Option<usize>>,
     /// symbolic sparsity pattern
     pub sparsity_pattern: SymbolicSparseColMat<usize>,
-    /// symbolic Cholesky factorization
-    pub symbolic_llt: SymbolicLlt<usize>,
-    /// AMD fill-reducing permutation: perm_fwd[permuted] = original
+    /// symbolic Cholesky factorization (AMD fill-reducing ordering)
+    pub symbolic_cholesky: SymbolicCholesky<usize>,
+    /// fill-reducing permutation taken from `symbolic_cholesky`: perm_fwd[permuted] = original
     pub perm_fwd: Vec<usize>,
     /// precomputed Jacobian matrix
     pub jac: SparseColMat<usize, f64>,
@@ -87,16 +86,20 @@ impl HydraulicSolver {
         let values = vec![0.0; sparsity_pattern.as_ref().row_idx().len()];
         let jac = SparseColMat::new(sparsity_pattern.clone(), values.clone());
 
-        // precompute the AMD fill-reducing permutation for error mapping
-        let perm_fwd = compute_amd_permutation(&sparsity_pattern, &node_to_unknown);
-        // precompute the symbolic Cholesky factorization
-        let symbolic_llt = SymbolicLlt::try_new(jac.symbolic(), Side::Lower)
+        // precompute the symbolic Cholesky factorization (with AMD ordering)
+        let symbolic_cholesky = build_symbolic_cholesky(&sparsity_pattern)
             .map_err(|e| SolverError::Factorization(e.to_string()))?;
+        // store the exact fill-reducing permutation faer will use, so non-positive-pivot
+        // indices can be mapped back to the original unknowns during the numeric phase
+        let perm_fwd = match symbolic_cholesky.perm() {
+            Some(perm) => perm.arrays().0.to_vec(),
+            None => (0..symbolic_cholesky.nrows()).collect(),
+        };
 
         Ok(Self {
             node_to_unknown,
             sparsity_pattern,
-            symbolic_llt,
+            symbolic_cholesky,
             perm_fwd,
             jac,
             csc_indices,
@@ -140,6 +143,16 @@ impl HydraulicSolver {
 
         let mut grounded_nodes = vec![false; network.nodes.len()];
 
+        // reusable buffers for the numeric Cholesky factorization and the solve.
+        // these are reused across iterations to avoid per-iteration allocations.
+        let par = Par::Seq;
+        let mut l_values = vec![0.0_f64; self.symbolic_cholesky.len_val()];
+        let mut mem = MemBuffer::new(StackReq::any_of(&[
+            self.symbolic_cholesky
+                .factorize_numeric_llt_scratch::<f64>(par, Default::default()),
+            self.symbolic_cholesky.solve_in_place_scratch::<f64>(1, par),
+        ]));
+
         'gga: for iteration in 1..=network.options.max_trials {
             values.fill(0.0);
             rhs.fill(0.0);
@@ -162,20 +175,32 @@ impl HydraulicSolver {
             // copy the values to the Jacobian matrix
             jac.val_mut().copy_from_slice(&values);
 
-            // try to factorize the Jacobian matrix
-            let llt = match Llt::try_new_with_symbolic(
-                self.symbolic_llt.clone(),
+            // try to numerically factorize the Jacobian matrix using the precomputed
+            // symbolic factorization. this reuses faer's fill-reducing permutation, so
+            // the reported pivot index maps back to the original unknowns consistently.
+            let llt = match self.symbolic_cholesky.factorize_numeric_llt(
+                &mut l_values,
                 jac.as_ref(),
                 Side::Lower,
+                LltRegularization::default(),
+                par,
+                MemStack::new(&mut mem),
+                Default::default(),
             ) {
                 Ok(llt) => llt,
-                Err(LltError::Numeric(NonPositivePivot { index })) => {
-                    // get the original unknown index from the AMD permutation and translate it to a node index in the network
-                    let original_unknown = self.perm_fwd[index - 1];
+                Err(LltError::NonPositivePivot { index }) => {
+                    // the pivot index is in the permuted space. faer's simplicial path
+                    // reports a 1-based index while the supernodal path reports a 0-based
+                    // one, so normalize before mapping through the permutation.
+                    let permuted = match self.symbolic_cholesky.raw() {
+                        SymbolicCholeskyRaw::Simplicial(_) => index - 1,
+                        SymbolicCholeskyRaw::Supernodal(_) => index,
+                    };
+                    let original_unknown = self.perm_fwd[permuted];
                     let node_index = self
                         .node_to_unknown
                         .iter()
-                        .position(|&x| x.is_some() && x.unwrap() == original_unknown)
+                        .position(|&x| x == Some(original_unknown))
                         .unwrap();
 
                     // if the factorization failed, attempt to fix the problem by first fixing a possible bad valve
@@ -197,13 +222,11 @@ impl HydraulicSolver {
                     error!("{}", err);
                     return Err(err);
                 }
-                Err(e) => {
-                    return Err(SolverError::Factorization(e.to_string()));
-                }
             };
 
-            // solve the system of equations
-            let dh = llt.solve(&Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]));
+            // solve the system of equations in place
+            let mut dh = Mat::from_fn(unknown_nodes, 1, |r, _| rhs[r]);
+            llt.solve_in_place_with_conj(Conj::No, dh.as_mut(), par, MemStack::new(&mut mem));
 
             // update the heads for the unknown nodes
             for (global, &head_id) in self.node_to_unknown.iter().enumerate() {

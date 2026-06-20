@@ -1,7 +1,10 @@
 //! Sparsity pattern, CSC indexing and AMD ordering helpers for the Jacobian matrix.
 
-use faer::dyn_stack::{MemBuffer, MemStack};
-use faer::sparse::linalg::amd;
+use faer::Side;
+use faer::sparse::FaerError;
+use faer::sparse::linalg::cholesky::{
+    SymbolicCholesky, SymmetricOrdering, factorize_symbolic_cholesky,
+};
 use faer::sparse::{SparseColMat, SymbolicSparseColMat, Triplet};
 
 use crate::model::network::Network;
@@ -139,28 +142,21 @@ pub fn map_nodes_to_rows(
     node_rows
 }
 
-/// Compute AMD fill-reducing permutation
-/// Returns the forward permutation, used to map LLT errors back to the original unknowns
-pub fn compute_amd_permutation(
+/// Compute the symbolic Cholesky factorization using an AMD fill-reducing ordering.
+///
+/// This uses faer's middle-level sparse Cholesky API. Performing the symbolic
+/// analysis here (instead of relying on the high-level `SymbolicLlt`) means the
+/// fill-reducing permutation returned by [`SymbolicCholesky::perm`] is the exact
+/// permutation that the numeric factorization will use. That lets us map a
+/// non-positive-pivot index back to the original unknown reliably, instead of
+/// computing a separate AMD ordering that might not match faer's internal one.
+pub fn build_symbolic_cholesky(
     sparsity_pattern: &SymbolicSparseColMat<usize>,
-    node_to_unknown: &[Option<usize>],
-) -> Vec<usize> {
-    let n_unknowns = node_to_unknown.iter().filter(|x| x.is_some()).count();
-    let a_nnz = sparsity_pattern.as_ref().compute_nnz();
-    let mut perm_fwd = vec![0usize; n_unknowns];
-    let mut perm_inv = vec![0usize; n_unknowns];
-    {
-        let scratch_size = amd::order_maybe_unsorted_scratch::<usize>(n_unknowns, a_nnz);
-        let mut mem = MemBuffer::new(scratch_size);
-        amd::order_maybe_unsorted(
-            &mut perm_fwd,
-            &mut perm_inv,
-            sparsity_pattern.as_ref(),
-            amd::Control::default(),
-            MemStack::new(&mut mem),
-        )
-        .expect("Failed to compute AMD ordering");
-    }
-
-    perm_fwd
+) -> Result<SymbolicCholesky<usize>, FaerError> {
+    factorize_symbolic_cholesky(
+        sparsity_pattern.as_ref(),
+        Side::Lower,
+        SymmetricOrdering::Amd,
+        Default::default(),
+    )
 }
