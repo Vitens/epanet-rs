@@ -8,7 +8,7 @@ The simulation driver updates the network state with the changes to the network,
 Example:
 ```rust no_run
 use epanet_rs::simulation::Simulation;
-use epanet_rs::model::network::modify::PipeUpdate;
+use epanet_rs::model::network::modify::{LinkTypeUpdate, PipeUpdate};
 
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 // load the network from a file
@@ -16,10 +16,10 @@ let mut simulation = Simulation::from_file("tests/pump.inp")?;
 // run a complete simulation
 simulation.solve_hydraulics(false)?;
 // modify the network
-simulation.network.update_pipe("P1", &PipeUpdate {
+simulation.network.update_link("P1", None, Some(LinkTypeUpdate::Pipe(&PipeUpdate {
   roughness: Some(0.2),
   ..Default::default()
-})?;
+})))?;
 // run the simulation again
 simulation.solve_hydraulics(false)?;
 # Ok(())

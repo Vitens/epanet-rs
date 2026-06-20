@@ -11,13 +11,15 @@ fn test_network_creation() {
     let mut network = Network::new(FlowUnits::CFS, HeadlossFormula::DarcyWeisbach);
 
     network
-        .add_reservoir(
+        .add_node(
             "FH",
-            &ReservoirData {
+            100.0,
+            None,
+            NewNodeType::Reservoir(&ReservoirData {
                 elevation: 100.0,
                 head_pattern: None,
                 coordinates: None,
-            },
+            }),
         )
         .unwrap();
 
@@ -34,9 +36,11 @@ fn test_network_creation() {
     // add the junctions to the network
     for (id, elevation, basedemand) in junctions {
         network
-            .add_junction(
+            .add_node(
                 id,
-                &JunctionData {
+                elevation,
+                None,
+                NewNodeType::Junction(&JunctionData {
                     elevation,
                     demands: vec![Demand {
                         basedemand,
@@ -46,7 +50,7 @@ fn test_network_creation() {
                     }],
                     emitter_coefficient: 0.0,
                     coordinates: None,
-                },
+                }),
             )
             .unwrap();
     }
@@ -65,9 +69,12 @@ fn test_network_creation() {
 
     for (id, start_node, end_node, length, diameter, roughness) in pipes {
         network
-            .add_pipe(
+            .add_link(
                 id,
-                &PipeData {
+                start_node,
+                end_node,
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     start_node: start_node.into(),
                     end_node: end_node.into(),
                     length,
@@ -77,7 +84,7 @@ fn test_network_creation() {
                     check_valve: false,
                     initial_status: LinkStatus::Open,
                     vertices: None,
-                },
+                }),
             )
             .unwrap();
     }
@@ -95,12 +102,13 @@ fn test_network_creation() {
     // update the reservoir elevation
     simulation
         .network
-        .update_reservoir(
+        .update_node(
             "FH",
-            &ReservoirUpdate {
+            None,
+            Some(NodeTypeUpdate::Reservoir(&ReservoirUpdate {
                 elevation: Some(110.0),
                 ..Default::default()
-            },
+            })),
         )
         .unwrap();
 

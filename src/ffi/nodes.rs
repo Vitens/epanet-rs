@@ -5,7 +5,8 @@ use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation, get_simulation_mut};
 use crate::model::demand::Demand;
 use crate::model::network::modify::{
-    JunctionData, JunctionUpdate, NodeUpdate, ReservoirData, TankData, TankUpdate,
+    JunctionData, JunctionUpdate, NewNodeType, NodeTypeUpdate, NodeUpdate, ReservoirData, TankData,
+    TankUpdate,
 };
 use crate::model::node::NodeType;
 
@@ -40,9 +41,8 @@ pub unsafe extern "C" fn EN_addnode(
     };
 
     let result = match node_type {
-        ENNodeType::Junction => simulation.network.add_junction(
-            node_id,
-            &JunctionData {
+        ENNodeType::Junction => {
+            let data = JunctionData {
                 elevation: 0.0,
                 demands: vec![Demand {
                     basedemand: 0.0,
@@ -52,19 +52,23 @@ pub unsafe extern "C" fn EN_addnode(
                 }],
                 emitter_coefficient: 0.0,
                 coordinates: None,
-            },
-        ),
-        ENNodeType::Reservoir => simulation.network.add_reservoir(
-            node_id,
-            &ReservoirData {
+            };
+            simulation
+                .network
+                .add_node(node_id, 0.0, None, NewNodeType::Junction(&data))
+        }
+        ENNodeType::Reservoir => {
+            let data = ReservoirData {
                 elevation: 0.0,
                 head_pattern: None,
                 coordinates: None,
-            },
-        ),
-        ENNodeType::Tank => simulation.network.add_tank(
-            node_id,
-            &TankData {
+            };
+            simulation
+                .network
+                .add_node(node_id, 0.0, None, NewNodeType::Reservoir(&data))
+        }
+        ENNodeType::Tank => {
+            let data = TankData {
                 elevation: 0.0,
                 initial_level: 0.0,
                 min_level: 0.0,
@@ -74,8 +78,11 @@ pub unsafe extern "C" fn EN_addnode(
                 volume_curve_id: None,
                 overflow: false,
                 coordinates: None,
-            },
-        ),
+            };
+            simulation
+                .network
+                .add_node(node_id, 0.0, None, NewNodeType::Tank(&data))
+        }
     };
 
     if result.is_err() {
@@ -421,64 +428,72 @@ pub unsafe extern "C" fn EN_setnodevalue(
     let result = match property {
         NodeProperty::Elevation => network.update_node(
             &node_id,
-            &NodeUpdate {
+            Some(&NodeUpdate {
                 elevation: Some(value),
                 ..Default::default()
-            },
+            }),
+            None,
         ),
-        NodeProperty::BaseDemand => network.update_junction(
+        NodeProperty::BaseDemand => network.update_node(
             &node_id,
-            &JunctionUpdate {
+            None,
+            Some(NodeTypeUpdate::Junction(&JunctionUpdate {
                 basedemand: Some(value),
                 ..Default::default()
-            },
+            })),
         ),
-        NodeProperty::Emitter => network.update_junction(
+        NodeProperty::Emitter => network.update_node(
             &node_id,
-            &JunctionUpdate {
+            None,
+            Some(NodeTypeUpdate::Junction(&JunctionUpdate {
                 emitter_coefficient: Some(value),
                 ..Default::default()
-            },
+            })),
         ),
-        NodeProperty::TankDiam => network.update_tank(
+        NodeProperty::TankDiam => network.update_node(
             &node_id,
-            &TankUpdate {
+            None,
+            Some(NodeTypeUpdate::Tank(&TankUpdate {
                 diameter: Some(value),
                 ..Default::default()
-            },
+            })),
         ),
-        NodeProperty::MinLevel => network.update_tank(
+        NodeProperty::MinLevel => network.update_node(
             &node_id,
-            &TankUpdate {
+            None,
+            Some(NodeTypeUpdate::Tank(&TankUpdate {
                 min_level: Some(value),
                 ..Default::default()
-            },
+            })),
         ),
-        NodeProperty::MaxLevel => network.update_tank(
+        NodeProperty::MaxLevel => network.update_node(
             &node_id,
-            &TankUpdate {
+            None,
+            Some(NodeTypeUpdate::Tank(&TankUpdate {
                 max_level: Some(value),
                 ..Default::default()
-            },
+            })),
         ),
-        NodeProperty::TankLevel => network.update_tank(
+        NodeProperty::TankLevel => network.update_node(
             &node_id,
-            &TankUpdate {
+            None,
+            Some(NodeTypeUpdate::Tank(&TankUpdate {
                 initial_level: Some(value),
                 ..Default::default()
-            },
+            })),
         ),
         NodeProperty::Pattern => {
             let pattern_id = match network.patterns.get(value as usize - 1) {
                 Some(pattern) => pattern.id.clone(),
                 None => return ErrorCode::UndefinedPattern,
             };
-            network.update_junction(
+            network.update_node(
                 &node_id,
-                &JunctionUpdate {
+                None,
+                Some(NodeTypeUpdate::Junction(&JunctionUpdate {
                     pattern: Some(Some(pattern_id)),
                     ..Default::default()
-                },
+                })),
             )
         }
         // TODO: implement missing properties

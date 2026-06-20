@@ -10,7 +10,9 @@ use crate::ffi::enums::LinkProperty;
 use crate::ffi::enums::LinkType as ENLinkType;
 use crate::ffi::enums::MISSING_VALUE;
 
-use crate::model::network::modify::{LinkUpdate, PipeUpdate, PumpUpdate, ValveUpdate};
+use crate::model::network::modify::{
+    LinkTypeUpdate, LinkUpdate, NewLinkType, PipeUpdate, PumpUpdate, ValveUpdate,
+};
 use crate::model::network::modify::{PipeData, PumpData, ValveData};
 
 use crate::model::link::LinkStatus;
@@ -256,11 +258,12 @@ pub unsafe extern "C" fn EN_setlinknodes(
 
     match simulation.network.update_link(
         &link_id,
-        &LinkUpdate {
+        Some(&LinkUpdate {
             start_node: Some(start_node_id),
             end_node: Some(end_node_id),
             ..Default::default()
-        },
+        }),
+        None,
     ) {
         Ok(_) => ErrorCode::Ok,
         Err(_) => ErrorCode::InvalidParameterCode,
@@ -433,52 +436,58 @@ pub unsafe extern "C" fn EN_setlinkvalue(
 
     let result = match property {
         LinkProperty::Diameter => match &link.link_type {
-            LinkType::Pipe(_) => simulation.network.update_pipe(
+            LinkType::Pipe(_) => simulation.network.update_link(
                 &link_id,
-                &PipeUpdate {
+                None,
+                Some(LinkTypeUpdate::Pipe(&PipeUpdate {
                     diameter: Some(value),
                     ..Default::default()
-                },
+                })),
             ),
-            LinkType::Valve(_) => simulation.network.update_valve(
+            LinkType::Valve(_) => simulation.network.update_link(
                 &link_id,
-                &ValveUpdate {
+                None,
+                Some(LinkTypeUpdate::Valve(&ValveUpdate {
                     diameter: Some(value),
                     ..Default::default()
-                },
+                })),
             ),
             LinkType::Pump(_) => {
                 return ErrorCode::InvalidParameterCode;
             }
         },
-        LinkProperty::Length => simulation.network.update_pipe(
+        LinkProperty::Length => simulation.network.update_link(
             &link_id,
-            &PipeUpdate {
+            None,
+            Some(LinkTypeUpdate::Pipe(&PipeUpdate {
                 length: Some(value),
                 ..Default::default()
-            },
+            })),
         ),
-        LinkProperty::Roughness => simulation.network.update_pipe(
+        LinkProperty::Roughness => simulation.network.update_link(
             &link_id,
-            &PipeUpdate {
+            None,
+            Some(LinkTypeUpdate::Pipe(&PipeUpdate {
                 roughness: Some(value),
                 ..Default::default()
-            },
+            })),
         ),
         LinkProperty::MinorLoss => match &link.link_type {
-            LinkType::Pipe(_) => simulation.network.update_pipe(
+            LinkType::Pipe(_) => simulation.network.update_link(
                 &link_id,
-                &PipeUpdate {
+                None,
+                Some(LinkTypeUpdate::Pipe(&PipeUpdate {
                     minor_loss: Some(value),
                     ..Default::default()
-                },
+                })),
             ),
-            LinkType::Valve(_) => simulation.network.update_valve(
+            LinkType::Valve(_) => simulation.network.update_link(
                 &link_id,
-                &ValveUpdate {
+                None,
+                Some(LinkTypeUpdate::Valve(&ValveUpdate {
                     minor_loss: Some(value),
                     ..Default::default()
-                },
+                })),
             ),
             LinkType::Pump(_) => {
                 return ErrorCode::InvalidParameterCode;
@@ -499,38 +508,42 @@ pub unsafe extern "C" fn EN_setlinkvalue(
             }
             simulation.network.update_link(
                 &link_id,
-                &LinkUpdate {
+                Some(&LinkUpdate {
                     initial_status: Some(link_status),
                     ..Default::default()
-                },
+                }),
+                None,
             )
         }
         LinkProperty::InitSetting | LinkProperty::Setting => {
             match &link.link_type {
                 // for pipes, the setting is the roughness
-                LinkType::Pipe(_) => simulation.network.update_pipe(
+                LinkType::Pipe(_) => simulation.network.update_link(
                     &link_id,
-                    &PipeUpdate {
+                    None,
+                    Some(LinkTypeUpdate::Pipe(&PipeUpdate {
                         roughness: Some(value),
                         ..Default::default()
-                    },
+                    })),
                 ),
                 // for valves, the setting is the valve setting
-                LinkType::Valve(_) => simulation.network.update_valve(
+                LinkType::Valve(_) => simulation.network.update_link(
                     &link_id,
-                    &ValveUpdate {
+                    None,
+                    Some(LinkTypeUpdate::Valve(&ValveUpdate {
                         setting: Some(value),
                         ..Default::default()
-                    },
+                    })),
                 ),
 
                 // for pumps, the setting is the pump speed
-                LinkType::Pump(_) => simulation.network.update_pump(
+                LinkType::Pump(_) => simulation.network.update_link(
                     &link_id,
-                    &PumpUpdate {
+                    None,
+                    Some(LinkTypeUpdate::Pump(&PumpUpdate {
                         speed: Some(value),
                         ..Default::default()
-                    },
+                    })),
                 ),
             }
         }
@@ -541,12 +554,13 @@ pub unsafe extern "C" fn EN_setlinkvalue(
                 None => return ErrorCode::UndefinedCurve,
             };
 
-            simulation.network.update_valve(
+            simulation.network.update_link(
                 &link_id,
-                &ValveUpdate {
+                None,
+                Some(LinkTypeUpdate::Valve(&ValveUpdate {
                     curve_id: Some(Some(curve_id)),
                     ..Default::default()
-                },
+                })),
             )
         }
 
@@ -631,36 +645,90 @@ pub unsafe extern "C" fn EN_addlink(
     let response = match link_type {
         ENLinkType::CVPipe => {
             new_pipe.check_valve = true;
-            simulation.network.add_pipe(link_id, &new_pipe)
+            simulation.network.add_link(
+                link_id,
+                start_node_id,
+                end_node_id,
+                LinkStatus::Open,
+                NewLinkType::Pipe(&new_pipe),
+            )
         }
-        ENLinkType::Pipe => simulation.network.add_pipe(link_id, &new_pipe),
+        ENLinkType::Pipe => simulation.network.add_link(
+            link_id,
+            start_node_id,
+            end_node_id,
+            LinkStatus::Open,
+            NewLinkType::Pipe(&new_pipe),
+        ),
         ENLinkType::PRV => {
             new_valve.valve_type = ValveType::PRV;
-            simulation.network.add_valve(link_id, &new_valve)
+            simulation.network.add_link(
+                link_id,
+                start_node_id,
+                end_node_id,
+                LinkStatus::Active,
+                NewLinkType::Valve(&new_valve),
+            )
         }
         ENLinkType::PSV => {
             new_valve.valve_type = ValveType::PSV;
-            simulation.network.add_valve(link_id, &new_valve)
+            simulation.network.add_link(
+                link_id,
+                start_node_id,
+                end_node_id,
+                LinkStatus::Active,
+                NewLinkType::Valve(&new_valve),
+            )
         }
         ENLinkType::PBV => {
             new_valve.valve_type = ValveType::PBV;
-            simulation.network.add_valve(link_id, &new_valve)
+            simulation.network.add_link(
+                link_id,
+                start_node_id,
+                end_node_id,
+                LinkStatus::Active,
+                NewLinkType::Valve(&new_valve),
+            )
         }
         ENLinkType::FCV => {
             new_valve.valve_type = ValveType::FCV;
-            simulation.network.add_valve(link_id, &new_valve)
+            simulation.network.add_link(
+                link_id,
+                start_node_id,
+                end_node_id,
+                LinkStatus::Active,
+                NewLinkType::Valve(&new_valve),
+            )
         }
         ENLinkType::TCV => {
             new_valve.valve_type = ValveType::TCV;
-            simulation.network.add_valve(link_id, &new_valve)
+            simulation.network.add_link(
+                link_id,
+                start_node_id,
+                end_node_id,
+                LinkStatus::Active,
+                NewLinkType::Valve(&new_valve),
+            )
         }
         ENLinkType::PCV => {
             new_valve.valve_type = ValveType::PCV;
-            simulation.network.add_valve(link_id, &new_valve)
+            simulation.network.add_link(
+                link_id,
+                start_node_id,
+                end_node_id,
+                LinkStatus::Active,
+                NewLinkType::Valve(&new_valve),
+            )
         }
         ENLinkType::GPV => {
             new_valve.valve_type = ValveType::GPV;
-            simulation.network.add_valve(link_id, &new_valve)
+            simulation.network.add_link(
+                link_id,
+                start_node_id,
+                end_node_id,
+                LinkStatus::Active,
+                NewLinkType::Valve(&new_valve),
+            )
         }
         ENLinkType::Pump => {
             let new_pump = PumpData {
@@ -672,7 +740,13 @@ pub unsafe extern "C" fn EN_addlink(
                 initial_status: LinkStatus::Open,
                 vertices: None,
             };
-            simulation.network.add_pump(link_id, &new_pump)
+            simulation.network.add_link(
+                link_id,
+                start_node_id,
+                end_node_id,
+                LinkStatus::Open,
+                NewLinkType::Pump(&new_pump),
+            )
         }
     };
 
@@ -741,12 +815,13 @@ pub unsafe extern "C" fn EN_setheadcurveindex(
         LinkType::Pump(_) => {
             if head_curve_index == 0 {
                 // clear the head curve
-                simulation.network.update_pump(
+                simulation.network.update_link(
                     &link_id,
-                    &PumpUpdate {
+                    None,
+                    Some(LinkTypeUpdate::Pump(&PumpUpdate {
                         head_curve_id: Some(None),
                         ..Default::default()
-                    },
+                    })),
                 )
             } else {
                 // set the head curve
@@ -759,12 +834,13 @@ pub unsafe extern "C" fn EN_setheadcurveindex(
                     None => return ErrorCode::UndefinedCurve,
                 };
 
-                simulation.network.update_pump(
+                simulation.network.update_link(
                     &link_id,
-                    &PumpUpdate {
+                    None,
+                    Some(LinkTypeUpdate::Pump(&PumpUpdate {
                         head_curve_id: Some(Some(head_curve_id)),
                         ..Default::default()
-                    },
+                    })),
                 )
             }
         }

@@ -144,7 +144,7 @@ nodes/links, changing a link's endpoints) invalidate any cached solver; property
 
 ```no_run
 use epanet_rs::simulation::Simulation;
-use epanet_rs::model::network::{Network, JunctionData, PipeData, ReservoirData, PipeUpdate};
+use epanet_rs::model::network::{Network, JunctionData, LinkTypeUpdate, NewLinkType, NewNodeType, PipeData, ReservoirData, PipeUpdate};
 use epanet_rs::model::link::LinkStatus;
 use epanet_rs::model::options::HeadlossFormula;
 use epanet_rs::model::units::FlowUnits;
@@ -152,12 +152,13 @@ use epanet_rs::model::units::FlowUnits;
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 let mut network = Network::new(FlowUnits::LPS, HeadlossFormula::DarcyWeisbach);
 
-network.add_reservoir("R1", &ReservoirData {
+let reservoir = ReservoirData {
     elevation: 100.0,
     ..Default::default()
-})?;
+};
+network.add_node("R1", 100.0, None, NewNodeType::Reservoir(&reservoir))?;
 
-network.add_junction("J1", &JunctionData {
+let junction = JunctionData {
     elevation: 50.0,
     demands: vec![epanet_rs::model::demand::Demand {
         basedemand: 1.0,
@@ -166,9 +167,10 @@ network.add_junction("J1", &JunctionData {
         name: None,
     }],
     ..Default::default()
-})?;
+};
+network.add_node("J1", 50.0, None, NewNodeType::Junction(&junction))?;
 
-network.add_pipe("P1", &PipeData {
+let pipe = PipeData {
     start_node: "R1".into(),
     end_node: "J1".into(),
     length: 1000.0,
@@ -178,7 +180,8 @@ network.add_pipe("P1", &PipeData {
     check_valve: false,
     initial_status: LinkStatus::Open,
     vertices: None,
-})?;
+};
+network.add_link("P1", "R1", "J1", LinkStatus::Open, NewLinkType::Pipe(&pipe))?;
 
 let mut simulation = Simulation::new(network);
 
@@ -186,10 +189,10 @@ let mut simulation = Simulation::new(network);
 simulation.run_hydraulics()?;
 
 // update the pipe roughness
-simulation.network.update_pipe("P1", &PipeUpdate {
+simulation.network.update_link("P1", None, Some(LinkTypeUpdate::Pipe(&PipeUpdate {
     roughness: Some(0.2),
     ..Default::default()
-})?;
+})))?;
 
 // solve the network again
 simulation.run_hydraulics()?;

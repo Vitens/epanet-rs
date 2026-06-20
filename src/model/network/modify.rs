@@ -8,7 +8,7 @@ Updating a network element uses an update struct with default None values for th
 Example:
 
 ```rust
-# use epanet_rs::model::network::{Network, JunctionUpdate, JunctionData, PatternData};
+# use epanet_rs::model::network::{Network, JunctionUpdate, JunctionData, NewNodeType, NodeTypeUpdate, PatternData};
 # use epanet_rs::model::units::FlowUnits;
 # use epanet_rs::model::options::HeadlossFormula;
 let mut network = Network::new(FlowUnits::CFS, HeadlossFormula::DarcyWeisbach);
@@ -17,7 +17,7 @@ network.add_pattern("P1", &PatternData {
   multipliers: vec![1.0],
 }).unwrap();
 
-network.add_junction("J1", &JunctionData {
+let junction = JunctionData {
   elevation: 100.0,
   demands: vec![epanet_rs::model::demand::Demand {
     basedemand: 10.0,
@@ -27,17 +27,18 @@ network.add_junction("J1", &JunctionData {
   }],
   emitter_coefficient: 0.0,
   coordinates: Some((100.0, 200.0)),
-}).unwrap();
+};
+network.add_node("J1", 100.0, Some((100.0, 200.0)), NewNodeType::Junction(&junction)).unwrap();
 
-// update the junciton by setting the elevation to 50.0 and clearing the pattern
-network.update_junction("J1", &JunctionUpdate {
+// update the junction by setting the elevation to 50.0 and clearing the pattern
+network.update_node("J1", None, Some(NodeTypeUpdate::Junction(&JunctionUpdate {
   elevation: Some(50.0),
   basedemand: None,
   emitter_coefficient: None,
   pattern: Some(None),
   demands: None,
   coordinates: None,
-});
+}))).unwrap();
 */
 
 use hashbrown::HashMap;
@@ -121,9 +122,23 @@ pub struct ReservoirUpdate {
     pub head_pattern: Option<Option<Box<str>>>,
 }
 
+/// Type-specific data for adding a new node to the network.
+pub enum NewNodeType<'a> {
+    Junction(&'a JunctionData),
+    Tank(&'a TankData),
+    Reservoir(&'a ReservoirData),
+}
+
+/// Type-specific update for an existing node.
+pub enum NodeTypeUpdate<'a> {
+    Junction(&'a JunctionUpdate),
+    Tank(&'a TankUpdate),
+    Reservoir(&'a ReservoirUpdate),
+}
+
 /// Generic update for any node. Only elevation and coordinates can be changed
 /// through this struct; type-specific properties must be updated via the
-/// corresponding `update_tank`/`update_reservoir`/`update_junction` methods.
+/// `NodeTypeUpdate` variants passed to `update_node`.
 #[derive(Default)]
 pub struct NodeUpdate {
     pub elevation: Option<f64>,
@@ -195,6 +210,20 @@ pub struct ValveData {
     pub vertices: Option<Vec<(f64, f64)>>,
 }
 
+/// Type-specific data for adding a new link to the network.
+pub enum NewLinkType<'a> {
+    Pipe(&'a PipeData),
+    Pump(&'a PumpData),
+    Valve(&'a ValveData),
+}
+
+/// Type-specific update for an existing link.
+pub enum LinkTypeUpdate<'a> {
+    Pipe(&'a PipeUpdate),
+    Pump(&'a PumpUpdate),
+    Valve(&'a ValveUpdate),
+}
+
 #[derive(Default)]
 pub struct ValveUpdate {
     pub diameter: Option<f64>,
@@ -212,12 +241,11 @@ pub struct ValveUpdate {
 }
 
 /// Generic update for any link. Changing `start_node`/`end_node` is a topology change, forcing a complete solver and state re-initialization.
-/// changing `initial_status` or `vertices` is not.
+/// changing `initial_status` is not.
 #[derive(Default)]
 pub struct LinkUpdate {
     pub start_node: Option<Box<str>>,
     pub end_node: Option<Box<str>>,
-    pub vertices: Option<Vec<(f64, f64)>>,
     pub initial_status: Option<LinkStatus>,
 }
 
@@ -257,112 +285,114 @@ impl Network {
         self.updated_links.clear();
     }
 
-    /// Add a new junction to the network.
-    pub fn add_junction(&mut self, id: &str, data: &JunctionData) -> Result<(), InputError> {
-        let mut demands = data.demands.clone();
-        Self::resolve_demand_patterns(&self.pattern_map, &mut demands)?;
-
-        let junction = Junction {
-            emitter_coefficient: data.emitter_coefficient,
-            demands,
-        };
+    /// Add a new node to the network.
+    pub fn add_node(
+        &mut self,
+        id: &str,
+        elevation: f64,
+        coordinates: Option<(f64, f64)>,
+        node_type: NewNodeType<'_>,
+    ) -> Result<(), InputError> {
+        let node_type =
+            match node_type {
+                NewNodeType::Junction(data) => {
+                    let mut demands = data.demands.clone();
+                    Self::resolve_demand_patterns(&self.pattern_map, &mut demands)?;
+                    NodeType::Junction(Junction {
+                        emitter_coefficient: data.emitter_coefficient,
+                        demands,
+                    })
+                }
+                NewNodeType::Tank(data) => {
+                    if let Some(curve_id) = &data.volume_curve_id
+                        && !self.curve_map.contains_key(curve_id)
+                    {
+                        return Err(InputError::CurveNotFound {
+                            curve_id: curve_id.clone(),
+                        });
+                    }
+                    NodeType::Tank(Tank {
+                        elevation,
+                        initial_level: data.initial_level,
+                        min_level: data.min_level,
+                        max_level: data.max_level,
+                        diameter: data.diameter,
+                        min_volume: data.min_volume,
+                        volume_curve_id: data.volume_curve_id.clone(),
+                        overflow: data.overflow,
+                        volume_curve: None,
+                        links_to: Vec::new(),
+                        links_from: Vec::new(),
+                    })
+                }
+                NewNodeType::Reservoir(data) => {
+                    let head_pattern_index =
+                        if let Some(pattern) = &data.head_pattern {
+                            Some(*self.pattern_map.get(pattern).ok_or(
+                                InputError::PatternNotFound {
+                                    pattern_id: pattern.clone(),
+                                },
+                            )?)
+                        } else {
+                            None
+                        };
+                    NodeType::Reservoir(Reservoir {
+                        head_pattern: data.head_pattern.clone(),
+                        head_pattern_index,
+                    })
+                }
+            };
 
         let mut node = Node {
             id: id.into(),
-            elevation: data.elevation,
-            node_type: NodeType::Junction(junction),
-            coordinates: data.coordinates,
+            elevation,
+            node_type,
+            coordinates,
         };
 
-        // convert the node to standard units
         node.convert_to_standard(&self.options);
-        // add the node to the network
-        self.insert_node(node)?;
+        self.insert_node(node)
+    }
 
-        Ok(())
+    /// Add a new junction to the network.
+    #[deprecated(note = "use add_node with NewNodeType::Junction instead")]
+    pub fn add_junction(&mut self, id: &str, data: &JunctionData) -> Result<(), InputError> {
+        self.add_node(
+            id,
+            data.elevation,
+            data.coordinates,
+            NewNodeType::Junction(data),
+        )
     }
 
     /// Add a new tank to the network.
+    #[deprecated(note = "use add_node with NewNodeType::Tank instead")]
     pub fn add_tank(&mut self, id: &str, data: &TankData) -> Result<(), InputError> {
-        // validate the volume curve id (if provided) exists
-        if let Some(curve_id) = &data.volume_curve_id
-            && !self.curve_map.contains_key(curve_id)
-        {
-            return Err(InputError::CurveNotFound {
-                curve_id: curve_id.clone(),
-            });
-        }
-
-        let tank = Tank {
-            elevation: data.elevation,
-            initial_level: data.initial_level,
-            min_level: data.min_level,
-            max_level: data.max_level,
-            diameter: data.diameter,
-            min_volume: data.min_volume,
-            volume_curve_id: data.volume_curve_id.clone(),
-            overflow: data.overflow,
-            volume_curve: None,
-            links_to: Vec::new(),
-            links_from: Vec::new(),
-        };
-        let mut node = Node {
-            id: id.into(),
-            elevation: data.elevation,
-            node_type: NodeType::Tank(tank),
-            coordinates: data.coordinates,
-        };
-
-        // convert the tank node to standard units
-        node.convert_to_standard(&self.options);
-
-        // add the node to the network
-        self.insert_node(node)?;
-
-        Ok(())
+        self.add_node(
+            id,
+            data.elevation,
+            data.coordinates,
+            NewNodeType::Tank(data),
+        )
     }
 
     /// Add a new reservoir to the network.
+    #[deprecated(note = "use add_node with NewNodeType::Reservoir instead")]
     pub fn add_reservoir(&mut self, id: &str, data: &ReservoirData) -> Result<(), InputError> {
-        // resolve the head pattern index
-        let head_pattern_index = if let Some(pattern) = &data.head_pattern {
-            Some(
-                *self
-                    .pattern_map
-                    .get(pattern)
-                    .ok_or(InputError::PatternNotFound {
-                        pattern_id: pattern.clone(),
-                    })?,
-            )
-        } else {
-            None
-        };
-
-        let reservoir = Reservoir {
-            head_pattern: data.head_pattern.clone(),
-            head_pattern_index,
-        };
-        let mut node = Node {
-            id: id.into(),
-            elevation: data.elevation,
-            node_type: NodeType::Reservoir(reservoir),
-            coordinates: data.coordinates,
-        };
-
-        // convert the reservoir node to standard units
-        node.convert_to_standard(&self.options);
-        self.insert_node(node)?;
-
-        Ok(())
+        self.add_node(
+            id,
+            data.elevation,
+            data.coordinates,
+            NewNodeType::Reservoir(data),
+        )
     }
 
-    pub fn update_junction(&mut self, id: &str, update: &JunctionUpdate) -> Result<(), InputError> {
-        // lookup the node index
-        let node_index = self
-            .node_map
-            .get(id)
-            .ok_or(InputError::NodeNotFound { node_id: id.into() })?;
-
+    fn update_junction_type(
+        &mut self,
+        node_index: usize,
+        id: &str,
+        update: &JunctionUpdate,
+    ) -> Result<(), InputError> {
         // resolve the new pattern index up front (if a pattern change is
         // requested) so we fail fast on an unknown pattern before mutating
         // anything. `Some(Some(id))` sets the pattern; `Some(None)` clears it.
@@ -380,7 +410,7 @@ impl Network {
         };
 
         let pattern_map = &self.pattern_map;
-        let node = &mut self.nodes[*node_index];
+        let node = &mut self.nodes[node_index];
         if !matches!(node.node_type, NodeType::Junction(_)) {
             return Err(InputError::NodeNotAJunction { node_id: id.into() });
         }
@@ -419,7 +449,7 @@ impl Network {
         node.convert_to_standard(&self.options);
 
         // add the node index to the updated nodes set, forcing state update
-        self.updated_nodes.insert(*node_index);
+        self.updated_nodes.insert(node_index);
         // increment the properties version
         self.properties_version += 1;
 
@@ -428,11 +458,31 @@ impl Network {
 
     /// Update the elevation and/or coordinates of any node (junction, tank, or reservoir).
     /// For tanks, the tank's internal elevation is kept in sync with the node elevation.
-    pub fn update_node(&mut self, id: &str, update: &NodeUpdate) -> Result<(), InputError> {
+    pub fn update_node(
+        &mut self,
+        id: &str,
+        update: Option<&NodeUpdate>,
+        type_update: Option<NodeTypeUpdate<'_>>,
+    ) -> Result<(), InputError> {
         let node_index = *self
             .node_map
             .get(id)
             .ok_or(InputError::NodeNotFound { node_id: id.into() })?;
+
+        match type_update {
+            Some(NodeTypeUpdate::Junction(update)) => {
+                self.update_junction_type(node_index, id, update)?
+            }
+            Some(NodeTypeUpdate::Tank(update)) => self.update_tank_type(node_index, id, update)?,
+            Some(NodeTypeUpdate::Reservoir(update)) => {
+                self.update_reservoir_type(node_index, id, update)?
+            }
+            None => {}
+        }
+
+        let Some(update) = update else {
+            return Ok(());
+        };
 
         let node = &mut self.nodes[node_index];
 
@@ -458,12 +508,12 @@ impl Network {
     }
 
     /// Update a tank's properties. All fields are optional; only provided fields are changed.
-    pub fn update_tank(&mut self, id: &str, update: &TankUpdate) -> Result<(), InputError> {
-        let node_index = *self
-            .node_map
-            .get(id)
-            .ok_or(InputError::NodeNotFound { node_id: id.into() })?;
-
+    fn update_tank_type(
+        &mut self,
+        node_index: usize,
+        id: &str,
+        update: &TankUpdate,
+    ) -> Result<(), InputError> {
         let node = &mut self.nodes[node_index];
 
         // check if the node is a tank
@@ -505,16 +555,12 @@ impl Network {
     /// Update a reservoir's properties. `head_pattern` follows the
     /// `Option<Option<_>>` convention: `None` leaves the pattern untouched,
     /// `Some(None)` clears it, `Some(Some(id))` sets it.
-    pub fn update_reservoir(
+    fn update_reservoir_type(
         &mut self,
+        node_index: usize,
         id: &str,
         update: &ReservoirUpdate,
     ) -> Result<(), InputError> {
-        let node_index = *self
-            .node_map
-            .get(id)
-            .ok_or(InputError::NodeNotFound { node_id: id.into() })?;
-
         // resolve the new pattern index up front (if a pattern change is
         // requested) so we fail fast on an unknown pattern.
         let pattern_change: Option<(Option<Box<str>>, Option<usize>)> = match &update.head_pattern {
@@ -559,178 +605,183 @@ impl Network {
         Ok(())
     }
 
+    /// Update properties of an existing junction.
+    #[deprecated(note = "use update_node with NodeTypeUpdate::Junction instead")]
+    pub fn update_junction(&mut self, id: &str, update: &JunctionUpdate) -> Result<(), InputError> {
+        self.update_node(id, None, Some(NodeTypeUpdate::Junction(update)))
+    }
+
+    /// Update properties of an existing tank.
+    #[deprecated(note = "use update_node with NodeTypeUpdate::Tank instead")]
+    pub fn update_tank(&mut self, id: &str, update: &TankUpdate) -> Result<(), InputError> {
+        self.update_node(id, None, Some(NodeTypeUpdate::Tank(update)))
+    }
+
+    /// Update properties of an existing reservoir.
+    #[deprecated(note = "use update_node with NodeTypeUpdate::Reservoir instead")]
+    pub fn update_reservoir(
+        &mut self,
+        id: &str,
+        update: &ReservoirUpdate,
+    ) -> Result<(), InputError> {
+        self.update_node(id, None, Some(NodeTypeUpdate::Reservoir(update)))
+    }
+
     // --- Link add/update methods ---
 
-    /// Add a new pipe to the network. Fails if either referenced node does not
-    /// exist or a link with the same id is already present.
-    pub fn add_pipe(&mut self, id: &str, data: &PipeData) -> Result<(), InputError> {
-        let start_node =
-            *self
-                .node_map
-                .get(&data.start_node)
-                .ok_or_else(|| InputError::NodeNotFound {
-                    node_id: data.start_node.clone(),
-                })?;
-        let end_node =
-            *self
-                .node_map
-                .get(&data.end_node)
-                .ok_or_else(|| InputError::NodeNotFound {
-                    node_id: data.end_node.clone(),
-                })?;
-
-        let pipe = Pipe {
-            diameter: data.diameter,
-            length: data.length,
-            roughness: data.roughness,
-            minor_loss: data.minor_loss,
-            check_valve: data.check_valve,
-            headloss_formula: self.options.headloss_formula,
-        };
+    /// Add a new link to the network. Fails if either referenced node does not
+    /// exist, type-specific curve references are invalid, or a link with the
+    /// same id is already present.
+    pub fn add_link(
+        &mut self,
+        id: &str,
+        start: &str,
+        end: &str,
+        initial_status: LinkStatus,
+        link_type: NewLinkType<'_>,
+    ) -> Result<(), InputError> {
+        let start_node = *self
+            .node_map
+            .get(start)
+            .ok_or_else(|| InputError::NodeNotFound {
+                node_id: start.into(),
+            })?;
+        let end_node = *self
+            .node_map
+            .get(end)
+            .ok_or_else(|| InputError::NodeNotFound {
+                node_id: end.into(),
+            })?;
 
         let mut link = Link {
             id: id.into(),
-            link_type: LinkType::Pipe(pipe),
-            start_node_id: data.start_node.clone(),
-            end_node_id: data.end_node.clone(),
-            initial_status: data.initial_status,
-            vertices: data.vertices.clone(),
+            link_type: match link_type {
+                NewLinkType::Pipe(data) => LinkType::Pipe(Pipe {
+                    diameter: data.diameter,
+                    length: data.length,
+                    roughness: data.roughness,
+                    minor_loss: data.minor_loss,
+                    check_valve: data.check_valve,
+                    headloss_formula: self.options.headloss_formula,
+                }),
+                NewLinkType::Pump(data) => LinkType::Pump(Pump {
+                    speed: data.speed,
+                    head_curve_id: data.head_curve_id.clone(),
+                    power: data.power,
+                    head_curve: None,
+                }),
+                NewLinkType::Valve(data) => LinkType::Valve(Valve {
+                    diameter: data.diameter,
+                    setting: data.setting,
+                    curve_id: data.curve_id.clone(),
+                    valve_type: data.valve_type.clone(),
+                    minor_loss: data.minor_loss,
+                    gpv_curve: None,
+                    pcv_curve: None,
+                }),
+            },
+            start_node_id: start.into(),
+            end_node_id: end.into(),
+            initial_status,
+            vertices: None,
             start_node,
             end_node,
         };
 
-        // convert the link to internal units (feet, etc.)
-        link.convert_to_standard(&self.options);
-        // normalize the user-facing minor-loss coefficient against the internal diameter
-        if let LinkType::Pipe(pipe) = &mut link.link_type {
-            pipe.minor_loss = 0.02517 * pipe.minor_loss / pipe.diameter.powi(4);
-        }
-
-        self.insert_link(link)
-    }
-
-    /// Add a new pump to the network. Any `head_curve_id` is resolved eagerly.
-    pub fn add_pump(&mut self, id: &str, data: &PumpData) -> Result<(), InputError> {
-        let start_node =
-            *self
-                .node_map
-                .get(&data.start_node)
-                .ok_or_else(|| InputError::NodeNotFound {
-                    node_id: data.start_node.clone(),
-                })?;
-        let end_node =
-            *self
-                .node_map
-                .get(&data.end_node)
-                .ok_or_else(|| InputError::NodeNotFound {
-                    node_id: data.end_node.clone(),
-                })?;
-
-        let head_curve = self.resolve_head_curve(data.head_curve_id.as_deref())?;
-
-        let pump = Pump {
-            speed: data.speed,
-            head_curve_id: data.head_curve_id.clone(),
-            power: data.power,
-            head_curve: None,
+        let head_curve = match &link.link_type {
+            LinkType::Pump(pump) => self.resolve_head_curve(pump.head_curve_id.as_deref())?,
+            _ => None,
         };
 
-        let mut link = Link {
-            id: id.into(),
-            link_type: LinkType::Pump(pump),
-            start_node_id: data.start_node.clone(),
-            end_node_id: data.end_node.clone(),
-            initial_status: data.initial_status,
-            vertices: data.vertices.clone(),
-            start_node,
-            end_node,
-        };
-
-        link.convert_to_standard(&self.options);
-        // assign the (already standard-units) head curve after unit conversion so
-        // it does not get double-converted by Pump::convert_to_standard
-        if let LinkType::Pump(pump) = &mut link.link_type {
-            pump.head_curve = head_curve;
-        }
-
-        self.insert_link(link)
-    }
-
-    /// Add a new valve to the network. Any `curve_id` is resolved eagerly.
-    /// PSV/PRV valves store their setting as pressure (in feet of head) at
-    /// the anchor node; the solver adds the anchor's elevation at the point
-    /// of use, so the stored setting is independent of node elevation.
-    pub fn add_valve(&mut self, id: &str, data: &ValveData) -> Result<(), InputError> {
-        let start_node =
-            *self
-                .node_map
-                .get(&data.start_node)
-                .ok_or_else(|| InputError::NodeNotFound {
-                    node_id: data.start_node.clone(),
-                })?;
-        let end_node =
-            *self
-                .node_map
-                .get(&data.end_node)
-                .ok_or_else(|| InputError::NodeNotFound {
-                    node_id: data.end_node.clone(),
-                })?;
-
-        // // GPV valves are driven by their curve; require it up front
-        // if data.valve_type == ValveType::GPV && data.curve_id.is_none() {
-        //   return Err(InputError::new("GPV valves require a curve id"));
-        // }
-        // resolve the curve based on valve type. GPV curves are converted to
-        // standard units, while PCV curves are stored as-is because they
-        // represent dimensionless percentage relationships.
-        let (gpv_curve, pcv_curve) = match data.valve_type {
-            ValveType::GPV => (self.resolve_gpv_curve(data.curve_id.as_deref())?, None),
-            ValveType::PCV => (None, self.resolve_pcv_curve(data.curve_id.as_deref())?),
+        let (gpv_curve, pcv_curve) = match &link.link_type {
+            LinkType::Valve(valve) => match valve.valve_type {
+                ValveType::GPV => (self.resolve_gpv_curve(valve.curve_id.as_deref())?, None),
+                ValveType::PCV => (None, self.resolve_pcv_curve(valve.curve_id.as_deref())?),
+                _ => (None, None),
+            },
             _ => (None, None),
         };
 
-        let valve = Valve {
-            diameter: data.diameter,
-            setting: data.setting,
-            curve_id: data.curve_id.clone(),
-            valve_type: data.valve_type.clone(),
-            minor_loss: data.minor_loss,
-            gpv_curve: None,
-            pcv_curve: None,
-        };
-
-        let mut link = Link {
-            id: id.into(),
-            link_type: LinkType::Valve(valve),
-            start_node_id: data.start_node.clone(),
-            end_node_id: data.end_node.clone(),
-            initial_status: data.initial_status,
-            vertices: data.vertices.clone(),
-            start_node,
-            end_node,
-        };
-
         link.convert_to_standard(&self.options);
 
-        // attach the curve and flag the network as containing PSV/PRV (no
-        // elevation offset is applied — the setting is stored as pressure).
-        if let LinkType::Valve(valve) = &mut link.link_type {
-            if matches!(valve.valve_type, ValveType::PSV | ValveType::PRV) {
-                self.contains_pressure_control_valve = true;
+        match &mut link.link_type {
+            LinkType::Pipe(pipe) => {
+                // normalize the user-facing minor-loss coefficient against the internal diameter
+                pipe.minor_loss = 0.02517 * pipe.minor_loss / pipe.diameter.powi(4);
             }
-            valve.gpv_curve = gpv_curve;
-            valve.pcv_curve = pcv_curve;
+            LinkType::Pump(pump) => {
+                // assign the already-standard head curve after unit conversion
+                // so it does not get double-converted by Pump::convert_to_standard.
+                pump.head_curve = head_curve;
+            }
+            LinkType::Valve(valve) => {
+                // attach the curve and flag the network as containing PSV/PRV
+                // (no elevation offset is applied; the setting is stored as pressure).
+                if matches!(valve.valve_type, ValveType::PSV | ValveType::PRV) {
+                    self.contains_pressure_control_valve = true;
+                }
+                valve.gpv_curve = gpv_curve;
+                valve.pcv_curve = pcv_curve;
+            }
         }
 
         self.insert_link(link)
     }
 
-    /// Update properties of an existing pipe. Only provided fields are changed.
-    pub fn update_pipe(&mut self, id: &str, update: &PipeUpdate) -> Result<(), InputError> {
-        let link_index = *self
-            .link_map
-            .get(id)
-            .ok_or_else(|| InputError::LinkNotFound { link_id: id.into() })?;
+    /// Add a new pipe to the network.
+    #[deprecated(note = "use add_link with NewLinkType::Pipe instead")]
+    pub fn add_pipe(&mut self, id: &str, data: &PipeData) -> Result<(), InputError> {
+        self.add_link(
+            id,
+            &data.start_node,
+            &data.end_node,
+            data.initial_status,
+            NewLinkType::Pipe(data),
+        )?;
+        if data.vertices.is_some() {
+            self.set_vertices(id, data.vertices.clone())?;
+        }
+        Ok(())
+    }
+
+    /// Add a new pump to the network.
+    #[deprecated(note = "use add_link with NewLinkType::Pump instead")]
+    pub fn add_pump(&mut self, id: &str, data: &PumpData) -> Result<(), InputError> {
+        self.add_link(
+            id,
+            &data.start_node,
+            &data.end_node,
+            data.initial_status,
+            NewLinkType::Pump(data),
+        )?;
+        if data.vertices.is_some() {
+            self.set_vertices(id, data.vertices.clone())?;
+        }
+        Ok(())
+    }
+
+    /// Add a new valve to the network.
+    #[deprecated(note = "use add_link with NewLinkType::Valve instead")]
+    pub fn add_valve(&mut self, id: &str, data: &ValveData) -> Result<(), InputError> {
+        self.add_link(
+            id,
+            &data.start_node,
+            &data.end_node,
+            data.initial_status,
+            NewLinkType::Valve(data),
+        )?;
+        if data.vertices.is_some() {
+            self.set_vertices(id, data.vertices.clone())?;
+        }
+        Ok(())
+    }
+
+    fn update_pipe_type(
+        &mut self,
+        link_index: usize,
+        id: &str,
+        update: &PipeUpdate,
+    ) -> Result<(), InputError> {
         let link = &mut self.links[link_index];
 
         if !matches!(link.link_type, LinkType::Pipe(_)) {
@@ -766,12 +817,12 @@ impl Network {
     /// `Some(None)` clears it (turning the pump into a constant-power or
     /// open-valve pump depending on `power`), and `Some(Some(id))` attaches
     /// the named head curve.
-    pub fn update_pump(&mut self, id: &str, update: &PumpUpdate) -> Result<(), InputError> {
-        let link_index = *self
-            .link_map
-            .get(id)
-            .ok_or_else(|| InputError::LinkNotFound { link_id: id.into() })?;
-
+    fn update_pump_type(
+        &mut self,
+        link_index: usize,
+        id: &str,
+        update: &PumpUpdate,
+    ) -> Result<(), InputError> {
         if !matches!(self.links[link_index].link_type, LinkType::Pump(_)) {
             return Err(InputError::LinkNotAPump { link_id: id.into() });
         }
@@ -822,12 +873,12 @@ impl Network {
     /// `valve_type` requires a new `setting` (the stored value has no
     /// meaning under a different type); switching to `GPV` also requires a
     /// `curve_id` to be supplied.
-    pub fn update_valve(&mut self, id: &str, update: &ValveUpdate) -> Result<(), InputError> {
-        let link_index = *self
-            .link_map
-            .get(id)
-            .ok_or_else(|| InputError::LinkNotFound { link_id: id.into() })?;
-
+    fn update_valve_type(
+        &mut self,
+        link_index: usize,
+        id: &str,
+        update: &ValveUpdate,
+    ) -> Result<(), InputError> {
         if !matches!(self.links[link_index].link_type, LinkType::Valve(_)) {
             return Err(InputError::LinkNotAValve { link_id: id.into() });
         }
@@ -969,14 +1020,63 @@ impl Network {
         Ok(())
     }
 
-    /// Update the topology/display properties of any link: endpoints, vertices
-    /// and initial status. Type-specific properties must be edited via
-    /// [update_pipe], [update_pump] or [update_valve].
-    pub fn update_link(&mut self, id: &str, update: &LinkUpdate) -> Result<(), InputError> {
+    /// Update properties of an existing pipe.
+    #[deprecated(note = "use update_link with LinkTypeUpdate::Pipe instead")]
+    pub fn update_pipe(&mut self, id: &str, update: &PipeUpdate) -> Result<(), InputError> {
+        self.update_link(id, None, Some(LinkTypeUpdate::Pipe(update)))
+    }
+
+    /// Update properties of an existing pump.
+    #[deprecated(note = "use update_link with LinkTypeUpdate::Pump instead")]
+    pub fn update_pump(&mut self, id: &str, update: &PumpUpdate) -> Result<(), InputError> {
+        self.update_link(id, None, Some(LinkTypeUpdate::Pump(update)))
+    }
+
+    /// Update properties of an existing valve.
+    #[deprecated(note = "use update_link with LinkTypeUpdate::Valve instead")]
+    pub fn update_valve(&mut self, id: &str, update: &ValveUpdate) -> Result<(), InputError> {
+        self.update_link(id, None, Some(LinkTypeUpdate::Valve(update)))
+    }
+
+    /// Set or clear display vertices for an existing link.
+    pub fn set_vertices(
+        &mut self,
+        id: &str,
+        vertices: Option<Vec<(f64, f64)>>,
+    ) -> Result<(), InputError> {
         let link_index = *self
             .link_map
             .get(id)
             .ok_or_else(|| InputError::LinkNotFound { link_id: id.into() })?;
+        self.links[link_index].vertices = vertices;
+        Ok(())
+    }
+
+    /// Update topology/display properties and, optionally, type-specific
+    /// properties of any link.
+    pub fn update_link(
+        &mut self,
+        id: &str,
+        update: Option<&LinkUpdate>,
+        type_update: Option<LinkTypeUpdate<'_>>,
+    ) -> Result<(), InputError> {
+        let link_index = *self
+            .link_map
+            .get(id)
+            .ok_or_else(|| InputError::LinkNotFound { link_id: id.into() })?;
+
+        match type_update {
+            Some(LinkTypeUpdate::Pipe(update)) => self.update_pipe_type(link_index, id, update)?,
+            Some(LinkTypeUpdate::Pump(update)) => self.update_pump_type(link_index, id, update)?,
+            Some(LinkTypeUpdate::Valve(update)) => {
+                self.update_valve_type(link_index, id, update)?
+            }
+            None => {}
+        }
+
+        let Some(update) = update else {
+            return Ok(());
+        };
 
         // resolve new endpoints up front so we fail fast on missing nodes
         let new_start = if let Some(start_id) = &update.start_node {
@@ -1054,10 +1154,6 @@ impl Network {
         }
 
         let link = &mut self.links[link_index];
-        if let Some(vertices) = &update.vertices {
-            link.vertices = Some(vertices.clone());
-        }
-
         let mut properties_changed = false;
         if let Some(status) = update.initial_status
             && link.initial_status != status
@@ -1654,6 +1750,7 @@ fn retarget_tank_link(node: &mut Node, old_index: usize, new_index: usize, outgo
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::constants::MperFT;
@@ -2089,10 +2186,11 @@ mod tests {
         network
             .update_node(
                 "J1",
-                &NodeUpdate {
+                Some(&NodeUpdate {
                     elevation: None,
                     coordinates: Some((1.0, 2.0)),
-                },
+                }),
+                None,
             )
             .unwrap();
 
@@ -2117,10 +2215,11 @@ mod tests {
         network
             .update_node(
                 "J1",
-                &NodeUpdate {
+                Some(&NodeUpdate {
                     elevation: Some(250.0),
                     coordinates: None,
-                },
+                }),
+                None,
             )
             .unwrap();
 
@@ -2137,10 +2236,11 @@ mod tests {
         network
             .update_node(
                 "T1",
-                &NodeUpdate {
+                Some(&NodeUpdate {
                     elevation: Some(150.0),
                     coordinates: None,
-                },
+                }),
+                None,
             )
             .unwrap();
 
@@ -2157,10 +2257,11 @@ mod tests {
         let err = network
             .update_node(
                 "missing",
-                &NodeUpdate {
+                Some(&NodeUpdate {
                     elevation: Some(1.0),
                     coordinates: None,
-                },
+                }),
+                None,
             )
             .unwrap_err();
         assert!(matches!(err, InputError::NodeNotFound { .. }));
@@ -2328,7 +2429,9 @@ mod tests {
     #[test]
     fn test_update_reservoir_elevation_and_coordinates() {
         let mut network = Network::default();
-        network.insert_node(test_reservoir_node("R1", 50.0)).unwrap();
+        network
+            .insert_node(test_reservoir_node("R1", 50.0))
+            .unwrap();
         let props_before = network.properties_version;
 
         network
@@ -2356,7 +2459,9 @@ mod tests {
             multipliers: vec![1.0, 2.0],
         });
         network.pattern_map.insert("P1".into(), 0);
-        network.insert_node(test_reservoir_node("R1", 50.0)).unwrap();
+        network
+            .insert_node(test_reservoir_node("R1", 50.0))
+            .unwrap();
 
         network
             .update_reservoir(
@@ -2412,7 +2517,9 @@ mod tests {
     #[test]
     fn test_update_reservoir_pattern_not_found() {
         let mut network = Network::default();
-        network.insert_node(test_reservoir_node("R1", 50.0)).unwrap();
+        network
+            .insert_node(test_reservoir_node("R1", 50.0))
+            .unwrap();
 
         let err = network
             .update_reservoir(
@@ -2560,6 +2667,80 @@ mod tests {
         }
     }
 
+    fn add_sample_pipe(network: &mut Network, id: &str) -> Result<(), InputError> {
+        let data = sample_pipe_data();
+        network.add_link(id, "J1", "J2", LinkStatus::Open, NewLinkType::Pipe(&data))
+    }
+
+    fn add_sample_pump(
+        network: &mut Network,
+        id: &str,
+        head_curve_id: Option<Box<str>>,
+        power: f64,
+    ) -> Result<(), InputError> {
+        let data = PumpData {
+            start_node: "J1".into(),
+            end_node: "J2".into(),
+            speed: 1.0,
+            head_curve_id,
+            power,
+            initial_status: LinkStatus::Open,
+            vertices: None,
+        };
+        network.add_link(id, "J1", "J2", LinkStatus::Open, NewLinkType::Pump(&data))
+    }
+
+    fn add_sample_valve(
+        network: &mut Network,
+        id: &str,
+        valve_type: ValveType,
+        setting: f64,
+        curve_id: Option<Box<str>>,
+    ) -> Result<(), InputError> {
+        let data = ValveData {
+            start_node: "J1".into(),
+            end_node: "J2".into(),
+            diameter: 12.0,
+            valve_type,
+            setting,
+            curve_id,
+            minor_loss: 0.0,
+            initial_status: LinkStatus::Active,
+            vertices: None,
+        };
+        network.add_link(
+            id,
+            "J1",
+            "J2",
+            LinkStatus::Active,
+            NewLinkType::Valve(&data),
+        )
+    }
+
+    fn apply_pipe_update(
+        network: &mut Network,
+        id: &str,
+        update: &PipeUpdate,
+    ) -> Result<(), InputError> {
+        network.update_link(id, None, Some(LinkTypeUpdate::Pipe(update)))
+    }
+
+    fn apply_pump_update(
+        network: &mut Network,
+        id: &str,
+        update: &PumpUpdate,
+    ) -> Result<(), InputError> {
+        network.update_link(id, None, Some(LinkTypeUpdate::Pump(update)))
+    }
+
+    fn apply_valve_update(
+        network: &mut Network,
+        id: &str,
+        update: &ValveUpdate,
+    ) -> Result<(), InputError> {
+        network.update_link(id, None, Some(LinkTypeUpdate::Valve(update)))
+    }
+
     // --- add_pipe tests ---
 
     #[test]
@@ -2568,7 +2749,7 @@ mod tests {
         add_two_junctions(&mut network);
         let topo_before = network.topology_version;
 
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
 
         assert_eq!(network.links.len(), 1);
         assert_eq!(network.links[0].id, "P1".into());
@@ -2592,12 +2773,15 @@ mod tests {
         add_two_junctions(&mut network);
 
         network
-            .add_pipe(
+            .add_link(
                 "P1",
-                &PipeData {
+                "J1",
+                "J2",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     minor_loss: 2.0,
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
 
@@ -2614,13 +2798,16 @@ mod tests {
         add_two_junctions(&mut network);
 
         network
-            .add_pipe(
+            .add_link(
                 "P1",
-                &PipeData {
+                "J1",
+                "J2",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     length: 1000.0,
                     diameter: 300.0, // mm
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
 
@@ -2637,12 +2824,15 @@ mod tests {
         let mut network = Network::default();
         add_two_junctions(&mut network);
         let err = network
-            .add_pipe(
+            .add_link(
                 "P1",
-                &PipeData {
+                "missing",
+                "J2",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     start_node: "missing".into(),
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap_err();
         assert!(matches!(err, InputError::NodeNotFound { .. }));
@@ -2653,8 +2843,8 @@ mod tests {
     fn test_add_pipe_duplicate_id() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
-        let err = network.add_pipe("P1", &sample_pipe_data()).unwrap_err();
+        add_sample_pipe(&mut network, "P1").unwrap();
+        let err = add_sample_pipe(&mut network, "P1").unwrap_err();
         assert!(matches!(err, InputError::LinkExists { .. }));
     }
 
@@ -2665,13 +2855,16 @@ mod tests {
         add_two_junctions(&mut network);
 
         network
-            .add_pipe(
+            .add_link(
                 "P1",
-                &PipeData {
+                "J1",
+                "T1",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     start_node: "J1".into(),
                     end_node: "T1".into(),
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
 
@@ -2698,20 +2891,7 @@ mod tests {
         let mut network = Network::default();
         add_two_junctions(&mut network);
 
-        network
-            .add_pump(
-                "PU1",
-                &PumpData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    speed: 1.0,
-                    head_curve_id: None,
-                    power: 100.0,
-                    initial_status: LinkStatus::Open,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_pump(&mut network, "PU1", None, 100.0).unwrap();
 
         let LinkType::Pump(pump) = &network.links[0].link_type else {
             panic!("Expected Pump link type");
@@ -2727,20 +2907,7 @@ mod tests {
         add_two_junctions(&mut network);
         push_head_curve(&mut network);
 
-        network
-            .add_pump(
-                "PU1",
-                &PumpData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    speed: 1.0,
-                    head_curve_id: Some("C1".into()),
-                    power: 0.0,
-                    initial_status: LinkStatus::Open,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_pump(&mut network, "PU1", Some("C1".into()), 0.0).unwrap();
 
         let LinkType::Pump(pump) = &network.links[0].link_type else {
             panic!("Expected Pump link type");
@@ -2754,9 +2921,12 @@ mod tests {
         let mut network = Network::default();
         add_two_junctions(&mut network);
         let err = network
-            .add_pump(
+            .add_link(
                 "PU1",
-                &PumpData {
+                "J1",
+                "J2",
+                LinkStatus::Open,
+                NewLinkType::Pump(&PumpData {
                     start_node: "J1".into(),
                     end_node: "J2".into(),
                     speed: 1.0,
@@ -2764,7 +2934,7 @@ mod tests {
                     power: 0.0,
                     initial_status: LinkStatus::Open,
                     vertices: None,
-                },
+                }),
             )
             .unwrap_err();
         assert!(matches!(err, InputError::CurveNotFound { .. }));
@@ -2803,22 +2973,7 @@ mod tests {
             )
             .unwrap();
 
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::PRV,
-                    setting: 50.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::PRV, 50.0, None).unwrap();
 
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
@@ -2834,22 +2989,7 @@ mod tests {
         let mut network = Network::default();
         add_two_junctions(&mut network);
 
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::TCV,
-                    setting: 5.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::TCV, 5.0, None).unwrap();
 
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
@@ -2864,21 +3004,21 @@ mod tests {
     fn test_update_pipe_fields() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
         let props_before = network.properties_version;
 
-        network
-            .update_pipe(
-                "P1",
-                &PipeUpdate {
-                    length: Some(500.0),
-                    diameter: Some(24.0), // inches -> 2 ft
-                    roughness: Some(120.0),
-                    minor_loss: Some(3.0),
-                    check_valve: Some(true),
-                },
-            )
-            .unwrap();
+        apply_pipe_update(
+            &mut network,
+            "P1",
+            &PipeUpdate {
+                length: Some(500.0),
+                diameter: Some(24.0), // inches -> 2 ft
+                roughness: Some(120.0),
+                minor_loss: Some(3.0),
+                check_valve: Some(true),
+            },
+        )
+        .unwrap();
 
         let LinkType::Pipe(pipe) = &network.links[0].link_type else {
             panic!("Expected Pipe link type");
@@ -2898,30 +3038,33 @@ mod tests {
         let mut network = Network::default();
         add_two_junctions(&mut network);
         network
-            .add_pipe(
+            .add_link(
                 "P1",
-                &PipeData {
+                "J1",
+                "J2",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     minor_loss: 2.0,
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
         let k_expected = 0.02517 * 2.0 / 1.0_f64.powi(4);
 
         // change only the length; K should remain equivalent to 2.0 despite the
         // round-trip through convert_from_standard/convert_to_standard
-        network
-            .update_pipe(
-                "P1",
-                &PipeUpdate {
-                    length: Some(250.0),
-                    diameter: None,
-                    roughness: None,
-                    minor_loss: None,
-                    check_valve: None,
-                },
-            )
-            .unwrap();
+        apply_pipe_update(
+            &mut network,
+            "P1",
+            &PipeUpdate {
+                length: Some(250.0),
+                diameter: None,
+                roughness: None,
+                minor_loss: None,
+                check_valve: None,
+            },
+        )
+        .unwrap();
 
         let LinkType::Pipe(pipe) = &network.links[0].link_type else {
             panic!("Expected Pipe link type");
@@ -2934,51 +3077,38 @@ mod tests {
     fn test_update_pipe_wrong_type() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network
-            .add_pump(
-                "PU1",
-                &PumpData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    speed: 1.0,
-                    head_curve_id: None,
-                    power: 10.0,
-                    initial_status: LinkStatus::Open,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_pump(&mut network, "PU1", None, 10.0).unwrap();
 
-        let err = network
-            .update_pipe(
-                "PU1",
-                &PipeUpdate {
-                    length: Some(10.0),
-                    diameter: None,
-                    roughness: None,
-                    minor_loss: None,
-                    check_valve: None,
-                },
-            )
-            .unwrap_err();
+        let err = apply_pipe_update(
+            &mut network,
+            "PU1",
+            &PipeUpdate {
+                length: Some(10.0),
+                diameter: None,
+                roughness: None,
+                minor_loss: None,
+                check_valve: None,
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, InputError::LinkNotAPipe { .. }));
     }
 
     #[test]
     fn test_update_pipe_not_found() {
         let mut network = Network::default();
-        let err = network
-            .update_pipe(
-                "missing",
-                &PipeUpdate {
-                    length: None,
-                    diameter: None,
-                    roughness: None,
-                    minor_loss: None,
-                    check_valve: None,
-                },
-            )
-            .unwrap_err();
+        let err = apply_pipe_update(
+            &mut network,
+            "missing",
+            &PipeUpdate {
+                length: None,
+                diameter: None,
+                roughness: None,
+                minor_loss: None,
+                check_valve: None,
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, InputError::LinkNotFound { .. }));
     }
 
@@ -2988,31 +3118,18 @@ mod tests {
     fn test_update_pump_speed_and_power() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network
-            .add_pump(
-                "PU1",
-                &PumpData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    speed: 1.0,
-                    head_curve_id: None,
-                    power: 100.0,
-                    initial_status: LinkStatus::Open,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_pump(&mut network, "PU1", None, 100.0).unwrap();
 
-        network
-            .update_pump(
-                "PU1",
-                &PumpUpdate {
-                    speed: Some(1.5),
-                    power: Some(200.0),
-                    head_curve_id: None,
-                },
-            )
-            .unwrap();
+        apply_pump_update(
+            &mut network,
+            "PU1",
+            &PumpUpdate {
+                speed: Some(1.5),
+                power: Some(200.0),
+                head_curve_id: None,
+            },
+        )
+        .unwrap();
 
         let LinkType::Pump(pump) = &network.links[0].link_type else {
             panic!("Expected Pump link type");
@@ -3028,31 +3145,18 @@ mod tests {
         let mut network = Network::default();
         add_two_junctions(&mut network);
         push_head_curve(&mut network);
-        network
-            .add_pump(
-                "PU1",
-                &PumpData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    speed: 1.0,
-                    head_curve_id: None,
-                    power: 10.0,
-                    initial_status: LinkStatus::Open,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_pump(&mut network, "PU1", None, 10.0).unwrap();
 
-        network
-            .update_pump(
-                "PU1",
-                &PumpUpdate {
-                    speed: None,
-                    power: None,
-                    head_curve_id: Some(Some("C1".into())),
-                },
-            )
-            .unwrap();
+        apply_pump_update(
+            &mut network,
+            "PU1",
+            &PumpUpdate {
+                speed: None,
+                power: None,
+                head_curve_id: Some(Some("C1".into())),
+            },
+        )
+        .unwrap();
 
         let LinkType::Pump(pump) = &network.links[0].link_type else {
             panic!("Expected Pump link type");
@@ -3065,18 +3169,18 @@ mod tests {
     fn test_update_pump_wrong_type() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
 
-        let err = network
-            .update_pump(
-                "P1",
-                &PumpUpdate {
-                    speed: Some(1.0),
-                    power: None,
-                    head_curve_id: None,
-                },
-            )
-            .unwrap_err();
+        let err = apply_pump_update(
+            &mut network,
+            "P1",
+            &PumpUpdate {
+                speed: Some(1.0),
+                power: None,
+                head_curve_id: None,
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, InputError::LinkNotAPump { .. }));
     }
 
@@ -3086,31 +3190,18 @@ mod tests {
         let mut network = Network::default();
         add_two_junctions(&mut network);
         push_head_curve(&mut network);
-        network
-            .add_pump(
-                "PU1",
-                &PumpData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    speed: 1.0,
-                    head_curve_id: Some("C1".into()),
-                    power: 0.0,
-                    initial_status: LinkStatus::Open,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_pump(&mut network, "PU1", Some("C1".into()), 0.0).unwrap();
 
-        network
-            .update_pump(
-                "PU1",
-                &PumpUpdate {
-                    speed: Some(2.0),
-                    power: None,
-                    head_curve_id: None,
-                },
-            )
-            .unwrap();
+        apply_pump_update(
+            &mut network,
+            "PU1",
+            &PumpUpdate {
+                speed: Some(2.0),
+                power: None,
+                head_curve_id: None,
+            },
+        )
+        .unwrap();
 
         let LinkType::Pump(pump) = &network.links[0].link_type else {
             panic!("Expected Pump link type");
@@ -3125,31 +3216,18 @@ mod tests {
         let mut network = Network::default();
         add_two_junctions(&mut network);
         push_head_curve(&mut network);
-        network
-            .add_pump(
-                "PU1",
-                &PumpData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    speed: 1.0,
-                    head_curve_id: Some("C1".into()),
-                    power: 0.0,
-                    initial_status: LinkStatus::Open,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_pump(&mut network, "PU1", Some("C1".into()), 0.0).unwrap();
 
-        network
-            .update_pump(
-                "PU1",
-                &PumpUpdate {
-                    speed: None,
-                    power: Some(50.0),
-                    head_curve_id: Some(None),
-                },
-            )
-            .unwrap();
+        apply_pump_update(
+            &mut network,
+            "PU1",
+            &PumpUpdate {
+                speed: None,
+                power: Some(50.0),
+                head_curve_id: Some(None),
+            },
+        )
+        .unwrap();
 
         let LinkType::Pump(pump) = &network.links[0].link_type else {
             panic!("Expected Pump link type");
@@ -3185,35 +3263,20 @@ mod tests {
                 },
             )
             .unwrap();
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::PRV,
-                    setting: 50.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::PRV, 50.0, None).unwrap();
 
-        network
-            .update_valve(
-                "V1",
-                &ValveUpdate {
-                    diameter: None,
-                    setting: Some(80.0),
-                    minor_loss: None,
-                    curve_id: None,
-                    valve_type: None,
-                },
-            )
-            .unwrap();
+        apply_valve_update(
+            &mut network,
+            "V1",
+            &ValveUpdate {
+                diameter: None,
+                setting: Some(80.0),
+                minor_loss: None,
+                curve_id: None,
+                valve_type: None,
+            },
+        )
+        .unwrap();
 
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
@@ -3250,40 +3313,25 @@ mod tests {
                 },
             )
             .unwrap();
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::PRV,
-                    setting: 50.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::PRV, 50.0, None).unwrap();
         let setting_before = if let LinkType::Valve(valve) = &network.links[0].link_type {
             valve.setting
         } else {
             unreachable!()
         };
 
-        network
-            .update_valve(
-                "V1",
-                &ValveUpdate {
-                    diameter: Some(24.0),
-                    setting: None,
-                    minor_loss: None,
-                    curve_id: None,
-                    valve_type: None,
-                },
-            )
-            .unwrap();
+        apply_valve_update(
+            &mut network,
+            "V1",
+            &ValveUpdate {
+                diameter: Some(24.0),
+                setting: None,
+                minor_loss: None,
+                curve_id: None,
+                valve_type: None,
+            },
+        )
+        .unwrap();
 
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
@@ -3296,19 +3344,19 @@ mod tests {
     fn test_update_valve_wrong_type() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
-        let err = network
-            .update_valve(
-                "P1",
-                &ValveUpdate {
-                    diameter: None,
-                    setting: None,
-                    minor_loss: None,
-                    curve_id: None,
-                    valve_type: None,
-                },
-            )
-            .unwrap_err();
+        add_sample_pipe(&mut network, "P1").unwrap();
+        let err = apply_valve_update(
+            &mut network,
+            "P1",
+            &ValveUpdate {
+                diameter: None,
+                setting: None,
+                minor_loss: None,
+                curve_id: None,
+                valve_type: None,
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, InputError::LinkNotAValve { .. }));
     }
 
@@ -3316,35 +3364,20 @@ mod tests {
     fn test_update_valve_type_change_requires_setting() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::TCV,
-                    setting: 5.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::TCV, 5.0, None).unwrap();
 
-        let err = network
-            .update_valve(
-                "V1",
-                &ValveUpdate {
-                    diameter: None,
-                    setting: None,
-                    minor_loss: None,
-                    curve_id: None,
-                    valve_type: Some(ValveType::PRV),
-                },
-            )
-            .unwrap_err();
+        let err = apply_valve_update(
+            &mut network,
+            "V1",
+            &ValveUpdate {
+                diameter: None,
+                setting: None,
+                minor_loss: None,
+                curve_id: None,
+                valve_type: Some(ValveType::PRV),
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, InputError::Parse { .. }));
     }
 
@@ -3352,35 +3385,20 @@ mod tests {
     fn test_update_valve_type_change_to_gpv_requires_curve() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::TCV,
-                    setting: 5.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::TCV, 5.0, None).unwrap();
 
-        let err = network
-            .update_valve(
-                "V1",
-                &ValveUpdate {
-                    diameter: None,
-                    setting: Some(0.0),
-                    minor_loss: None,
-                    curve_id: None,
-                    valve_type: Some(ValveType::GPV),
-                },
-            )
-            .unwrap_err();
+        let err = apply_valve_update(
+            &mut network,
+            "V1",
+            &ValveUpdate {
+                diameter: None,
+                setting: Some(0.0),
+                minor_loss: None,
+                curve_id: None,
+                valve_type: Some(ValveType::GPV),
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, InputError::Parse { .. }));
     }
 
@@ -3390,35 +3408,20 @@ mod tests {
         let mut network = Network::default();
         add_two_junctions(&mut network);
         push_head_curve(&mut network);
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::GPV,
-                    setting: 0.0,
-                    curve_id: Some("C1".into()),
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::GPV, 0.0, Some("C1".into())).unwrap();
 
-        let err = network
-            .update_valve(
-                "V1",
-                &ValveUpdate {
-                    diameter: None,
-                    setting: None,
-                    minor_loss: None,
-                    curve_id: Some(None),
-                    valve_type: None,
-                },
-            )
-            .unwrap_err();
+        let err = apply_valve_update(
+            &mut network,
+            "V1",
+            &ValveUpdate {
+                diameter: None,
+                setting: None,
+                minor_loss: None,
+                curve_id: Some(None),
+                valve_type: None,
+            },
+        )
+        .unwrap_err();
         assert!(matches!(err, InputError::Parse { .. }));
     }
 
@@ -3428,35 +3431,20 @@ mod tests {
         let mut network = Network::default();
         add_two_junctions(&mut network);
         push_head_curve(&mut network);
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::GPV,
-                    setting: 0.0,
-                    curve_id: Some("C1".into()),
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::GPV, 0.0, Some("C1".into())).unwrap();
 
-        network
-            .update_valve(
-                "V1",
-                &ValveUpdate {
-                    diameter: Some(10.0),
-                    setting: None,
-                    minor_loss: None,
-                    curve_id: None,
-                    valve_type: None,
-                },
-            )
-            .unwrap();
+        apply_valve_update(
+            &mut network,
+            "V1",
+            &ValveUpdate {
+                diameter: Some(10.0),
+                setting: None,
+                minor_loss: None,
+                curve_id: None,
+                valve_type: None,
+            },
+        )
+        .unwrap();
 
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
@@ -3471,35 +3459,20 @@ mod tests {
         // Non-GPV case: `curve_id: None` is a no-op even when no curve is set.
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::TCV,
-                    setting: 5.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::TCV, 5.0, None).unwrap();
 
-        network
-            .update_valve(
-                "V1",
-                &ValveUpdate {
-                    diameter: None,
-                    setting: Some(10.0),
-                    minor_loss: None,
-                    curve_id: None,
-                    valve_type: None,
-                },
-            )
-            .unwrap();
+        apply_valve_update(
+            &mut network,
+            "V1",
+            &ValveUpdate {
+                diameter: None,
+                setting: Some(10.0),
+                minor_loss: None,
+                curve_id: None,
+                valve_type: None,
+            },
+        )
+        .unwrap();
 
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
@@ -3534,36 +3507,21 @@ mod tests {
                 },
             )
             .unwrap();
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::TCV,
-                    setting: 5.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::TCV, 5.0, None).unwrap();
         assert!(!network.contains_pressure_control_valve);
 
-        network
-            .update_valve(
-                "V1",
-                &ValveUpdate {
-                    diameter: None,
-                    setting: Some(50.0),
-                    minor_loss: None,
-                    curve_id: None,
-                    valve_type: Some(ValveType::PRV),
-                },
-            )
-            .unwrap();
+        apply_valve_update(
+            &mut network,
+            "V1",
+            &ValveUpdate {
+                diameter: None,
+                setting: Some(50.0),
+                minor_loss: None,
+                curve_id: None,
+                valve_type: Some(ValveType::PRV),
+            },
+        )
+        .unwrap();
 
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
@@ -3600,36 +3558,21 @@ mod tests {
                 },
             )
             .unwrap();
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::PRV,
-                    setting: 50.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::PRV, 50.0, None).unwrap();
         assert!(network.contains_pressure_control_valve);
 
-        network
-            .update_valve(
-                "V1",
-                &ValveUpdate {
-                    diameter: None,
-                    setting: Some(5.0),
-                    minor_loss: None,
-                    curve_id: None,
-                    valve_type: Some(ValveType::TCV),
-                },
-            )
-            .unwrap();
+        apply_valve_update(
+            &mut network,
+            "V1",
+            &ValveUpdate {
+                diameter: None,
+                setting: Some(5.0),
+                minor_loss: None,
+                curve_id: None,
+                valve_type: Some(ValveType::TCV),
+            },
+        )
+        .unwrap();
 
         let LinkType::Valve(valve) = &network.links[0].link_type else {
             panic!("Expected Valve link type");
@@ -3646,19 +3589,22 @@ mod tests {
     fn test_update_link_vertices_and_status() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
         let topo_before = network.topology_version;
         let props_before = network.properties_version;
 
         network
+            .set_vertices("P1", Some(vec![(1.0, 2.0), (3.0, 4.0)]))
+            .unwrap();
+        network
             .update_link(
                 "P1",
-                &LinkUpdate {
+                Some(&LinkUpdate {
                     start_node: None,
                     end_node: None,
-                    vertices: Some(vec![(1.0, 2.0), (3.0, 4.0)]),
                     initial_status: Some(LinkStatus::Closed),
-                },
+                }),
+                None,
             )
             .unwrap();
 
@@ -3688,18 +3634,18 @@ mod tests {
                 },
             )
             .unwrap();
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
         let topo_before = network.topology_version;
 
         network
             .update_link(
                 "P1",
-                &LinkUpdate {
+                Some(&LinkUpdate {
                     start_node: None,
                     end_node: Some("J3".into()),
-                    vertices: None,
                     initial_status: None,
-                },
+                }),
+                None,
             )
             .unwrap();
 
@@ -3726,25 +3672,28 @@ mod tests {
             .unwrap();
 
         network
-            .add_pipe(
+            .add_link(
                 "P1",
-                &PipeData {
+                "J1",
+                "T1",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     start_node: "J1".into(),
                     end_node: "T1".into(),
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
 
         network
             .update_link(
                 "P1",
-                &LinkUpdate {
+                Some(&LinkUpdate {
                     start_node: None,
                     end_node: Some("T2".into()),
-                    vertices: None,
                     initial_status: None,
-                },
+                }),
+                None,
             )
             .unwrap();
 
@@ -3765,16 +3714,16 @@ mod tests {
     fn test_update_link_unknown_node() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
         let err = network
             .update_link(
                 "P1",
-                &LinkUpdate {
+                Some(&LinkUpdate {
                     start_node: Some("missing".into()),
                     end_node: None,
-                    vertices: None,
                     initial_status: None,
-                },
+                }),
+                None,
             )
             .unwrap_err();
         assert!(matches!(err, InputError::NodeNotFound { .. }));
@@ -3786,12 +3735,12 @@ mod tests {
         let err = network
             .update_link(
                 "missing",
-                &LinkUpdate {
+                Some(&LinkUpdate {
                     start_node: None,
                     end_node: None,
-                    vertices: None,
                     initial_status: None,
-                },
+                }),
+                None,
             )
             .unwrap_err();
         assert!(matches!(err, InputError::LinkNotFound { .. }));
@@ -3803,7 +3752,7 @@ mod tests {
     fn test_remove_link_basic() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
         let topo_before = network.topology_version;
 
         network.remove_link("P1", false).unwrap();
@@ -3817,9 +3766,9 @@ mod tests {
     fn test_remove_link_reindexes_link_map_after_swap() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
-        network.add_pipe("P2", &sample_pipe_data()).unwrap();
-        network.add_pipe("P3", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
+        add_sample_pipe(&mut network, "P2").unwrap();
+        add_sample_pipe(&mut network, "P3").unwrap();
 
         // remove the middle link; swap_remove puts P3 into slot 1
         network.remove_link("P2", false).unwrap();
@@ -3838,13 +3787,16 @@ mod tests {
         add_two_junctions(&mut network);
 
         network
-            .add_pipe(
+            .add_link(
                 "P1",
-                &PipeData {
+                "J1",
+                "T1",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     start_node: "J1".into(),
                     end_node: "T1".into(),
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
 
@@ -3866,23 +3818,29 @@ mod tests {
         add_two_junctions(&mut network);
 
         network
-            .add_pipe(
+            .add_link(
                 "P1",
-                &PipeData {
+                "J1",
+                "T1",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     start_node: "J1".into(),
                     end_node: "T1".into(),
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
         network
-            .add_pipe(
+            .add_link(
                 "P2",
-                &PipeData {
+                "J2",
+                "T1",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     start_node: "J2".into(),
                     end_node: "T1".into(),
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
 
@@ -3900,22 +3858,7 @@ mod tests {
     fn test_remove_link_clears_pressure_control_flag() {
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network
-            .add_valve(
-                "V1",
-                &ValveData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    diameter: 12.0,
-                    valve_type: ValveType::PRV,
-                    setting: 50.0,
-                    curve_id: None,
-                    minor_loss: 0.0,
-                    initial_status: LinkStatus::Active,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_valve(&mut network, "V1", ValveType::PRV, 50.0, None).unwrap();
         assert!(network.contains_pressure_control_valve);
 
         network.remove_link("V1", false).unwrap();
@@ -3927,7 +3870,7 @@ mod tests {
         use crate::model::control::{Control, ControlCondition};
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
         network.controls.push(Control {
             condition: ControlCondition::Time { seconds: 0 },
             link_id: "P1".into(),
@@ -3990,13 +3933,16 @@ mod tests {
             )
             .unwrap();
         network
-            .add_pipe(
+            .add_link(
                 "P1",
-                &PipeData {
+                "J1",
+                "J3",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     start_node: "J1".into(),
                     end_node: "J3".into(),
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
 
@@ -4026,25 +3972,31 @@ mod tests {
                 },
             )
             .unwrap();
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
         network
-            .add_pipe(
+            .add_link(
                 "P2",
-                &PipeData {
+                "J2",
+                "J3",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     start_node: "J2".into(),
                     end_node: "J3".into(),
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
         network
-            .add_pipe(
+            .add_link(
                 "P3",
-                &PipeData {
+                "J1",
+                "J3",
+                LinkStatus::Open,
+                NewLinkType::Pipe(&PipeData {
                     start_node: "J1".into(),
                     end_node: "J3".into(),
                     ..sample_pipe_data()
-                },
+                }),
             )
             .unwrap();
 
@@ -4063,7 +4015,7 @@ mod tests {
         use crate::model::control::{Control, ControlCondition};
         let mut network = Network::default();
         add_two_junctions(&mut network);
-        network.add_pipe("P1", &sample_pipe_data()).unwrap();
+        add_sample_pipe(&mut network, "P1").unwrap();
         network.controls.push(Control {
             condition: ControlCondition::Time { seconds: 0 },
             link_id: "P1".into(),
@@ -4517,20 +4469,7 @@ mod tests {
                 },
             )
             .unwrap();
-        network
-            .add_pump(
-                "PU1",
-                &PumpData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    speed: 1.0,
-                    head_curve_id: Some("C1".into()),
-                    power: 0.0,
-                    initial_status: LinkStatus::Open,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_pump(&mut network, "PU1", Some("C1".into()), 0.0).unwrap();
         network.reset_changes();
         let props_before = network.properties_version;
 
@@ -4677,20 +4616,7 @@ mod tests {
                 },
             )
             .unwrap();
-        network
-            .add_pump(
-                "PU1",
-                &PumpData {
-                    start_node: "J1".into(),
-                    end_node: "J2".into(),
-                    speed: 1.0,
-                    head_curve_id: Some("C1".into()),
-                    power: 0.0,
-                    initial_status: LinkStatus::Open,
-                    vertices: None,
-                },
-            )
-            .unwrap();
+        add_sample_pump(&mut network, "PU1", Some("C1".into()), 0.0).unwrap();
 
         let err = network.remove_curve("C1").unwrap_err();
         assert!(matches!(err, InputError::Parse { .. }));

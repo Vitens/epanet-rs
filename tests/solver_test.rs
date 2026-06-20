@@ -334,10 +334,11 @@ fn test_solve_pcv_valve_minor_loss_si_units_status_change() {
         .network
         .update_link(
             "v1",
-            &LinkUpdate {
+            Some(&LinkUpdate {
                 initial_status: Some(LinkStatus::Open),
                 ..Default::default()
-            },
+            }),
+            None,
         )
         .unwrap();
 

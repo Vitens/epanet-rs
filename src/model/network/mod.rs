@@ -19,9 +19,10 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 pub mod modify;
 pub use modify::{
-    CurveData, CurveUpdate, JunctionData, JunctionUpdate, LinkUpdate, NodeUpdate, PatternData,
-    PatternUpdate, PipeData, PipeUpdate, PumpData, PumpUpdate, ReservoirData, ReservoirUpdate,
-    TankData, TankUpdate, ValveData, ValveUpdate,
+    CurveData, CurveUpdate, JunctionData, JunctionUpdate, LinkTypeUpdate, LinkUpdate, NewLinkType,
+    NewNodeType, NodeTypeUpdate, NodeUpdate, PatternData, PatternUpdate, PipeData, PipeUpdate,
+    PumpData, PumpUpdate, ReservoirData, ReservoirUpdate, TankData, TankUpdate, ValveData,
+    ValveUpdate,
 };
 
 #[derive(Default, Serialize, Clone)]
