@@ -421,7 +421,7 @@ impl Network {
 
             if let Some(disabled) = update.disabled {
                 if node.disabled != disabled {
-                    self.topology_version += 1;  // set topology as stale
+                    self.topology_version += 1; // set topology as stale
                 }
                 node.disabled = disabled;
             }
@@ -455,9 +455,9 @@ impl Network {
 
         if let Some(disabled) = update.disabled {
             if node.disabled != disabled {
-                self.topology_version += 1;  // set topology as stale
+                self.topology_version += 1; // set topology as stale
             }
-            
+
             node.disabled = disabled;
         }
 
