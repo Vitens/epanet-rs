@@ -80,7 +80,7 @@ impl HydraulicSolver {
     ) {
         // iterate over the links
         for (i, link) in network.links.iter().enumerate() {
-            // skip links with disabled nodes and set flow to zero
+            // skip links with disabled nodes
             if network.nodes[link.start_node].disabled || network.nodes[link.end_node].disabled {
                 continue;
             }
