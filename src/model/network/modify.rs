@@ -37,6 +37,7 @@ network.update_junction("J1", &JunctionUpdate {
   pattern: Some(None),
   demands: None,
   coordinates: None,
+  disabled: None
 });
 */
 
