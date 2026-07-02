@@ -1,7 +1,7 @@
 //! Integration test for the hydraulic solver using pump.inp
 
 use epanet_rs::model::link::LinkStatus;
-use epanet_rs::model::network::{LinkUpdate, Network};
+use epanet_rs::model::network::{LinkUpdate, Network, NodeUpdate};
 use epanet_rs::simulation::Simulation;
 use epanet_rs::solver::result::SolverResult;
 
@@ -86,6 +86,76 @@ fn test_solve_pump_network() {
         &expected_heads,
         &expected_flows,
     );
+}
+
+/// Disabling a leaf junction should give it zero head, zero demand, and close
+/// its incident link, while the rest of the network still solves.
+#[test]
+fn test_disabled_leaf_junction() {
+    let mut simulation =
+        Simulation::from_file("tests/pump.inp").expect("Failed to create simulation");
+
+    simulation
+        .network
+        .update_node(
+            "5",
+            &NodeUpdate {
+                disabled: Some(true),
+                ..Default::default()
+            },
+        )
+        .expect("Failed to disable node");
+
+    let result = simulation
+        .solve_hydraulics(false)
+        .expect("Failed to solve hydraulics");
+
+    let last = result.heads.len() - 1;
+    let node = |id: &str| *simulation.network.node_map.get(id).unwrap();
+    let link = |id: &str| *simulation.network.link_map.get(id).unwrap();
+
+    // disabled node: zero head, zero demand
+    assert_eq!(result.heads[last][node("5")], 0.0, "disabled node head");
+    assert_eq!(result.demands[last][node("5")], 0.0, "disabled node demand");
+    // incident link is closed with zero flow
+    assert_eq!(result.flows[last][link("F")], 0.0, "incident link flow");
+
+    // the rest of the network is unaffected (reservoir head still fixed)
+    assert!((result.heads[last][node("FH")] - 100.00).abs() < 0.01);
+    assert!(result.heads[last][node("1")] > 0.0);
+}
+
+/// Disabling a node that sits between the network and a check-valve-fed
+/// reservoir should close both incident links (including the CV link).
+#[test]
+fn test_disabled_node_closes_check_valve_branch() {
+    let mut simulation =
+        Simulation::from_file("tests/pump.inp").expect("Failed to create simulation");
+
+    simulation
+        .network
+        .update_node(
+            "7",
+            &NodeUpdate {
+                disabled: Some(true),
+                ..Default::default()
+            },
+        )
+        .expect("Failed to disable node");
+
+    let result = simulation
+        .solve_hydraulics(false)
+        .expect("Failed to solve hydraulics");
+
+    let last = result.heads.len() - 1;
+    let node = |id: &str| *simulation.network.node_map.get(id).unwrap();
+    let link = |id: &str| *simulation.network.link_map.get(id).unwrap();
+
+    assert_eq!(result.heads[last][node("7")], 0.0, "disabled node head");
+    assert_eq!(result.demands[last][node("7")], 0.0, "disabled node demand");
+    // both incident links carry zero flow (H is a pipe, I is a check valve)
+    assert_eq!(result.flows[last][link("H")], 0.0, "pipe H flow");
+    assert_eq!(result.flows[last][link("I")], 0.0, "check valve I flow");
 }
 
 /// Test solving valve.inp and verify exact head and flow values
