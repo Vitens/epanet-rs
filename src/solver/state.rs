@@ -35,6 +35,9 @@ impl SolverState {
             .nodes
             .iter()
             .map(|n| {
+                if n.disabled {
+                    return 0.0;
+                }
                 if let NodeType::Junction(junction) = &n.node_type {
                     if junction.emitter_coefficient > 0.0 {
                         1.0
@@ -111,6 +114,11 @@ impl SolverState {
             .nodes
             .iter()
             .map(|n| {
+                // don't take into account disabled nodes
+                if n.disabled {
+                    return 0.0;
+                }
+
                 let NodeType::Junction(junction) = &n.node_type else {
                     return 0.0;
                 };
@@ -191,12 +199,13 @@ impl SolverState {
 
                 match &node.node_type {
                     NodeType::Junction(junction) => {
-                        // set the emitter flow to 1.0 if the emitter coefficient is greater than 0.0, otherwise set it to 0.0
-                        self.emitter_flows[*node_index] = if junction.emitter_coefficient > 0.0 {
-                            1.0
-                        } else {
-                            0.0
-                        };
+                        // set the emitter flow to 1.0 if the emitter coefficient is greater than 0.0 (and the node is not disabled), otherwise set it to 0.0
+                        self.emitter_flows[*node_index] =
+                            if junction.emitter_coefficient > 0.0 && !node.disabled {
+                                1.0
+                            } else {
+                                0.0
+                            };
                     }
                     NodeType::Tank(_) | NodeType::Reservoir(_) => {
                         // update the head

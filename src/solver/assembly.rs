@@ -54,6 +54,10 @@ impl HydraulicSolver {
 
     fn node_contributions(&self, network: &Network, state: &mut SolverState, rhs: &mut [f64]) {
         for (i, node) in network.nodes.iter().enumerate() {
+            // skip disabled nodes
+            if node.disabled {
+                continue;
+            }
             if let NodeType::Junction(_) = &node.node_type {
                 let idx = self.node_to_unknown[i].unwrap();
                 if network.options.demand_model == DemandModel::PDA {
@@ -76,6 +80,11 @@ impl HydraulicSolver {
     ) {
         // iterate over the links
         for (i, link) in network.links.iter().enumerate() {
+            // skip links with disabled nodes
+            if network.nodes[link.start_node].disabled || network.nodes[link.end_node].disabled {
+                continue;
+            }
+
             let q = state.flows[i];
             let csc_index = &self.csc_indices[i];
             let coefficients = link.coefficients(
@@ -141,6 +150,10 @@ impl HydraulicSolver {
     ) {
         // iterate over emitters
         for (i, node) in network.nodes.iter().enumerate() {
+            if node.disabled {
+                continue;
+            }
+
             if let NodeType::Junction(junction) = &node.node_type
                 && junction.emitter_coefficient > 0.0
             {
@@ -174,6 +187,11 @@ impl HydraulicSolver {
 
         // Iterate over all junctions
         for (i, node) in network.nodes.iter().enumerate() {
+            // skip disabled nodes
+            if node.disabled {
+                continue;
+            }
+
             if let NodeType::Junction(junction) = &node.node_type {
                 // only consider junctions with a positive demand
                 if state.demands[i] > 0.0 {

@@ -1,6 +1,6 @@
 [package]
 name = "epanet-rs"
-version = "0.2.2"
+version = "0.2.3"
 edition = "2024"
 rust-version = "1.85"
 description = "A fast, modern and safe re-implementation of the EPANET2 hydraulic solver, written in Rust."
