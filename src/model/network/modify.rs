@@ -76,6 +76,7 @@ pub struct JunctionUpdate {
     pub pattern: Option<Option<Box<str>>>,
     pub emitter_coefficient: Option<f64>,
     pub coordinates: Option<(f64, f64)>,
+    pub disabled: Option<bool>,
 }
 
 #[derive(Default)]
@@ -128,6 +129,7 @@ pub struct ReservoirUpdate {
 pub struct NodeUpdate {
     pub elevation: Option<f64>,
     pub coordinates: Option<(f64, f64)>,
+    pub disabled: Option<bool>,
 }
 
 /// Data for adding a pipe. All fields are in the user's unit system.
@@ -272,6 +274,7 @@ impl Network {
             elevation: data.elevation,
             node_type: NodeType::Junction(junction),
             coordinates: data.coordinates,
+            disabled: false,
         };
 
         // convert the node to standard units
@@ -311,6 +314,7 @@ impl Network {
             elevation: data.elevation,
             node_type: NodeType::Tank(tank),
             coordinates: data.coordinates,
+            disabled: false,
         };
 
         // convert the tank node to standard units
@@ -347,6 +351,7 @@ impl Network {
             elevation: data.elevation,
             node_type: NodeType::Reservoir(reservoir),
             coordinates: data.coordinates,
+            disabled: false,
         };
 
         // convert the reservoir node to standard units
@@ -413,6 +418,13 @@ impl Network {
                 demand.pattern_index = new_index;
             }
 
+            if let Some(disabled) = update.disabled {
+                if node.disabled != disabled {
+                    self.topology_version += 1;  // set topology as stale
+                }
+                node.disabled = disabled;
+            }
+
             Self::resolve_demand_patterns(pattern_map, &mut junction.demands)?;
         }
         // convert back to standard units
@@ -438,6 +450,14 @@ impl Network {
 
         if let Some(coordinates) = update.coordinates {
             node.coordinates = Some(coordinates);
+        }
+
+        if let Some(disabled) = update.disabled {
+            if node.disabled != disabled {
+                self.topology_version += 1;  // set topology as stale
+            }
+            
+            node.disabled = disabled;
         }
 
         if let Some(new_elevation) = update.elevation {
@@ -1691,6 +1711,7 @@ mod tests {
                 links_from: Vec::new(),
             }),
             coordinates: None,
+            disabled: false,
         }
     }
 
@@ -1703,6 +1724,7 @@ mod tests {
                 head_pattern_index: None,
             }),
             coordinates: None,
+            disabled: false,
         }
     }
 
@@ -1732,6 +1754,7 @@ mod tests {
             emitter_coefficient: Some(0.5),
             pattern: None,
             coordinates: None,
+            disabled: None,
         };
         network.update_junction("J1", &update).unwrap();
         assert_eq!(network.nodes[0].elevation, 200.0);
@@ -2092,6 +2115,7 @@ mod tests {
                 &NodeUpdate {
                     elevation: None,
                     coordinates: Some((1.0, 2.0)),
+                    disabled: None,
                 },
             )
             .unwrap();
@@ -2120,6 +2144,7 @@ mod tests {
                 &NodeUpdate {
                     elevation: Some(250.0),
                     coordinates: None,
+                    disabled: None,
                 },
             )
             .unwrap();
@@ -2140,6 +2165,7 @@ mod tests {
                 &NodeUpdate {
                     elevation: Some(150.0),
                     coordinates: None,
+                    disabled: None,
                 },
             )
             .unwrap();
@@ -2160,6 +2186,7 @@ mod tests {
                 &NodeUpdate {
                     elevation: Some(1.0),
                     coordinates: None,
+                    disabled: None,
                 },
             )
             .unwrap_err();

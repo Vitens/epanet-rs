@@ -277,6 +277,9 @@ impl Network {
             .unwrap_or(0.0);
         let pattern: Option<Box<str>> = parts.next().map(|s| s.into());
 
+        // let disabled: bool = parts.next().unwrap_or("false").parse_field::<bool>("disabled")?;
+        let disabled = false;
+
         Ok(Node {
             id,
             elevation,
@@ -290,6 +293,7 @@ impl Network {
                 }],
             }),
             coordinates: None,
+            disabled,
         })
     }
 
@@ -311,6 +315,7 @@ impl Network {
                 head_pattern_index: None,
             }),
             coordinates: None,
+            disabled: false,
         })
     }
 
@@ -335,6 +340,7 @@ impl Network {
                     head_pattern_index: None,
                 }),
                 coordinates: None,
+                disabled: false,
             });
         }
 
@@ -388,6 +394,7 @@ impl Network {
                 links_from: Vec::new(),
             }),
             coordinates: None,
+            disabled: false,
         })
     }
 
@@ -1421,6 +1428,7 @@ mod tests {
                         emitter_coefficient: 0.0,
                     }),
                     coordinates: None,
+                    disabled: false,
                 })
                 .unwrap();
             network
@@ -1437,6 +1445,7 @@ mod tests {
                         emitter_coefficient: 0.0,
                     }),
                     coordinates: None,
+                    disabled: false,
                 })
                 .unwrap();
             network

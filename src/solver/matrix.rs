@@ -80,7 +80,7 @@ pub fn build_unknown_numbering_map(network: &Network) -> Vec<Option<usize>> {
         .nodes
         .iter()
         .map(|n| {
-            if matches!(n.node_type, NodeType::Junction { .. }) {
+            if matches!(n.node_type, NodeType::Junction { .. }) && !n.disabled {
                 let id = unknown_id;
                 unknown_id += 1;
                 Some(id)

@@ -15,6 +15,9 @@ pub struct Node {
     pub node_type: NodeType,
     pub elevation: f64,
     pub coordinates: Option<(f64, f64)>,
+
+    // disabled flag
+    pub disabled: bool,
 }
 
 /// Node types

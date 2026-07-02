@@ -308,6 +308,13 @@ impl HydraulicSolver {
         let mut stats = IterationStatistics::default();
 
         for (i, link) in network.links.iter().enumerate() {
+            // skip if the start/end node is disabled
+            if network.nodes[link.start_node].disabled || network.nodes[link.end_node].disabled {
+                // set flow to zero
+                state.flows[i] = 0.0;
+                continue;
+            }
+
             let dh = state.heads[link.start_node] - state.heads[link.end_node];
             let g_inv = coefficients.g_inv[i];
             let y = coefficients.y[i];
@@ -362,6 +369,11 @@ impl HydraulicSolver {
         stats: &mut IterationStatistics,
     ) {
         for (i, node) in network.nodes.iter().enumerate() {
+            // skip disabled nodes
+            if node.disabled {
+                continue;
+            }
+
             if let NodeType::Junction(junction) = &node.node_type
                 && junction.emitter_coefficient > 0.0
             {
@@ -392,6 +404,9 @@ impl HydraulicSolver {
         let n = 1.0 / options.pressure_exponent;
 
         for (i, node) in network.nodes.iter().enumerate() {
+            if node.disabled {
+                continue;
+            }
             if let NodeType::Junction(junction) = &node.node_type
                 && state.demands[i] > 0.0
             {
