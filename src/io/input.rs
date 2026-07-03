@@ -24,6 +24,7 @@ use crate::model::tank::Tank;
 use crate::model::units::{FlowUnits, PressureUnits, UnitConversion, UnitSystem};
 use crate::model::valve::{Valve, ValveType};
 use crate::utils::time::parse_time_str;
+use simplelog::warn;
 
 /// Error type for input parsing operations
 #[derive(Debug)]
@@ -950,7 +951,7 @@ impl Network {
         let time_opts = &mut self.options.time_options;
 
         if time_opts.pattern_timestep == 0 {
-            eprintln!("Warning: PATTERN TIMESTEP was 0, adjusting to 3600 seconds (1 hour)");
+            warn!("Warning: PATTERN TIMESTEP was 0, adjusting to 3600 seconds (1 hour)");
             time_opts.pattern_timestep = 3600;
         }
 
