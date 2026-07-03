@@ -48,5 +48,5 @@ jobs:
         run: |
           echo "### Code Coverage Report" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          cargo llvm-cov --all-features --workspace --summary-only >> $GITHUB_STEP_SUMMARY
+          cargo llvm-cov --locked --all-features --workspace --summary-only >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
