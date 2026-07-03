@@ -231,7 +231,7 @@ pub unsafe extern "C" fn EN_setoption(
         }
 
         SimOption::Accuracy => {
-            if value < 1.0e-8 || value > 1.0e-1 {
+            if !(1.0e-8..=1.0e-1).contains(&value) {
                 return ErrorCode::InvalidOptionValue;
             }
             simulation.network.options.accuracy = value;
