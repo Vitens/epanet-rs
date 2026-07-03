@@ -34,6 +34,7 @@ jobs:
       - name: Install llvm-tools-preview
         run: rustup component add llvm-tools-preview
       - name: Cache cargo-llvm-cov
+        id: cache-llvm-cov
         uses: actions/cache@v4
         with:
           path: ~/.cargo/bin/cargo-llvm-cov
@@ -41,6 +42,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-llvm-cov-
       - name: Install cargo-llvm-cov
+        if: steps.cache-llvm-cov.outputs.cache-hit != 'true'
         run: cargo install cargo-llvm-cov --locked
       - name: Generate coverage report
         run: |
