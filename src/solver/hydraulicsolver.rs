@@ -349,7 +349,7 @@ impl HydraulicSolver {
             // TODO: Make this configurable and better implemented
             if matches!(link.link_type, LinkType::Pump(_)) && state.statuses[i] == LinkStatus::Xhead {
 
-              if iteration > 25 && iteration % 2 == 0 {
+              if iteration > 20 && iteration % 10 != 0 {
                 new_status = None;
               }
             }
