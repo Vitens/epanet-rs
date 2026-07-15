@@ -213,7 +213,7 @@ impl HydraulicSolver {
             }
 
             // update the links and emitters and gather iteration statistics
-            let mut stats = self.update_links(network, &mut state, &link_coefficients);
+            let mut stats = self.update_links(network, &mut state, &link_coefficients, iteration);
             self.update_emitter_flows(network, &mut state, &mut stats);
 
             // close/open links connected to tanks based on tank level
@@ -304,6 +304,7 @@ impl HydraulicSolver {
         network: &Network,
         state: &mut SolverState,
         coefficients: &ResistanceCoefficients,
+        iteration: usize,
     ) -> IterationStatistics {
         let mut stats = IterationStatistics::default();
 
@@ -331,8 +332,10 @@ impl HydraulicSolver {
             // update the link flow
             state.flows[i] -= dq;
 
+
+
             // check if the status of the link has changed
-            let new_status = link.update_status(
+            let mut new_status = link.update_status(
                 state.settings[i],
                 state.statuses[i],
                 state.flows[i],
@@ -341,6 +344,16 @@ impl HydraulicSolver {
                 network.nodes[link.start_node].elevation,
                 network.nodes[link.end_node].elevation,
             );
+
+            // test to see if this improves convergence
+            // TODO: Make this configurable and better implemented
+            if matches!(link.link_type, LinkType::Pump(_)) && state.statuses[i] == LinkStatus::Xhead {
+
+              if iteration > 25 && iteration % 2 == 0 {
+                new_status = None;
+              }
+            }
+
             if let Some(status) = new_status {
                 if state.statuses[i] != LinkStatus::TempClosed
                     && state.statuses[i] != LinkStatus::Xhead
