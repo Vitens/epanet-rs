@@ -83,9 +83,9 @@ impl Network {
         let mut network: Network = rmp_serde::from_read(reader).map_err(|e| {
             InputError::new(format!("Failed to parse msgpack file '{}': {}", msgpack, e))
         })?;
-        
+
         network.update_links()?;
-        
+
         *self = network;
         Ok(())
     }
@@ -99,7 +99,7 @@ impl Network {
             .map_err(|e| InputError::new(format!("Failed to parse JSON file '{}': {}", json, e)))?;
 
         network.update_links()?;
-        
+
         *self = network;
         Ok(())
     }
@@ -284,7 +284,10 @@ impl Network {
             .unwrap_or(0.0);
         let pattern: Option<Box<str>> = parts.next().map(|s| s.into());
 
-        let disabled: bool = parts.next().unwrap_or("false").parse_field::<bool>("disabled")?;
+        let disabled: bool = parts
+            .next()
+            .unwrap_or("false")
+            .parse_field::<bool>("disabled")?;
         // let disabled = false;
 
         Ok(Node {
