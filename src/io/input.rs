@@ -80,9 +80,12 @@ impl Network {
         let file = File::open(msgpack)
             .map_err(|e| InputError::new(format!("Failed to open file '{}': {}", msgpack, e)))?;
         let reader = BufReader::new(file);
-        let network: Network = rmp_serde::from_read(reader).map_err(|e| {
+        let mut network: Network = rmp_serde::from_read(reader).map_err(|e| {
             InputError::new(format!("Failed to parse msgpack file '{}': {}", msgpack, e))
         })?;
+        
+        network.update_links()?;
+        
         *self = network;
         Ok(())
     }
@@ -92,11 +95,15 @@ impl Network {
         let file = File::open(json)
             .map_err(|e| InputError::new(format!("Failed to open file '{}': {}", json, e)))?;
         let reader = BufReader::new(file);
-        let network: Network = serde_json::from_reader(reader)
+        let mut network: Network = serde_json::from_reader(reader)
             .map_err(|e| InputError::new(format!("Failed to parse JSON file '{}': {}", json, e)))?;
+
+        network.update_links()?;
+        
         *self = network;
         Ok(())
     }
+
     /// Read a network from an INP file.
     pub fn read_inp(&mut self, inp: &str) -> Result<(), InputError> {
         // set the initial state to none
@@ -277,8 +284,8 @@ impl Network {
             .unwrap_or(0.0);
         let pattern: Option<Box<str>> = parts.next().map(|s| s.into());
 
-        // let disabled: bool = parts.next().unwrap_or("false").parse_field::<bool>("disabled")?;
-        let disabled = false;
+        let disabled: bool = parts.next().unwrap_or("false").parse_field::<bool>("disabled")?;
+        // let disabled = false;
 
         Ok(Node {
             id,
