@@ -41,7 +41,7 @@ impl LinkTrait for Pump {
         }
 
         // get the maximum head from the pump curve or use BIG_VALUE if no curve (constant power pump)
-        let h_max = if let Some(curve) = self.head_curve.as_ref() {
+        let _h_max = if let Some(curve) = self.head_curve.as_ref() {
             curve.statistics.h_max
         } else {
             BIG_VALUE

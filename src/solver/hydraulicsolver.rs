@@ -304,7 +304,7 @@ impl HydraulicSolver {
         network: &Network,
         state: &mut SolverState,
         coefficients: &ResistanceCoefficients,
-        iteration: usize,
+        _iteration: usize,
     ) -> IterationStatistics {
         let mut stats = IterationStatistics::default();
 
@@ -332,10 +332,8 @@ impl HydraulicSolver {
             // update the link flow
             state.flows[i] -= dq;
 
-
-
             // check if the status of the link has changed
-            let mut new_status = link.update_status(
+            let new_status = link.update_status(
                 state.settings[i],
                 state.statuses[i],
                 state.flows[i],
