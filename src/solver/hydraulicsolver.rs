@@ -213,7 +213,7 @@ impl HydraulicSolver {
             }
 
             // update the links and emitters and gather iteration statistics
-            let mut stats = self.update_links(network, &mut state, &link_coefficients, iteration);
+            let mut stats = self.update_links(network, &mut state, &link_coefficients);
             self.update_emitter_flows(network, &mut state, &mut stats);
 
             // close/open links connected to tanks based on tank level
@@ -304,7 +304,6 @@ impl HydraulicSolver {
         network: &Network,
         state: &mut SolverState,
         coefficients: &ResistanceCoefficients,
-        _iteration: usize,
     ) -> IterationStatistics {
         let mut stats = IterationStatistics::default();
 

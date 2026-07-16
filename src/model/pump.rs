@@ -40,13 +40,6 @@ impl LinkTrait for Pump {
             return LinkCoefficients::simple(1.0 / BIG_VALUE, q);
         }
 
-        // get the maximum head from the pump curve or use BIG_VALUE if no curve (constant power pump)
-        let _h_max = if let Some(curve) = self.head_curve.as_ref() {
-            curve.statistics.h_max
-        } else {
-            BIG_VALUE
-        };
-
         // Prevent negative flow using a barrier function (similar to check_valve)
         if q < 0.0 {
             let a = BIG_VALUE * q;
