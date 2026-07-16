@@ -345,15 +345,6 @@ impl HydraulicSolver {
                 network.nodes[link.end_node].elevation,
             );
 
-            // test to see if this improves convergence
-            // TODO: Make this configurable and better implemented
-            if matches!(link.link_type, LinkType::Pump(_)) && state.statuses[i] == LinkStatus::Xhead {
-
-              if iteration > 20 && iteration % 10 != 0 {
-                new_status = None;
-              }
-            }
-
             if let Some(status) = new_status {
                 if state.statuses[i] != LinkStatus::TempClosed
                     && state.statuses[i] != LinkStatus::Xhead
