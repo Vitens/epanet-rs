@@ -341,6 +341,7 @@ impl HydraulicSolver {
                 network.nodes[link.start_node].elevation,
                 network.nodes[link.end_node].elevation,
             );
+
             if let Some(status) = new_status {
                 if state.statuses[i] != LinkStatus::TempClosed
                     && state.statuses[i] != LinkStatus::Xhead
