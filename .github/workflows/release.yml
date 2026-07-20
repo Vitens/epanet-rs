@@ -65,7 +65,7 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build release
-        run: cargo build --release --target ${{ matrix.target }} --locked
+        run: cargo build --release --target ${{ matrix.target }} --locked --all-features
 
       - name: Package (Unix)
         if: matrix.archive == 'tar.gz'

@@ -23,6 +23,10 @@ exclude = [
 [lib]
 crate-type = ["rlib", "cdylib"]
 
+[features]
+# FFI bindings for legacy API wrappers
+ffi = []
+
 [dependencies]
 faer = { version = "0.23.2", features = ["linalg", "perf-warn"] }
 hashbrown = { version = "0.16", features = ["serde"] }

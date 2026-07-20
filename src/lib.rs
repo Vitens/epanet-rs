@@ -200,9 +200,11 @@ simulation.run_hydraulics()?;
 */
 pub mod constants;
 pub mod error;
-pub mod ffi;
 pub mod io;
 pub mod model;
 pub mod simulation;
 pub mod solver;
 pub mod utils;
+
+#[cfg(feature = "ffi")]
+pub mod ffi;
