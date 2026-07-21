@@ -71,6 +71,9 @@ pub struct SimulationOptions {
     pub minimum_pressure: f64,
     pub required_pressure: f64,
     pub pressure_exponent: f64,
+
+    // damping limit
+    pub damping_limit: f64,
 }
 
 /// Default implementation for SimulationOptions
@@ -96,6 +99,7 @@ impl Default for SimulationOptions {
             minimum_pressure: 0.0,
             required_pressure: 10.0,
             pressure_exponent: 0.5,
+            damping_limit: 0.00,
         }
     }
 }

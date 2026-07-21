@@ -140,6 +140,11 @@ impl HydraulicSolver {
 
         let mut grounded_nodes = vec![false; network.nodes.len()];
 
+        // Adaptive under-relaxation: full Newton steps while residuals fall,
+        // damp when the relative change starts increasing (limit cycles).
+        let mut damping_factor = 1.0;
+        let mut prev_rel_change = f64::INFINITY;
+
         'gga: for iteration in 1..=network.options.max_trials {
             values.fill(0.0);
             rhs.fill(0.0);
@@ -213,21 +218,35 @@ impl HydraulicSolver {
             }
 
             // update the links and emitters and gather iteration statistics
-            let mut stats = self.update_links(network, &mut state, &link_coefficients);
-            self.update_emitter_flows(network, &mut state, &mut stats);
+            let mut stats = self.update_links(network, &mut state, &link_coefficients, damping_factor);
+            self.update_emitter_flows(network, &mut state, &mut stats, damping_factor);
 
             // close/open links connected to tanks based on tank level
             self.update_tank_links(network, &mut state);
 
             if network.options.demand_model == DemandModel::PDA {
-                self.update_demand_flows(network, &mut state, &mut stats);
+                self.update_demand_flows(network, &mut state, &mut stats, damping_factor);
             }
 
+            // Apply damping to attempt to stabilize the solution
+            let rel_change = stats.relative_change(&network.options);
+            // Only apply damping if the relative change is increasing and the relative change is below the damping limit option
+            if rel_change > prev_rel_change && rel_change < network.options.damping_limit {
+                // residual increased near convergence: damp subsequent steps
+                damping_factor = (damping_factor * 0.5).max(0.25);
+            } else if rel_change < prev_rel_change * 0.5 {
+                // strong improvement: restore full Newton steps
+                damping_factor = 1.0;
+            } else if rel_change < prev_rel_change {
+                // mild improvement: ease back toward full steps
+                damping_factor = (damping_factor * 1.2).min(1.0);
+            }
+            // update the previous relative change
+            prev_rel_change = rel_change;
+
             debug!(
-                ">> Iteration {}: Relative change: {:.6}, Status changed: {}",
-                iteration,
-                stats.relative_change(&network.options),
-                stats.status_changed
+                ">> Iteration {}: Relative change: {:.6}, Status changed: {}, damping factor: {:.3}",
+                iteration, rel_change, stats.status_changed, damping_factor
             );
             debug!(
                 ">>>> Max flow change: {:.6} for link {}",
@@ -242,7 +261,7 @@ impl HydraulicSolver {
             // - relative change is less than the accuracy
             // - no status changes
             // - maximum flow change is less than the maximum flow change allowed
-            if stats.relative_change(&network.options) < network.options.accuracy
+            if rel_change < network.options.accuracy
                 && !stats.status_changed
                 && stats.max_dq_converted(&network.options) < max_flow_change
             {
@@ -298,12 +317,14 @@ impl HydraulicSolver {
         }
     }
 
-    /// Update links and gather iteration statistics
+    /// Update links and gather iteration statistics.
+    /// `omega` is an under-relaxation factor applied to the Newton flow step.
     fn update_links(
         &self,
         network: &Network,
         state: &mut SolverState,
         coefficients: &ResistanceCoefficients,
+        damping_factor: f64,
     ) -> IterationStatistics {
         let mut stats = IterationStatistics::default();
 
@@ -319,8 +340,8 @@ impl HydraulicSolver {
             let g_inv = coefficients.g_inv[i];
             let y = coefficients.y[i];
 
-            // calculate the flow change
-            let dq = y - g_inv * dh;
+            // calculate the (possibly under-relaxed) flow change
+            let dq = damping_factor * (y - g_inv * dh);
 
             // update the maximum flow change
             if dq.abs() > stats.max_dq {
@@ -368,6 +389,7 @@ impl HydraulicSolver {
         network: &Network,
         state: &mut SolverState,
         stats: &mut IterationStatistics,
+        damping_factor: f64,
     ) {
         for (i, node) in network.nodes.iter().enumerate() {
             // skip disabled nodes
@@ -381,7 +403,7 @@ impl HydraulicSolver {
                 let dh = state.heads[i] - node.elevation;
                 let (g_inv, y) = junction
                     .emitter_coefficients(state.emitter_flows[i], network.options.emitter_exponent);
-                let dq = (y - dh) * g_inv;
+                let dq = damping_factor * (y - dh) * g_inv;
                 state.emitter_flows[i] -= dq;
                 stats.sum_dq += dq.abs();
                 stats.sum_q += state.emitter_flows[i].abs();
@@ -398,6 +420,7 @@ impl HydraulicSolver {
         network: &Network,
         state: &mut SolverState,
         stats: &mut IterationStatistics,
+        damping_factor: f64,
     ) {
         let options = &network.options;
 
@@ -415,7 +438,7 @@ impl HydraulicSolver {
                     junction.demand_coefficients(state.demand_flows[i], state.demands[i], dp, n);
 
                 let dh = state.heads[i] - node.elevation - options.minimum_pressure;
-                let dq = (y - dh) * g_inv;
+                let dq = damping_factor * (y - dh) * g_inv;
 
                 state.demand_flows[i] -= dq;
                 stats.sum_dq += dq.abs();

@@ -901,6 +901,9 @@ impl Network {
                     )));
                 }
             }
+            "DAMPLIMIT" => {
+                self.options.damping_limit = value.parse_field::<f64>("damping limit")?;
+            }
             "REQUIRED" => {
                 let next_part = value.trim().to_uppercase();
                 if next_part == "PRESSURE" {
