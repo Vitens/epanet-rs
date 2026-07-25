@@ -1,11 +1,16 @@
 //! FFI curve accessors: `EN_addcurve`, `EN_getcurvevalue`, `EN_setcurvevalue`, etc.
 
+use crate::ffi::enums::CurveType;
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation, get_simulation_mut};
+use crate::ffi::util::{MAX_ID, write_out, write_str};
 
+use crate::model::link::LinkType;
 use crate::model::network::modify::{CurveData, CurveUpdate};
+use crate::model::node::NodeType;
+use crate::model::valve::ValveType;
 
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::os::raw::{c_char, c_double, c_int};
 
 // Adds a new curve to the network.
@@ -90,13 +95,105 @@ pub unsafe extern "C" fn EN_getcurveid(
         None => return ErrorCode::UndefinedCurve,
     };
 
-    let c_str = CString::new(curve_id).unwrap();
-
-    unsafe {
-        std::ptr::copy_nonoverlapping(c_str.as_ptr(), out_id, c_str.as_bytes_with_nul().len());
-    }
+    unsafe { write_str(out_id, curve_id, MAX_ID) };
 
     ErrorCode::Ok
+}
+
+/// Deletes a curve from the network. Fails while the curve is still referenced
+/// by a pump, valve or tank.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_deletecurve(ph: *mut Project, index: c_int) -> ErrorCode {
+    let simulation = get_simulation_mut!(ph);
+
+    let curve_id = match simulation.network.curves.get((index - 1) as usize) {
+        Some(curve) => curve.id.clone(),
+        None => return ErrorCode::UndefinedCurve,
+    };
+
+    match simulation.network.remove_curve(&curve_id) {
+        Ok(()) => ErrorCode::Ok,
+        Err(_) => ErrorCode::IllegalLinkProperty,
+    }
+}
+
+/// Returns how a curve is used within the network.
+///
+/// `epanet-rs` does not store an explicit curve type, so the type is derived
+/// from the objects that reference the curve; unreferenced curves report
+/// [`CurveType::Generic`].
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_getcurvetype(
+    ph: *mut Project,
+    index: c_int,
+    out_type: *mut c_int,
+) -> ErrorCode {
+    let simulation = get_simulation!(ph);
+
+    let curve_id = match simulation.network.curves.get((index - 1) as usize) {
+        Some(curve) => curve.id.clone(),
+        None => return ErrorCode::UndefinedCurve,
+    };
+
+    let mut curve_type = CurveType::Generic;
+
+    for link in simulation.network.links.iter() {
+        match &link.link_type {
+            LinkType::Pump(pump) if pump.head_curve_id.as_deref() == Some(&*curve_id) => {
+                curve_type = CurveType::Pump;
+            }
+            LinkType::Valve(valve) if valve.curve_id.as_deref() == Some(&*curve_id) => {
+                curve_type = match valve.valve_type {
+                    ValveType::GPV => CurveType::HLoss,
+                    _ => CurveType::Valve,
+                };
+            }
+            _ => continue,
+        }
+        break;
+    }
+
+    if curve_type == CurveType::Generic {
+        let used_by_tank = simulation
+            .network
+            .nodes
+            .iter()
+            .any(|node| match &node.node_type {
+                NodeType::Tank(tank) => tank.volume_curve_id.as_deref() == Some(&*curve_id),
+                _ => false,
+            });
+        if used_by_tank {
+            curve_type = CurveType::Volume;
+        }
+    }
+
+    unsafe { write_out(out_type, curve_type as c_int) };
+
+    ErrorCode::Ok
+}
+
+/// Assigns a type to a curve.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_setcurvetype(
+    _ph: *mut Project,
+    _index: c_int,
+    _curve_type: c_int,
+) -> ErrorCode {
+    // TODO: curves in epanet-rs have no explicit type; their meaning follows
+    // from the pump/valve/tank that references them.
+    ErrorCode::NotImplemented
 }
 
 /// Sets the ID name of a curve given its index.
@@ -207,26 +304,74 @@ pub unsafe extern "C" fn EN_getcurvevalue(
     let x = curve.x[point_index];
     let y = curve.y[point_index];
 
-    unsafe { *out_x = x as c_double };
-    unsafe { *out_y = y as c_double };
+    unsafe { write_out(out_x, x as c_double) };
+    unsafe { write_out(out_y, y as c_double) };
 
     ErrorCode::Ok
 }
 
-// Retrieve all of a curve's points
+/// Sets the value of a single data point on a curve.
+///
+/// Any pump or valve using the curve has its derived coefficients rebuilt.
+///
 /// # Safety
 ///
 /// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
-/// `out_x` must be a valid non-null writable pointer.
-/// `out_y` must be a valid non-null writable pointer.
-/// `out_n_points` must be a valid non-null writable pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_setcurvevalue(
+    ph: *mut Project,
+    index: c_int,
+    point_index: c_int,
+    x: c_double,
+    y: c_double,
+) -> ErrorCode {
+    let simulation = get_simulation_mut!(ph);
+
+    let curve = match simulation.network.curves.get((index - 1) as usize) {
+        Some(curve) => curve,
+        None => return ErrorCode::UndefinedCurve,
+    };
+
+    let point_index = (point_index - 1) as usize;
+    if point_index >= curve.x.len() {
+        return ErrorCode::InvalidParameterCode;
+    }
+
+    let curve_id = curve.id.clone();
+    let mut new_x = curve.x.clone();
+    let mut new_y = curve.y.clone();
+    new_x[point_index] = x;
+    new_y[point_index] = y;
+
+    // go through update_curve so any derived pump/valve curve is rebuilt
+    match simulation.network.update_curve(
+        &curve_id,
+        &CurveUpdate {
+            x: Some(new_x),
+            y: Some(new_y),
+        },
+    ) {
+        Ok(()) => ErrorCode::Ok,
+        Err(_) => ErrorCode::InvalidParameterCode,
+    }
+}
+
+/// Retrieves all of a curve's data.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_id` must point to a buffer of at least `EN_MAXID + 1` bytes.
+/// `out_x` and `out_y` must each point to a buffer able to hold the curve's
+/// points (use [`EN_getcurvelen`] to size them).
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn EN_getcurve(
     ph: *mut Project,
     index: c_int,
+    out_id: *mut c_char,
     out_n_points: *mut c_int,
-    out_x: *mut *mut c_double,
-    out_y: *mut *mut c_double,
+    out_x: *mut c_double,
+    out_y: *mut c_double,
 ) -> ErrorCode {
     let simulation = get_simulation!(ph);
 
@@ -238,12 +383,15 @@ pub unsafe extern "C" fn EN_getcurve(
         None => return ErrorCode::UndefinedCurve,
     };
 
-    let n_points = curve.x.len();
+    unsafe { write_str(out_id, &curve.id, MAX_ID) };
+    unsafe { write_out(out_n_points, curve.x.len() as c_int) };
 
-    unsafe { *out_n_points = n_points as c_int };
-
-    unsafe { *out_x = curve.x.as_ptr() as *mut c_double };
-    unsafe { *out_y = curve.y.as_ptr() as *mut c_double };
+    if !out_x.is_null() {
+        unsafe { std::ptr::copy_nonoverlapping(curve.x.as_ptr(), out_x, curve.x.len()) };
+    }
+    if !out_y.is_null() {
+        unsafe { std::ptr::copy_nonoverlapping(curve.y.as_ptr(), out_y, curve.y.len()) };
+    }
 
     ErrorCode::Ok
 }
@@ -270,6 +418,10 @@ pub unsafe extern "C" fn EN_setcurve(
         Some(curve) => curve.id.clone(),
         None => return ErrorCode::UndefinedCurve,
     };
+
+    if count < 1 || x.is_null() || y.is_null() {
+        return ErrorCode::InvalidParameterCode;
+    }
 
     let x = unsafe { std::slice::from_raw_parts(x, count as usize).to_vec() };
     let y = unsafe { std::slice::from_raw_parts(y, count as usize).to_vec() };

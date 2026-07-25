@@ -2,8 +2,9 @@
 
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation, get_simulation_mut};
+use crate::ffi::util::{MAX_ID, write_out, write_str};
 
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::os::raw::{c_char, c_double, c_int};
 
 use crate::model::network::modify::PatternData;
@@ -107,11 +108,7 @@ pub unsafe extern "C" fn EN_getpatternid(
         None => return ErrorCode::UndefinedPattern,
     };
 
-    let c_str = CString::new(pattern_id.as_ref()).unwrap();
-
-    unsafe {
-        std::ptr::copy_nonoverlapping(c_str.as_ptr(), out_id, c_str.as_bytes_with_nul().len());
-    }
+    unsafe { write_str(out_id, &pattern_id, MAX_ID) };
 
     ErrorCode::Ok
 }
@@ -241,23 +238,71 @@ pub unsafe extern "C" fn EN_getpatternlen(
 pub unsafe extern "C" fn EN_getpatternvalue(
     ph: *mut Project,
     index: c_int,
-    time: c_int,
+    period: c_int,
     out_value: *mut c_double,
 ) -> ErrorCode {
     let simulation = get_simulation!(ph);
 
     let index = (index - 1) as usize;
-    let time = (time - 1) as usize;
 
     let pattern = match simulation.network.patterns.get(index) {
         Some(pattern) => pattern,
         None => return ErrorCode::UndefinedPattern,
     };
 
-    let value = pattern.multipliers[time % pattern.multipliers.len()];
+    if period < 1 || period as usize > pattern.multipliers.len() {
+        return ErrorCode::InvalidParameterCode;
+    }
 
-    unsafe { *out_value = value as c_double };
+    let value = pattern.multipliers[(period - 1) as usize];
+
+    unsafe { write_out(out_value, value as c_double) };
     ErrorCode::Ok
+}
+
+/// Sets a time pattern's multiplier for a given period.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_setpatternvalue(
+    ph: *mut Project,
+    index: c_int,
+    period: c_int,
+    value: c_double,
+) -> ErrorCode {
+    let simulation = get_simulation_mut!(ph);
+
+    let index = (index - 1) as usize;
+
+    let pattern = match simulation.network.patterns.get_mut(index) {
+        Some(pattern) => pattern,
+        None => return ErrorCode::UndefinedPattern,
+    };
+
+    if period < 1 || period as usize > pattern.multipliers.len() {
+        return ErrorCode::InvalidParameterCode;
+    }
+
+    pattern.multipliers[(period - 1) as usize] = value;
+
+    ErrorCode::Ok
+}
+
+/// Loads a set of multipliers from a file into a time pattern.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_loadpatternfile(
+    _ph: *mut Project,
+    _filename: *const c_char,
+    _id: *const c_char,
+) -> ErrorCode {
+    // TODO: epanet-rs does not read EPANET's standalone pattern file format.
+    ErrorCode::NotImplemented
 }
 
 ///
@@ -280,6 +325,10 @@ pub unsafe extern "C" fn EN_setpattern(
         Some(pattern) => pattern,
         None => return ErrorCode::UndefinedPattern,
     };
+
+    if count < 1 || multipliers.is_null() {
+        return ErrorCode::InvalidParameterCode;
+    }
 
     pattern.multipliers =
         unsafe { std::slice::from_raw_parts(multipliers, count as usize).to_vec() };

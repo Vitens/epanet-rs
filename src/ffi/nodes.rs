@@ -2,16 +2,19 @@
 
 use crate::ffi::enums::NodeProperty;
 use crate::ffi::error_codes::ErrorCode;
-use crate::ffi::project::{Project, get_simulation, get_simulation_mut};
+use crate::ffi::project::{Project, get_simulation, get_simulation_mut, input_error_code};
+use crate::ffi::util::{MAX_ID, read_str, write_out, write_str};
+use crate::model::control::ControlCondition;
 use crate::model::demand::Demand;
 use crate::model::network::modify::{
-    JunctionData, JunctionUpdate, NodeUpdate, ReservoirData, TankData, TankUpdate,
+    JunctionData, JunctionUpdate, NodeUpdate, ReservoirData, ReservoirUpdate, TankData, TankUpdate,
 };
 use crate::model::node::NodeType;
+use crate::simulation::Simulation;
 
 use crate::ffi::enums::NodeType as ENNodeType;
 
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::os::raw::{c_char, c_double, c_int};
 
 /// # Safety
@@ -121,7 +124,7 @@ pub unsafe extern "C" fn EN_getnodeindex(
 /// # Safety
 ///
 /// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
-/// `out_id` must point to a buffer large enough for the result string including NUL.
+/// `out_id` must point to a buffer of at least `EN_MAXID + 1` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn EN_getnodeid(
     ph: *mut Project,
@@ -138,11 +141,7 @@ pub unsafe extern "C" fn EN_getnodeid(
         None => return ErrorCode::UndefinedNode,
     };
 
-    let c_str = CString::new(node_id).unwrap();
-
-    unsafe {
-        std::ptr::copy_nonoverlapping(c_str.as_ptr(), out_id, c_str.as_bytes_with_nul().len());
-    }
+    unsafe { write_str(out_id, node_id, MAX_ID) };
 
     ErrorCode::Ok
 }
@@ -180,6 +179,8 @@ pub unsafe extern "C" fn EN_setnodeid(
         return ErrorCode::DuplicateId;
     }
 
+    let old_node_id = node.id.clone();
+
     // remove the old node id from the node map
     simulation.network.node_map.remove(&node.id);
 
@@ -194,10 +195,10 @@ pub unsafe extern "C" fn EN_setnodeid(
 
     // update all links that point to the old node id to point to the new node id
     for link in simulation.network.links.iter_mut() {
-        if link.start_node_id == node.id {
+        if link.start_node_id == old_node_id {
             link.start_node_id = new_node_id.into();
         }
-        if link.end_node_id == node.id {
+        if link.end_node_id == old_node_id {
             link.end_node_id = new_node_id.into();
         }
     }
@@ -237,37 +238,24 @@ pub unsafe extern "C" fn EN_getnodetype(
     ErrorCode::Ok
 }
 
-/// Retrieves the property value of a node
-/// # Safety
+/// Reads a single node property, converted to the project's units.
 ///
-/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
-/// `out_value` must be a valid non-null writable pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn EN_getnodevalue(
-    ph: *mut Project,
-    index: c_int,
-    property: c_int,
-    out_value: *mut c_double,
-) -> ErrorCode {
-    let simulation = get_simulation!(ph);
-
-    // EPANET indexes from 1, so we need to subtract 1 from the index
-    let index = (index - 1) as usize;
-
+/// `index` is zero-based. Properties whose underlying feature is unsupported
+/// return [`ErrorCode::NotImplemented`].
+fn node_value(
+    simulation: &Simulation,
+    index: usize,
+    property: NodeProperty,
+) -> Result<f64, ErrorCode> {
     let node = match simulation.network.nodes.get(index) {
         Some(node) => node,
-        None => return ErrorCode::UndefinedNode,
+        None => return Err(ErrorCode::UndefinedNode),
     };
 
     let options = &simulation.network.options;
     let unit_system = &options.unit_system;
     let flow_units = &options.flow_units;
     let pressure_units = &options.pressure_units;
-
-    let property = match NodeProperty::from_repr(property) {
-        Some(property) => property,
-        None => return ErrorCode::InvalidParameterCode,
-    };
 
     let value = match property {
         NodeProperty::Elevation => node.elevation * unit_system.per_feet(),
@@ -283,16 +271,13 @@ pub unsafe extern "C" fn EN_getnodevalue(
             NodeType::Junction(junction) => junction
                 .demands
                 .first()
-                .map(|d| {
-                    d.pattern_index
-                        .map(|index| (index + 1) as f64)
-                        .unwrap_or(123.0)
-                })
-                .unwrap_or(123.0),
+                .and_then(|d| d.pattern_index)
+                .map(|index| (index + 1) as f64)
+                .unwrap_or(0.0),
             NodeType::Reservoir(reservoir) => reservoir
                 .head_pattern_index
                 .map(|index| (index + 1) as f64)
-                .unwrap_or(123.0),
+                .unwrap_or(0.0),
             _ => 0.0,
         },
         NodeProperty::Emitter => match &node.node_type {
@@ -307,24 +292,18 @@ pub unsafe extern "C" fn EN_getnodevalue(
             }
             _ => 0.0,
         },
-        NodeProperty::InitQual => 0.0, // TODO: quality not implemented yet
-        NodeProperty::SourceQual => 0.0, // TODO: quality not implemented yet
-        NodeProperty::SourcePat => 0.0, // TODO: quality not implemented yet
-        NodeProperty::SourceType => 0.0, // TODO: quality not implemented yet
 
         NodeProperty::TankLevel => match &node.node_type {
-            NodeType::Tank(_) => {
-                simulation
-                    .solved_state()
-                    .map_or(0.0, |state| state.heads[index] - node.elevation)
-                    * unit_system.per_feet()
-            }
+            NodeType::Tank(tank) => match simulation.solved_state() {
+                Some(state) => (state.heads[index] - node.elevation) * unit_system.per_feet(),
+                None => tank.initial_level * unit_system.per_feet(),
+            },
             _ => 0.0,
         },
 
         NodeProperty::InitVolume => match &node.node_type {
             NodeType::Tank(tank) => {
-                tank.volume_at_level(tank.initial_level) * options.unit_system.per_cubic_feet()
+                tank.volume_at_level(tank.initial_level) * unit_system.per_cubic_feet()
             }
             _ => 0.0,
         },
@@ -338,36 +317,53 @@ pub unsafe extern "C" fn EN_getnodevalue(
         NodeProperty::Pressure => simulation.solved_state().map_or(0.0, |state| {
             (state.heads[index] - node.elevation) * pressure_units.per_feet()
         }),
-        NodeProperty::Quality => 0.0, // TODO: quality not implemented yet
+        NodeProperty::EmitterFlow => simulation.solved_state().map_or(0.0, |state| {
+            state.emitter_flows[index] * flow_units.per_cfs()
+        }),
+        // the converged demand also carries the emitter outflow
+        NodeProperty::DemandFlow => simulation.solved_state().map_or(0.0, |state| {
+            (state.demands[index] - state.emitter_flows[index]) * flow_units.per_cfs()
+        }),
+
         NodeProperty::TankDiam => match &node.node_type {
-            NodeType::Tank(tank) => tank.diameter * options.unit_system.per_feet(),
+            NodeType::Tank(tank) => tank.diameter * unit_system.per_feet(),
             _ => 0.0,
         },
         NodeProperty::MinVolume => match &node.node_type {
-            NodeType::Tank(tank) => tank.min_volume() * options.unit_system.per_cubic_feet(),
+            NodeType::Tank(tank) => tank.min_volume() * unit_system.per_cubic_feet(),
             _ => 0.0,
         },
         NodeProperty::MaxVolume => match &node.node_type {
-            NodeType::Tank(tank) => tank.max_volume() * options.unit_system.per_cubic_feet(),
+            NodeType::Tank(tank) => tank.max_volume() * unit_system.per_cubic_feet(),
             _ => 0.0,
         },
         NodeProperty::MinLevel => match &node.node_type {
-            NodeType::Tank(tank) => tank.min_level * options.unit_system.per_feet(),
+            NodeType::Tank(tank) => tank.min_level * unit_system.per_feet(),
             _ => 0.0,
         },
         NodeProperty::MaxLevel => match &node.node_type {
-            NodeType::Tank(tank) => tank.max_level * options.unit_system.per_feet(),
+            NodeType::Tank(tank) => tank.max_level * unit_system.per_feet(),
             _ => 0.0,
         },
 
         NodeProperty::TankVolume => match &node.node_type {
             NodeType::Tank(tank) => {
                 if let Some(state) = simulation.solved_state() {
-                    tank.volume_at_head(state.heads[index]) * options.unit_system.per_cubic_feet()
+                    tank.volume_at_head(state.heads[index]) * unit_system.per_cubic_feet()
                 } else {
-                    tank.volume_at_level(tank.initial_level) * options.unit_system.per_cubic_feet()
+                    tank.volume_at_level(tank.initial_level) * unit_system.per_cubic_feet()
                 }
             }
+            _ => 0.0,
+        },
+
+        NodeProperty::VolCurve => match &node.node_type {
+            NodeType::Tank(tank) => tank
+                .volume_curve_id
+                .as_ref()
+                .and_then(|id| simulation.network.curve_map.get(id))
+                .map(|index| (index + 1) as f64)
+                .unwrap_or(0.0),
             _ => 0.0,
         },
 
@@ -375,48 +371,126 @@ pub unsafe extern "C" fn EN_getnodevalue(
             NodeType::Tank(tank) if tank.overflow => 1.0,
             _ => 0.0,
         },
-        NodeProperty::DemandDeficit => 0.0,
-        NodeProperty::NodeInControl => 0.0,
-        NodeProperty::EmitterFlow => 0.0,
-        NodeProperty::LeakageFlow => 0.0,
-        NodeProperty::DemandFlow => 0.0,
-        NodeProperty::FullDemand => 0.0,
-        NodeProperty::SourceMass => 0.0, // TODO: mass not implemented yet
-        _ => -123.0,
+
+        NodeProperty::NodeInControl => {
+            let in_control =
+                simulation
+                    .network
+                    .controls
+                    .iter()
+                    .any(|control| match control.condition {
+                        ControlCondition::HighLevel { tank_index, .. }
+                        | ControlCondition::LowLevel { tank_index, .. } => tank_index == index,
+                        ControlCondition::HighPressure { node_index, .. }
+                        | ControlCondition::LowPressure { node_index, .. } => node_index == index,
+                        _ => false,
+                    });
+            if in_control { 1.0 } else { 0.0 }
+        }
+
+        // TODO: pressure-driven demand deficits are not retained after the
+        // solver converges.
+        NodeProperty::DemandDeficit | NodeProperty::FullDemand => {
+            return Err(ErrorCode::NotImplemented);
+        }
+        // TODO: pipe/node leakage is not modelled.
+        NodeProperty::LeakageFlow => return Err(ErrorCode::NotImplemented),
+        // TODO: water quality analysis (including tank mixing) is not implemented.
+        NodeProperty::InitQual
+        | NodeProperty::SourceQual
+        | NodeProperty::SourcePat
+        | NodeProperty::SourceType
+        | NodeProperty::SourceMass
+        | NodeProperty::Quality
+        | NodeProperty::MixModel
+        | NodeProperty::MixZoneVol
+        | NodeProperty::MixFraction
+        | NodeProperty::TankKBulk => return Err(ErrorCode::NotImplemented),
     };
 
-    unsafe { *out_value = value as c_double };
+    Ok(value)
+}
+
+/// Retrieves the property value of a node
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_value` must be a valid non-null writable pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_getnodevalue(
+    ph: *mut Project,
+    index: c_int,
+    property: c_int,
+    out_value: *mut c_double,
+) -> ErrorCode {
+    let simulation = get_simulation!(ph);
+
+    let property = match NodeProperty::from_repr(property) {
+        Some(property) => property,
+        None => return ErrorCode::InvalidParameterCode,
+    };
+
+    // EPANET indexes from 1, so we need to subtract 1 from the index
+    if index < 1 {
+        return ErrorCode::UndefinedNode;
+    }
+    match node_value(simulation, (index - 1) as usize, property) {
+        Ok(value) => {
+            unsafe { write_out(out_value, value as c_double) };
+            ErrorCode::Ok
+        }
+        Err(code) => code,
+    }
+}
+
+/// Retrieves a property value for all nodes, in index order.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_values` must point to writable memory for `EN_getcount(EN_NODECOUNT)`
+/// `c_double` values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_getnodevalues(
+    ph: *mut Project,
+    property: c_int,
+    out_values: *mut c_double,
+) -> ErrorCode {
+    let simulation = get_simulation!(ph);
+
+    let property = match NodeProperty::from_repr(property) {
+        Some(property) => property,
+        None => return ErrorCode::InvalidParameterCode,
+    };
+
+    if out_values.is_null() {
+        return ErrorCode::InvalidFormat;
+    }
+
+    for index in 0..simulation.network.nodes.len() {
+        match node_value(simulation, index, property) {
+            Ok(value) => unsafe { *out_values.add(index) = value as c_double },
+            Err(code) => return code,
+        }
+    }
 
     ErrorCode::Ok
 }
 
-// Set the property value of a node
-/// # Safety
-///
-/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn EN_setnodevalue(
-    ph: *mut Project,
-    index: c_int,
-    property: c_int,
-    value: c_double,
+/// Writes a single node property, interpreting `value` in the project's units.
+fn set_node_value(
+    simulation: &mut Simulation,
+    index: usize,
+    property: NodeProperty,
+    value: f64,
 ) -> ErrorCode {
-    let simulation = get_simulation_mut!(ph);
-
-    // EPANET indexes from 1, so we need to subtract 1 from the index
-    let index = (index - 1) as usize;
-
     let network = &mut simulation.network;
 
     let node_id = match network.nodes.get(index) {
         Some(node) => node.id.clone(),
         None => return ErrorCode::UndefinedNode,
     };
-
-    let property = match NodeProperty::from_repr(property) {
-        Some(property) => property,
-        None => return ErrorCode::InvalidParameterCode,
-    };
+    let is_reservoir = matches!(network.nodes[index].node_type, NodeType::Reservoir(_));
 
     let result = match property {
         NodeProperty::Elevation => network.update_node(
@@ -440,13 +514,18 @@ pub unsafe extern "C" fn EN_setnodevalue(
                 ..Default::default()
             },
         ),
-        NodeProperty::TankDiam => network.update_tank(
-            &node_id,
-            &TankUpdate {
-                diameter: Some(value),
-                ..Default::default()
-            },
-        ),
+        NodeProperty::TankDiam => {
+            if value <= 0.0 {
+                return ErrorCode::IllegalNodeProperty;
+            }
+            network.update_tank(
+                &node_id,
+                &TankUpdate {
+                    diameter: Some(value),
+                    ..Default::default()
+                },
+            )
+        }
         NodeProperty::MinLevel => network.update_tank(
             &node_id,
             &TankUpdate {
@@ -468,28 +547,249 @@ pub unsafe extern "C" fn EN_setnodevalue(
                 ..Default::default()
             },
         ),
-        NodeProperty::Pattern => {
-            let pattern_id = match network.patterns.get(value as usize - 1) {
-                Some(pattern) => pattern.id.clone(),
-                None => return ErrorCode::UndefinedPattern,
-            };
-            network.update_junction(
+        NodeProperty::MinVolume => {
+            if value < 0.0 {
+                return ErrorCode::IllegalNodeProperty;
+            }
+            network.update_tank(
                 &node_id,
-                &JunctionUpdate {
-                    pattern: Some(Some(pattern_id)),
+                &TankUpdate {
+                    min_volume: Some(value),
                     ..Default::default()
                 },
             )
         }
-        // TODO: implement missing properties
+        NodeProperty::CanOverflow => network.update_tank(
+            &node_id,
+            &TankUpdate {
+                overflow: Some(value != 0.0),
+                ..Default::default()
+            },
+        ),
+        NodeProperty::Pattern => {
+            // a zero index clears the node's pattern
+            let pattern_id = if value < 1.0 {
+                None
+            } else {
+                match network.patterns.get(value as usize - 1) {
+                    Some(pattern) => Some(pattern.id.clone()),
+                    None => return ErrorCode::UndefinedPattern,
+                }
+            };
+            if is_reservoir {
+                network.update_reservoir(
+                    &node_id,
+                    &ReservoirUpdate {
+                        head_pattern: Some(pattern_id),
+                        ..Default::default()
+                    },
+                )
+            } else {
+                network.update_junction(
+                    &node_id,
+                    &JunctionUpdate {
+                        pattern: Some(pattern_id),
+                        ..Default::default()
+                    },
+                )
+            }
+        }
+        // TODO: tank volume curves, water quality sources and tank mixing are
+        // not implemented.
+        NodeProperty::VolCurve
+        | NodeProperty::InitQual
+        | NodeProperty::SourceQual
+        | NodeProperty::SourcePat
+        | NodeProperty::SourceType
+        | NodeProperty::SourceMass
+        | NodeProperty::MixModel
+        | NodeProperty::MixFraction
+        | NodeProperty::TankKBulk => return ErrorCode::NotImplemented,
+        // computed results cannot be assigned
         _ => return ErrorCode::InvalidParameterCode,
     };
 
-    if result.is_err() {
-        return ErrorCode::IllegalNodeProperty;
+    match result {
+        Ok(_) => ErrorCode::Ok,
+        Err(error) => match input_error_code(&error) {
+            ErrorCode::UndefinedNode => ErrorCode::UndefinedNode,
+            ErrorCode::NotATank => ErrorCode::NotATank,
+            _ => ErrorCode::IllegalNodeProperty,
+        },
+    }
+}
+
+// Set the property value of a node
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_setnodevalue(
+    ph: *mut Project,
+    index: c_int,
+    property: c_int,
+    value: c_double,
+) -> ErrorCode {
+    let simulation = get_simulation_mut!(ph);
+
+    let property = match NodeProperty::from_repr(property) {
+        Some(property) => property,
+        None => return ErrorCode::InvalidParameterCode,
+    };
+
+    if index < 1 {
+        return ErrorCode::UndefinedNode;
+    }
+
+    set_node_value(simulation, (index - 1) as usize, property, value)
+}
+
+/// Sets a property value for all nodes, in index order.
+///
+/// On failure the 1-based index of the offending node is written to
+/// `out_bad_index`.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `values` must point to `EN_getcount(EN_NODECOUNT)` readable `c_double` values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_setnodevalues(
+    ph: *mut Project,
+    property: c_int,
+    values: *const c_double,
+    out_bad_index: *mut c_int,
+) -> ErrorCode {
+    let simulation = get_simulation_mut!(ph);
+
+    let property = match NodeProperty::from_repr(property) {
+        Some(property) => property,
+        None => return ErrorCode::InvalidParameterCode,
+    };
+
+    if values.is_null() {
+        return ErrorCode::InvalidFormat;
+    }
+
+    for index in 0..simulation.network.nodes.len() {
+        let value = unsafe { *values.add(index) };
+        let code = set_node_value(simulation, index, property, value);
+        if code != ErrorCode::Ok {
+            unsafe { write_out(out_bad_index, (index + 1) as c_int) };
+            return code;
+        }
     }
 
     ErrorCode::Ok
+}
+
+/// Sets a junction's elevation, primary base demand and demand pattern in one call.
+///
+/// An empty or null `demand_pattern` clears the junction's demand pattern.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `demand_pattern` must be null or a valid pointer to a NUL-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_setjuncdata(
+    ph: *mut Project,
+    index: c_int,
+    elevation: c_double,
+    demand: c_double,
+    demand_pattern: *const c_char,
+) -> ErrorCode {
+    let simulation = get_simulation_mut!(ph);
+
+    let node_id = match simulation.network.nodes.get((index - 1) as usize) {
+        Some(node) => node.id.clone(),
+        None => return ErrorCode::UndefinedNode,
+    };
+
+    let pattern = match unsafe { read_str(demand_pattern) } {
+        Some(pattern) if !pattern.is_empty() => {
+            if !simulation.network.pattern_map.contains_key(pattern) {
+                return ErrorCode::UndefinedPattern;
+            }
+            Some(pattern.into())
+        }
+        _ => None,
+    };
+
+    match simulation.network.update_junction(
+        &node_id,
+        &JunctionUpdate {
+            elevation: Some(elevation),
+            basedemand: Some(demand),
+            pattern: Some(pattern),
+            ..Default::default()
+        },
+    ) {
+        Ok(_) => ErrorCode::Ok,
+        Err(_) => ErrorCode::IllegalNodeProperty,
+    }
+}
+
+/// Sets a group of properties for a tank node.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `volume_curve` must be null or a valid pointer to a NUL-terminated C string.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn EN_settankdata(
+    ph: *mut Project,
+    index: c_int,
+    elevation: c_double,
+    initial_level: c_double,
+    min_level: c_double,
+    max_level: c_double,
+    diameter: c_double,
+    min_volume: c_double,
+    volume_curve: *const c_char,
+) -> ErrorCode {
+    let simulation = get_simulation_mut!(ph);
+
+    let node_id = match simulation.network.nodes.get((index - 1) as usize) {
+        Some(node) => node.id.clone(),
+        None => return ErrorCode::UndefinedNode,
+    };
+
+    if let Some(curve) = unsafe { read_str(volume_curve) }
+        && !curve.is_empty()
+    {
+        // TODO: tanks with a volume curve are not supported by the solver.
+        return ErrorCode::NotImplemented;
+    }
+
+    if min_level < 0.0
+        || min_level > initial_level
+        || max_level < initial_level
+        || diameter < 0.0
+        || min_volume < 0.0
+    {
+        return ErrorCode::IllegalNodeProperty;
+    }
+
+    match simulation.network.update_tank(
+        &node_id,
+        &TankUpdate {
+            elevation: Some(elevation),
+            initial_level: Some(initial_level),
+            min_level: Some(min_level),
+            max_level: Some(max_level),
+            diameter: Some(diameter),
+            min_volume: Some(min_volume),
+            ..Default::default()
+        },
+    ) {
+        Ok(_) => ErrorCode::Ok,
+        Err(error) => match input_error_code(&error) {
+            ErrorCode::NotATank => ErrorCode::NotATank,
+            _ => ErrorCode::IllegalNodeProperty,
+        },
+    }
 }
 
 /// # Safety

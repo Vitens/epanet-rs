@@ -1,12 +1,16 @@
-//! FFI reporting and count functions: `EN_getcount`, `EN_getnodetype`, etc.
+//! FFI reporting, counting and result-index functions.
+//!
+//! `epanet-rs` does not produce EPANET's textual report file, so the functions
+//! that write, format or reset that report are marked as not implemented.
 
-use crate::ffi::enums::CountType;
+use crate::ffi::enums::{CountType, ObjectType};
 use crate::ffi::error_codes::ErrorCode;
 use crate::ffi::project::{Project, get_simulation};
+use crate::ffi::util::write_out;
 
 use crate::model::node::NodeType;
 
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_double, c_int, c_long};
 
 /// Retrieves the number of objects of a given type in a project.
 ///
@@ -38,16 +42,16 @@ pub unsafe extern "C" fn EN_getcount(
         CountType::PatCount => net.patterns.len(),
         CountType::CurveCount => net.curves.len(),
         CountType::ControlCount => net.controls.len(),
-        CountType::RuleCount => 0, // TODO: implement rule counting
+        CountType::RuleCount => net.rules.len(),
     };
 
-    unsafe { *out_count = count as c_int };
+    unsafe { write_out(out_count, count as c_int) };
     ErrorCode::Ok
 }
 
 /// Retrieves the text of an error message given its error code.
 ///
-/// Writes up to `maxLen` bytes (including the null terminator) into `errmsg`.
+/// Writes up to `max_len` bytes (including the null terminator) into `errmsg`.
 ///
 /// # Safety
 ///
@@ -67,11 +71,150 @@ pub unsafe extern "C" fn EN_geterror(
         None => format!("Unknown error code: {}", errcode),
     };
 
-    let buf = unsafe { std::slice::from_raw_parts_mut(errmsg as *mut u8, max_len as usize) };
-    let bytes = msg.as_bytes();
-    let copy_len = bytes.len().min(buf.len() - 1);
-    buf[..copy_len].copy_from_slice(&bytes[..copy_len]);
-    buf[copy_len] = 0;
+    unsafe { crate::ffi::util::write_str(errmsg, &msg, max_len as usize - 1) };
 
     ErrorCode::Ok
+}
+
+/// Retrieves the order in which a node or link appears in the binary output file.
+///
+/// `epanet-rs` keeps results for every node and link, so an object's result
+/// index is identical to its object index.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+/// `out_value` must be null or a valid writable pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_getresultindex(
+    ph: *mut Project,
+    object_type: c_int,
+    index: c_int,
+    out_value: *mut c_int,
+) -> ErrorCode {
+    let simulation = get_simulation!(ph);
+
+    let count = match ObjectType::from_repr(object_type) {
+        Some(ObjectType::Node) => simulation.network.nodes.len(),
+        Some(ObjectType::Link) => simulation.network.links.len(),
+        _ => return ErrorCode::InvalidParameterCode,
+    };
+
+    if index < 1 || index as usize > count {
+        return match ObjectType::from_repr(object_type) {
+            Some(ObjectType::Node) => ErrorCode::UndefinedNode,
+            _ => ErrorCode::UndefinedLink,
+        };
+    }
+
+    unsafe { write_out(out_value, index) };
+    ErrorCode::Ok
+}
+
+/// Retrieves a particular simulation statistic.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_getstatistic(
+    _ph: *mut Project,
+    _statistic_type: c_int,
+    _out_value: *mut c_double,
+) -> ErrorCode {
+    // TODO: the solver discards its per-step convergence statistics.
+    ErrorCode::NotImplemented
+}
+
+/// Retrieves the time until the next hydraulic event occurs.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_timetonextevent(
+    _ph: *mut Project,
+    _out_event_type: *mut c_int,
+    _out_duration: *mut c_long,
+    _out_element_index: *mut c_int,
+) -> ErrorCode {
+    // TODO: the simulation driver does not expose which event ends a time step.
+    ErrorCode::NotImplemented
+}
+
+/// Writes a line of text to a project's report file.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_writeline(_ph: *mut Project, _line: *const c_char) -> ErrorCode {
+    // TODO: epanet-rs does not write a report file.
+    ErrorCode::NotImplemented
+}
+
+/// Writes simulation results in a tabular format to a project's report file.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_report(_ph: *mut Project) -> ErrorCode {
+    // TODO: epanet-rs does not write a report file.
+    ErrorCode::NotImplemented
+}
+
+/// Copies the current contents of a project's report file to another file.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_copyreport(_ph: *mut Project, _filename: *const c_char) -> ErrorCode {
+    // TODO: epanet-rs does not write a report file.
+    ErrorCode::NotImplemented
+}
+
+/// Clears the contents of a project's report file.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_clearreport(_ph: *mut Project) -> ErrorCode {
+    // TODO: epanet-rs does not write a report file.
+    ErrorCode::NotImplemented
+}
+
+/// Resets a project's report options to their default values.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_resetreport(_ph: *mut Project) -> ErrorCode {
+    // TODO: epanet-rs does not write a report file.
+    ErrorCode::NotImplemented
+}
+
+/// Processes a reporting format command.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_setreport(_ph: *mut Project, _format: *const c_char) -> ErrorCode {
+    // TODO: epanet-rs does not write a report file.
+    ErrorCode::NotImplemented
+}
+
+/// Sets the level of hydraulic status reporting.
+///
+/// # Safety
+///
+/// `ph` must be a valid non-null project handle returned by [`EN_createproject`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn EN_setstatusreport(_ph: *mut Project, _level: c_int) -> ErrorCode {
+    // TODO: epanet-rs does not write a report file.
+    ErrorCode::NotImplemented
 }

@@ -12,6 +12,11 @@ use thiserror::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error, FromRepr)]
 #[repr(i32)]
 pub enum ErrorCode {
+    /// Not part of the EPANET numbering: returned by toolkit functions whose
+    /// underlying feature is not (yet) supported by `epanet-rs`.
+    #[error("Function not implemented")]
+    NotImplemented = -2,
+
     #[error("Invalid Project Handle")]
     InvalidHandle = -1,
 
