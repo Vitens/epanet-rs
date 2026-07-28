@@ -158,6 +158,37 @@ fn test_disabled_node_closes_check_valve_branch() {
     assert_eq!(result.flows[last][link("I")], 0.0, "check valve I flow");
 }
 
+/// A check valve in a zero-flow network must not introduce an artificial head gain.
+#[test]
+fn test_zero_flow_check_valve_head() {
+    let mut simulation =
+        Simulation::from_file("tests/zeroflow-cv.inp").expect("Failed to create simulation");
+    let result = simulation
+        .solve_hydraulics(false)
+        .expect("Failed to solve hydraulics");
+
+    let expected_heads = vec![
+        ("ajee1o-in", 5.0),
+        ("ajee1o-out", 5.0),
+        ("itq07v-inout", 5.0),
+        ("y1mt10-in", 5.0),
+        ("itq07v-reservoir", 5.0),
+    ];
+    let expected_flows = vec![
+        ("itq07v-link", 0.0),
+        ("itq07v(inout)<->ajee1o(out)", 0.0),
+        ("ajee1o(in)<->y1mt10(in)", 0.0),
+        ("ajee1o", 0.0),
+    ];
+
+    verify_heads_and_flows(
+        &simulation.network,
+        &result,
+        &expected_heads,
+        &expected_flows,
+    );
+}
+
 /// Test solving valve.inp and verify exact head and flow values
 #[test]
 fn test_solve_valve_network() {

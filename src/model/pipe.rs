@@ -137,7 +137,8 @@ impl Pipe {
     fn add_cv_head_loss(q: Cfs, g_inv: f64, y: f64) -> (f64, f64) {
         let hgrad = 1.0 / g_inv;
         let hloss = y * hgrad;
-        let a = BIG_VALUE * q;
+        // add a small offset to the flow to prevent head errors for zero flow networks
+        let a = BIG_VALUE * (q + Q_ZERO);
         let b = (a * a + CV_HEAD_EPSILON).sqrt();
         let hloss = hloss + (a - b) * 0.5;
         let hgrad = hgrad + BIG_VALUE * (1.0 - a / b) * 0.5;

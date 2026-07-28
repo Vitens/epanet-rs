@@ -1,0 +1,86 @@
+
+[JUNCTIONS]
+;ID        Elev         Demand       Pattern      
+;-------------------------------------------------
+ajee1o-in  0            0            
+ajee1o-out 0            0            
+itq07v-inout 0            0            
+y1mt10-in  0            0            
+
+[RESERVOIRS]
+;ID        Head            Pattern      
+;---------------------------------------
+itq07v-reservoir 5            
+
+[TANKS]
+;ID        Elevation       InitLevel       MinLevel        MaxLevel        Diameter        MinVol          VolCurve        Overflow     
+;---------------------------------------------------------------------------------------------------------------------------------------
+
+[PIPES]
+;ID        Node1        Node2        Length       Diameter     Roughness    MinorLoss    Status       
+;-----------------------------------------------------------------------------------------------------
+itq07v-link itq07v-reservoir itq07v-inout 0.1          999.9999999999999 0.001        0            CV          
+itq07v(inout)<->ajee1o(out) itq07v-inout ajee1o-out   0.9999999999999999 499.99999999999994 0.01         0                        
+ajee1o(in)<->y1mt10(in) ajee1o-in    y1mt10-in    0.9999999999999999 499.99999999999994 0.01         0                        
+
+[PUMPS]
+;ID        Node1        Node2        Parameters   
+;-------------------------------------------------
+
+[VALVES]
+;ID        Node1        Node2        Diameter     Type         Setting      MinorLoss    PCV Curve    
+;-----------------------------------------------------------------------------------------------------
+ajee1o     ajee1o-in    ajee1o-out   100          PCV          100          0.4                      
+
+[DEMANDS]
+;Junction  Demand       Pattern      
+;------------------------------------
+itq07v-inout 0                        ;
+
+[EMITTERS]
+;Junction  Coefficient  
+;-----------------------
+
+[CURVES]
+;ID        X-Value      Y-Value      
+;------------------------------------
+
+[PATTERNS]
+;ID        Multipliers  
+;-----------------------
+
+[CONTROLS]
+
+[TIMES]
+DURATION 00:00
+HYDRAULIC TIMESTEP 01:00
+PATTERN TIMESTEP 01:00
+REPORT TIMESTEP 01:00
+PATTERN START 00:00
+START CLOCKTIME 00:00
+
+[OPTIONS]
+Units CMH
+Headloss D-W
+DEMAND MODEL PDA
+Specific Gravity 1
+Viscosity 1
+Trials 200
+Accuracy 0.001
+Pattern 1
+Demand Multiplier 1
+Emitter Exponent 2
+
+[COORDINATES]
+;ID        X            Y            
+;------------------------------------
+ajee1o-in  5867.5       -5469       
+ajee1o-out 5867.5       -5514       
+itq07v-inout 5690         -5564       
+itq07v-reservoir 5750         -5564       
+y1mt10-in  5980         -5419       
+
+[VERTICES]
+;Link      X            Y            
+;------------------------------------
+
