@@ -334,13 +334,4 @@ impl Simulation {
         .min()
         .unwrap()
     }
-
-    /// get the solved state if it is available, otherwise return None
-    pub(crate) fn solved_state(&self) -> Option<&SolverState> {
-        if self.solved {
-            self.state.as_ref()
-        } else {
-            None
-        }
-    }
 }
