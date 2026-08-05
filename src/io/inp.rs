@@ -431,9 +431,14 @@ pub fn write_inp(network: &Network, mut writer: BufWriter<File>) -> Result<(), S
         &mut buffer,
         &format!("Demand Multiplier {}", network.options.demand_multiplier),
     );
+    // Internally `emitter_exponent` stores 1/γ (head-loss form); the INP
+    // option uses γ itself (discharge form, typically 0.5).
     write_line(
         &mut buffer,
-        &format!("Emitter Exponent {}", network.options.emitter_exponent),
+        &format!(
+            "Emitter Exponent {}",
+            1.0 / network.options.emitter_exponent
+        ),
     );
 
     // write coordinates

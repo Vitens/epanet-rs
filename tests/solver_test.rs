@@ -425,6 +425,58 @@ fn test_solve_pcv_valve_minor_loss_si_units() {
     );
 }
 
+/// Emitter exponent is stored internally as 1/γ; INP write must emit γ so a
+/// save/reload round-trip preserves both the exponent and coefficients.
+#[test]
+fn test_emitter_inp_roundtrip() {
+    let network = epanet_rs::model::network::Network::from_file("tests/emitter.inp")
+        .expect("Failed to load emitter.inp");
+
+    let original_exponent = network.options.emitter_exponent;
+    let original_coeffs: Vec<(Box<str>, f64)> = network
+        .nodes
+        .iter()
+        .filter_map(|node| match &node.node_type {
+            epanet_rs::model::node::NodeType::Junction(j) if j.emitter_coefficient > 0.0 => {
+                Some((node.id.clone(), j.emitter_coefficient))
+            }
+            _ => None,
+        })
+        .collect();
+
+    let dir = std::env::temp_dir();
+    let path = dir.join("epanet-rs-emitter-roundtrip.inp");
+    network
+        .save_network(path.to_str().unwrap())
+        .expect("Failed to save network");
+
+    let reloaded = epanet_rs::model::network::Network::from_file(path.to_str().unwrap())
+        .expect("Failed to reload saved network");
+
+    assert!(
+        (reloaded.options.emitter_exponent - original_exponent).abs() < 1e-12,
+        "Emitter exponent changed after round-trip: original {}, reloaded {}",
+        original_exponent,
+        reloaded.options.emitter_exponent
+    );
+
+    for (id, coeff) in original_coeffs {
+        let idx = *reloaded.node_map.get(&id).expect("node missing after reload");
+        let epanet_rs::model::node::NodeType::Junction(j) = &reloaded.nodes[idx].node_type else {
+            panic!("node {} is not a junction", id);
+        };
+        assert!(
+            (j.emitter_coefficient - coeff).abs() < 1e-9,
+            "Emitter coefficient for {} changed: original {}, reloaded {}",
+            id,
+            coeff,
+            j.emitter_coefficient
+        );
+    }
+
+    let _ = std::fs::remove_file(&path);
+}
+
 #[test]
 // Bug with PCV valve losing setting when initial status is changed
 fn test_solve_pcv_valve_minor_loss_si_units_status_change() {

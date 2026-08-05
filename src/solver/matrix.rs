@@ -67,6 +67,11 @@ pub fn build_sparsity_pattern(
             triplets.push(Triplet::new(row, col, 0.0));
         }
     }
+
+    for u in node_to_unknown.iter().flatten() {
+        triplets.push(Triplet::new(*u, *u, 0.0));
+    }
+    
     let sparsity_matrix =
         SparseColMat::try_new_from_triplets(n_unknowns, n_unknowns, &triplets).unwrap();
 
