@@ -50,6 +50,11 @@ pub unsafe extern "C" fn EN_getcurveindex(
     id: *const c_char,
     out_index: *mut c_int,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_index.is_null() {
+        unsafe { *out_index = 0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let c_str = unsafe { CStr::from_ptr(id) };
@@ -157,6 +162,11 @@ pub unsafe extern "C" fn EN_getcurvelen(
     index: c_int,
     out_count: *mut c_int,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_count.is_null() {
+        unsafe { *out_count = 0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     // EPANET indexes from 1, so we need to subtract 1 from the index
@@ -188,6 +198,15 @@ pub unsafe extern "C" fn EN_getcurvevalue(
     out_x: *mut c_double,
     out_y: *mut c_double,
 ) -> ErrorCode {
+    // Initialize output parameters to match C API behavior
+    if !out_x.is_null() {
+        unsafe { *out_x = 0.0 };
+    }
+
+    if !out_y.is_null() {
+        unsafe { *out_y = 0.0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     // EPANET indexes from 1, so we need to subtract 1 from the index
