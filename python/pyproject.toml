@@ -1,0 +1,40 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "epanet-rs"
+version = "0.2.2"
+description = "A fast, modern re-implementation of the EPANET2 hydraulic solver, written in Rust."
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+requires-python = ">=3.9"
+authors = [{ name = "Abel Heinsbroek" }]
+keywords = ["epanet", "hydraulic", "water", "solver", "simulation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Scientific/Engineering",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.urls]
+Homepage = "https://github.com/vitens/epanet-rs"
+Repository = "https://github.com/vitens/epanet-rs"
+Documentation = "https://github.com/vitens/epanet-rs"
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+python-source = "python"
+module-name = "epanet_rs"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
