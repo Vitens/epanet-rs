@@ -1,0 +1,16 @@
+[package]
+name = "epanet-rs-python"
+version = "0.2.2"
+edition = "2024"
+rust-version = "1.85"
+description = "Python bindings for epanet-rs hydraulic solver"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "epanet_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+epanet = { path = "..", package = "epanet-rs" }
+pyo3 = { version = "0.24", features = ["extension-module", "abi3-py39"] }

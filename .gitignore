@@ -1,3 +1,9 @@
 /target
+/python/target
 .DS_Store
 .vscode
+__pycache__/
+python/python/epanet_rs/*.so
+python/python/epanet_rs/*.pyd
+python/.venv/
+python/uv.lock
