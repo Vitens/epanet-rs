@@ -1,0 +1,37 @@
+[package]
+name = "gui-app"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "EPANET network editor: eframe/egui desktop application."
+publish = false
+
+[[bin]]
+name = "epanet-gui"
+path = "src/main.rs"
+
+[features]
+default = []
+# HTTP(S) `.pmtiles` basemap sources, on top of the always-available local
+# file source. Off by default: `reqwest`'s rustls TLS stack pulls in a
+# fairly heavy dependency subtree that isn't needed for the primary
+# (local/offline `.pmtiles`) use case - see the plan's assumption 0. Build
+# with `--features http-basemap` to enable "Load basemap from URL...".
+http-basemap = ["pmtiles/http-async", "pmtiles/reqwest-rustls"]
+
+[dependencies]
+gui-core = { path = "../gui-core" }
+epanet-rs = { path = "../.." }
+eframe = "0.36"
+egui = "0.36"
+rfd = "0.17"
+pmtiles = { version = "0.23", default-features = false, features = [
+    "mmap-async-tokio",
+    "tilejson",
+] }
+mvt-reader = "2.3"
+geo-types = { version = "0.7", default-features = false }
+tokio = { version = "1", default-features = false, features = ["rt"] }
+
+[profile.release]
+opt-level = 3

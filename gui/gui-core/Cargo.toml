@@ -1,0 +1,11 @@
+[package]
+name = "gui-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "UI-framework-agnostic application state and reducer for the EPANET network editor GUI."
+publish = false
+
+[dependencies]
+epanet-rs = { path = "../.." }
+hashbrown = "0.16"

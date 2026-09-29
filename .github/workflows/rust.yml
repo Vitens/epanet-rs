@@ -26,3 +26,26 @@ jobs:
         run: cargo build  --locked --verbose
       - name: Run tests
         run: cargo test --locked --verbose
+
+  # gui/ is a separate, independent Cargo workspace (path-dependency on the
+  # root package, same convention as python/) so it doesn't affect the jobs
+  # above. gui-core has no UI-framework dependency, so its tests run
+  # headless on every platform; gui-app additionally needs native
+  # windowing/GPU libraries to *link*, so it's build-only here (no windowed
+  # smoke test) per the plan's CI notes.
+  gui:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install native GUI build dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libxcb-dev libx11-dev libgl1-mesa-dev
+      - name: Test gui-core (framework-agnostic reducer/state)
+        run: cargo test --manifest-path gui/gui-core/Cargo.toml --verbose
+      - name: Build gui-app
+        run: cargo build --manifest-path gui/gui-app/Cargo.toml --verbose
