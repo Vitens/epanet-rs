@@ -1,17 +1,5 @@
-//! The central canvas: renders the network with an immediate-mode
-//! `egui::Painter` and turns pointer gestures into `Action`s.
-//!
-//! Deviation from the original plan: this uses egui's own 2D painter rather
-//! than a custom `wgpu::PaintCallback` pipeline. That avoids pulling in a
-//! second rendering stack (shaders, instance buffers, a pmtiles/MVT basemap
-//! decoder) for a first working editor; the `SpatialIndex` in `gui-core`
-//! still does the frustum-culling and hit-testing work described in the
-//! plan, so swapping in a `wgpu` layer later only touches this file.
-
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 
-use epanet_rs::model::link::LinkType;
-use epanet_rs::model::node::NodeType;
 use gui_core::AppState;
 use gui_core::action::{Action, NewLinkKind, Tool};
 use gui_core::camera::Bounds;
@@ -26,6 +14,9 @@ pub struct Interaction {
     /// True while a universal pan gesture (spacebar or middle-mouse drag) is
     /// active, regardless of the currently selected `Tool`.
     panning: bool,
+    /// `(camera.center.x, camera.center.y, camera.zoom)` as of the last
+    /// frame - see `camera_is_settled` below.
+    last_camera: Option<(f64, f64, f64)>,
 }
 
 impl Interaction {
@@ -38,20 +29,35 @@ impl Interaction {
         self.connecting_from = None;
         self.box_select_start = None;
     }
+
+    /// Returns whether `camera` is unchanged from the last call (i.e. the
+    /// view has "settled"), updating the stored value either way.
+    ///
+    /// Used to skip the direction-arrow/value-label overlay while the
+    /// camera is actively panning or zooming: that overlay is drawn with
+    /// `egui::Painter` (unlike node/link shapes, which Galileo now owns -
+    /// see `network_layers.rs`), so it CPU-tessellates from scratch on
+    /// every call - up to `MAX_RENDERED_SHAPES` link arrows, every single
+    /// frame. A camera-only change (pan/zoom) doesn't touch any feature
+    /// data, so skipping this overlay for those frames costs nothing
+    /// visually except the arrows/labels themselves blinking out for the
+    /// gesture's duration and reappearing once it settles - a standard
+    /// "defer expensive decoration during interaction" tradeoff, not a
+    /// correctness issue.
+    fn camera_is_settled(&mut self, camera: &gui_core::camera::Camera) -> bool {
+        let key = (camera.center.0, camera.center.1, camera.zoom);
+        let settled = self.last_camera == Some(key);
+        self.last_camera = Some(key);
+        settled
+    }
 }
 
 const HIT_RADIUS_PX: f32 = 10.0;
 const NODE_RADIUS_PX: f32 = 4.5;
-/// Screen-space length below which a link is too short to bother drawing a
-/// direction arrowhead on (keeps dense/zoomed-out networks uncluttered).
-const MIN_ARROW_SEGMENT_PX: f32 = 16.0;
-/// Target on-screen spacing between repeated direction arrows along a
-/// single pipe, so long pipes show several arrows (clearer "which way does
-/// this flow" at a glance) instead of just one in the middle.
+/// Offset used to place a value label off to the side of a pipe's
+/// direction arrow (drawn by Galileo - see `network_layers.rs`), so the
+/// two don't sit directly on top of each other.
 const ARROW_SPACING_PX: f32 = 46.0;
-/// Keep arrows this far from a pipe's endpoints so they don't crowd the
-/// node symbols there.
-const ARROW_END_MARGIN_PX: f32 = 14.0;
 /// Simulation-result value labels ("the color alone is not clear at all")
 /// only draw while at most this many nodes+links are on screen at once;
 /// past that, text would overlap into an illegible smear and tank the frame
@@ -74,6 +80,8 @@ pub fn draw_canvas(
     ui: &mut egui::Ui,
     state: &mut AppState,
     interaction: &mut Interaction,
+    instanced: &mut Option<crate::instanced_renderer::InstancedRenderer>,
+    galileo_target: &mut Option<crate::galileo_target::GalileoTarget>,
     actions: &mut Vec<Action>,
 ) {
     let rect = ui.available_rect_before_wrap();
@@ -154,6 +162,83 @@ pub fn draw_canvas(
         }
     }
 
+    // --- apply this frame's camera-changing actions immediately ---
+    // `app.rs`'s "collect then apply" pattern (see its own doc comment)
+    // is correct for domain edits - it needs every action gesture-handled
+    // above to be visible together, after layout, exactly once. But for a
+    // *continuous* drag/scroll gesture like pan/zoom, deferring the
+    // resulting `Action::PanBy`/`ZoomAt` to that end-of-frame batch means
+    // this frame's rendering below (which already captured `camera`,
+    // above) draws with *last* frame's camera - the on-screen network
+    // would always trail the mouse by one frame, worse under any
+    // additional GPU/present-queue latency on top. Pulled out and applied
+    // right here instead, then `camera` is re-read fresh before anything
+    // below uses it for drawing.
+    //
+    // Not undo-tracked either way (see `gui_core::state::AppState`), so
+    // applying immediately - rather than through the batched path domain
+    // edits go through - has no correctness/undo implications. The
+    // gesture handling *above* this point (hit-testing for select/connect/
+    // box-select) correctly still used the *pre*-pan camera: a click or
+    // drag that started this frame should hit-test against what was
+    // actually on screen at the top of the frame, not a camera that
+    // hasn't been drawn yet.
+    let mut remaining_actions = Vec::with_capacity(actions.len());
+    for action in actions.drain(..) {
+        match action {
+            Action::PanBy { .. } | Action::ZoomAt { .. } | Action::CenterOn { .. } => {
+                state.apply(action);
+            }
+            other => remaining_actions.push(other),
+        }
+    }
+    *actions = remaining_actions;
+    let camera = state.camera;
+
+    // --- basemap backdrop (currently empty - see `galileo_target.rs`) ---
+    // NOT painted right now, on purpose: `target.paint`'s render pass
+    // clears its texture (to opaque white, as it happens) even with zero
+    // layers, and blitting that over the background fill above replaced
+    // it wholesale - the reported white canvas background (and the
+    // "selected" white highlight becoming invisible against it) traced
+    // back to exactly this, not to anything in `instanced_renderer.rs`.
+    // Skipping the paint call - not just skipping *adding* a basemap
+    // layer - avoids drawing an empty backdrop that actively overwrites
+    // the real background with nothing. `target`'s `Map`/view setup
+    // stays wired below (harmless, and camera-synced) so the only change
+    // needed when a real `.pmtiles` layer exists is re-enabling this
+    // block, not rebuilding the integration.
+    if let Some(target) = galileo_target.as_mut() {
+        let map_center = match state.geo_transform.as_ref() {
+            Some(transform) => transform.to_mercator(camera.center),
+            None => camera.center,
+        };
+        let resolution = 1.0 / camera.zoom.max(1e-9);
+        let view = galileo::MapView::new_projected_with_crs(
+            &galileo_types::cartesian::Point2::new(map_center.0, map_center.1),
+            resolution,
+            galileo_types::geo::Crs::EPSG3857,
+        )
+        .with_size(galileo_types::cartesian::Size::new(
+            rect.width().max(1.0) as f64,
+            rect.height().max(1.0) as f64,
+        ));
+        target.map().set_view(view);
+    }
+
+    // --- network topology: true GPU instancing (see `instanced_renderer.rs`) ---
+    // Two draw calls total, regardless of node/link count - one instanced
+    // draw for node symbols + direction arrows, one for links. `sync` is
+    // cheap when nothing changed; only the changed instances' bytes get
+    // re-uploaded (`queue.write_buffer`), not a CPU re-tessellation pass.
+    if let Some(renderer) = instanced.as_mut() {
+        renderer.sync(state);
+        renderer.set_camera(camera.center, camera.zoom, (rect.width(), rect.height()));
+        for shape in renderer.paint_shape(rect) {
+            painter.add(shape);
+        }
+    }
+
     // --- render ---
     let visible_bounds = camera.visible_bounds();
     let network = state.network();
@@ -166,6 +251,11 @@ pub fn draw_canvas(
     // and, if it's over budget, only draw an evenly spaced subset of the
     // visible nodes/links rather than everything - keeps the per-frame
     // vertex buffer bounded no matter how large/zoomed-out the network is.
+    //
+    // This budget now only bounds the *overlay* pass below (direction
+    // arrows + value labels via `egui::Painter`) - node/link shapes and
+    // colors themselves are drawn by the Galileo layer above, which has no
+    // decimation cutoff (see `network_layers.rs`).
     let total_link_segments: usize = visible_links
         .iter()
         .filter_map(|&i| spatial.link_line(i))
@@ -183,47 +273,38 @@ pub fn draw_canvas(
     let show_value_labels =
         results.enabled && visible_links.len() + visible_nodes.len() <= MAX_LABELED_ENTITIES;
 
-    for (pos, &link_index) in visible_links.iter().enumerate() {
-        if pos % decimation_stride != 0 {
-            continue;
-        }
-        let Some(line) = spatial.link_line(link_index) else {
-            continue;
-        };
-        let link = &network.links[link_index];
-        let selected = state.selection.contains_link(&link.id);
-        let color = results
-            .link_color(link_index)
-            .unwrap_or_else(|| link_color(link));
-        let stroke = Stroke::new(if selected { 3.0 } else { 1.6 }, color);
-        // Screen-space points of the *actual* polyline (endpoints plus any
-        // display vertices) - reused below so the selection highlight and
-        // the arrow/label placement follow the real pipe route instead of
-        // cutting a straight chord across any bends.
-        let screen_points: Vec<Pos2> = line.iter().map(|&p| to_screen(p)).collect();
-        for w in screen_points.windows(2) {
-            painter.line_segment([w[0], w[1]], stroke);
-        }
-        if selected {
-            for w in screen_points.windows(2) {
-                painter.line_segment([w[0], w[1]], Stroke::new(1.0, Color32::WHITE));
+    // Direction arrows + value labels are drawn with `egui::Painter`
+    // (unlike node/link shapes, which Galileo owns - see
+    // `network_layers.rs`), so - unlike Galileo's own redraw-skip in
+    // `galileo_target.rs` - they CPU-tessellate from scratch on every call
+    // regardless of whether anything changed. Skip this overlay entirely
+    // while the camera is actively panning/zooming (see
+    // `Interaction::camera_is_settled`'s doc comment): a pan/zoom touches
+    // no feature data, so there's nothing for this overlay to redraw
+    // *correctly* anyway, only redundantly - it reappears once the camera
+    // settles.
+    let overlay_enabled = interaction.camera_is_settled(&camera);
+
+    // Value labels only - node/link shapes, colors, and direction arrows
+    // are all drawn by the Galileo layer painted above (see
+    // `network_layers.rs`; `LinkSymbol::render` draws the arrow as part of
+    // each link's own cached geometry, not per-frame here).
+    if overlay_enabled {
+        for (pos, &link_index) in visible_links.iter().enumerate() {
+            if pos % decimation_stride != 0 {
+                continue;
             }
-        }
-        // Direction arrowheads: show the model's start -> end convention by
-        // default ("which way is start, which way is end"); once simulation
-        // results exist, they flip to the *simulated* flow direction instead
-        // (a negative flow means water actually moves end -> start).
-        // Repeated along the pipe (not just once in the middle) so the
-        // direction reads clearly on long pipes too; placed by walking the
-        // actual polyline, not the straight chord between its two
-        // endpoints, so they land on the drawn route on a bent pipe.
-        let reversed = results.flow_reversed(link_index);
-        draw_direction_arrows(&painter, &screen_points, reversed);
-        if show_value_labels {
+            if !show_value_labels {
+                continue;
+            }
+            let Some(line) = spatial.link_line(link_index) else {
+                continue;
+            };
+            let screen_points: Vec<Pos2> = line.iter().map(|&p| to_screen(p)).collect();
             if let Some(label) = results.link_label(link_index) {
-                // Offset further than just perpendicular to the pipe, and
-                // shifted along it away from the midpoint, so the label
-                // clears the arrow row instead of sitting on top of it.
+                // Offset away from the pipe's exact midpoint (roughly
+                // where its direction arrow sits) so the label doesn't
+                // sit directly on top of it.
                 let total = polyline_length(&screen_points);
                 let label_dist = (total * 0.5 + ARROW_SPACING_PX * 0.5).min(total);
                 let (label_anchor, tangent) = point_and_tangent_at(&screen_points, label_dist);
@@ -234,19 +315,15 @@ pub fn draw_canvas(
         }
     }
 
-    for (pos, &node_index) in visible_nodes.iter().enumerate() {
-        if pos % decimation_stride != 0 {
-            continue;
-        }
-        let Some(point) = spatial.node_point(node_index) else {
-            continue;
-        };
-        let node = &network.nodes[node_index];
-        let selected = state.selection.contains_node(&node.id);
-        let center = to_screen(point);
-        let fill_override = results.node_color(node_index);
-        draw_node_symbol(&painter, center, &node.node_type, selected, fill_override);
-        if show_value_labels {
+    if overlay_enabled && show_value_labels {
+        for (pos, &node_index) in visible_nodes.iter().enumerate() {
+            if pos % decimation_stride != 0 {
+                continue;
+            }
+            let Some(point) = spatial.node_point(node_index) else {
+                continue;
+            };
+            let center = to_screen(point);
             if let Some(label) = results.node_label(node_index) {
                 draw_value_label(
                     &painter,
@@ -257,6 +334,7 @@ pub fn draw_canvas(
             }
         }
     }
+
 
     // connect-tool rubber band preview
     if let Some(from_id) = &interaction.connecting_from {
@@ -488,110 +566,6 @@ fn handle_add_link(
     }
 }
 
-fn link_color(link: &epanet_rs::model::link::Link) -> Color32 {
-    match &link.link_type {
-        LinkType::Pipe(_) => Color32::from_rgb(140, 170, 200),
-        LinkType::Pump(_) => Color32::from_rgb(230, 90, 90),
-        LinkType::Valve(_) => Color32::from_rgb(230, 200, 80),
-    }
-}
-
-fn draw_node_symbol(
-    painter: &egui::Painter,
-    center: Pos2,
-    node_type: &NodeType,
-    selected: bool,
-    fill_override: Option<Color32>,
-) {
-    let type_color = match node_type {
-        NodeType::Junction(_) => Color32::from_rgb(120, 190, 250),
-        NodeType::Tank(_) => Color32::from_rgb(250, 170, 80),
-        NodeType::Reservoir(_) => Color32::from_rgb(120, 220, 140),
-    };
-    let color = fill_override.unwrap_or(type_color);
-    let outline = if selected {
-        Stroke::new(2.0, Color32::WHITE)
-    } else {
-        Stroke::new(1.0, Color32::from_gray(10))
-    };
-    let r = if selected {
-        NODE_RADIUS_PX + 1.5
-    } else {
-        NODE_RADIUS_PX
-    };
-
-    match node_type {
-        NodeType::Junction(_) => {
-            painter.circle(center, r, color, outline);
-        }
-        NodeType::Tank(_) => {
-            let rect = Rect::from_center_size(center, egui::vec2(r * 2.0, r * 2.0));
-            painter.rect(rect, 1.0, color, outline, egui::StrokeKind::Middle);
-        }
-        NodeType::Reservoir(_) => {
-            let pts = vec![
-                Pos2::new(center.x, center.y - r * 1.2),
-                Pos2::new(center.x - r * 1.1, center.y + r * 0.9),
-                Pos2::new(center.x + r * 1.1, center.y + r * 0.9),
-            ];
-            painter.add(egui::Shape::convex_polygon(pts, color, outline));
-        }
-    }
-}
-
-/// A small filled triangle at `pos`, pointing along the (not necessarily
-/// normalized) `tangent` direction — shows "which way is start, which way
-/// is end" for a pipe (or, once results exist, the simulated flow
-/// direction) without doubling up on the line itself (unlike
-/// `Painter::arrow`, which draws a full shaft). Takes an explicit position
-/// rather than a start/end pair so callers can place it at any point along
-/// a multi-vertex polyline instead of the straight chord between its two
-/// endpoints.
-fn draw_direction_arrow_at(painter: &egui::Painter, pos: Pos2, tangent: Vec2) {
-    if tangent.length_sq() < 1e-6 {
-        return;
-    }
-    let dir = tangent.normalized();
-    let normal = Vec2::new(-dir.y, dir.x);
-    let size = 5.5_f32;
-    let tip = pos + dir * size * 0.7;
-    let left = pos - dir * size * 0.5 + normal * size * 0.55;
-    let right = pos - dir * size * 0.5 - normal * size * 0.55;
-    let color = Color32::from_white_alpha(200);
-    painter.add(egui::Shape::convex_polygon(vec![tip, left, right], color, Stroke::NONE));
-}
-
-/// Draws one or more direction arrows spaced roughly every
-/// `ARROW_SPACING_PX` along `points` (a screen-space polyline), each
-/// pointing from `points[0]` toward `points[last]`, or the reverse when
-/// `reversed`. A no-op if the pipe is shorter than `MIN_ARROW_SEGMENT_PX`;
-/// falls back to a single centered arrow if it's too short to fit the end
-/// margins on both sides. Repeating the arrow along the pipe (rather than
-/// drawing just one in the middle) makes the direction readable at a
-/// glance on long pipes, and keeps it visible even where the value label
-/// (placed near the middle) would otherwise cover a single mid-pipe arrow.
-fn draw_direction_arrows(painter: &egui::Painter, points: &[Pos2], reversed: bool) {
-    let total = polyline_length(points);
-    if total < MIN_ARROW_SEGMENT_PX {
-        return;
-    }
-
-    let usable = total - 2.0 * ARROW_END_MARGIN_PX;
-    if usable <= 0.0 {
-        let (pos, tangent) = point_and_tangent_at(points, total * 0.5);
-        draw_direction_arrow_at(painter, pos, if reversed { -tangent } else { tangent });
-        return;
-    }
-
-    let count = (usable / ARROW_SPACING_PX).floor() as usize + 1;
-    for i in 0..count {
-        let frac = if count == 1 { 0.5 } else { i as f32 / (count - 1) as f32 };
-        let dist = ARROW_END_MARGIN_PX + usable * frac;
-        let (pos, tangent) = point_and_tangent_at(points, dist);
-        draw_direction_arrow_at(painter, pos, if reversed { -tangent } else { tangent });
-    }
-}
-
 /// Total on-screen length of a polyline (sum of its segment lengths).
 fn polyline_length(points: &[Pos2]) -> f32 {
     points.windows(2).map(|w| w[0].distance(w[1])).sum()
@@ -653,7 +627,10 @@ fn draw_value_label(painter: &egui::Painter, pos: Pos2, anchor: egui::Align2, te
 /// `None` whenever there's no result to show, or the result no longer
 /// matches the live network's node/link count (e.g. topology was edited
 /// after the run) — callers fall back to the static per-type colors.
-struct ResultOverlay {
+/// Simulation-result color/label overlay for the current report step.
+/// `pub(crate)`: also used by `network_layers.rs` to color Galileo
+/// features, not just this module's own `egui::Painter` legend.
+pub(crate) struct ResultOverlay {
     node_range: Option<(f64, f64)>,
     link_range: Option<(f64, f64)>,
     node_values: Vec<f64>,
@@ -671,7 +648,7 @@ struct ResultOverlay {
 }
 
 impl ResultOverlay {
-    fn new(state: &AppState) -> Self {
+    pub(crate) fn new(state: &AppState) -> Self {
         let Some(results) = &state.sim_results else {
             return Self::disabled();
         };
@@ -721,16 +698,21 @@ impl ResultOverlay {
         }
     }
 
-    fn node_color(&self, node_index: usize) -> Option<Color32> {
+    /// The result-driven fill color for `node_index`'s heat value, if any
+    /// results are active - `network_layers.rs` wraps this into a
+    /// `galileo::Color` for the Galileo-rendered node fill (there's no
+    /// `egui::Color32` dependency here since that module has none).
+    pub(crate) fn node_color_rgb(&self, node_index: usize) -> Option<(u8, u8, u8)> {
         let (lo, hi) = self.node_range?;
         let value = *self.node_values.get(node_index)?;
-        Some(heat_color(normalize(value, lo, hi)))
+        Some(heat_color_rgb(normalize(value, lo, hi)))
     }
 
-    fn link_color(&self, link_index: usize) -> Option<Color32> {
+    /// Same as `node_color_rgb`, for links.
+    pub(crate) fn link_color_rgb(&self, link_index: usize) -> Option<(u8, u8, u8)> {
         let (lo, hi) = self.link_range?;
         let value = *self.link_values.get(link_index)?;
-        Some(heat_color(normalize(value, lo, hi)))
+        Some(heat_color_rgb(normalize(value, lo, hi)))
     }
 
     /// Formatted pressure value (with unit) for the on-canvas label next to
@@ -755,7 +737,11 @@ impl ResultOverlay {
 
     /// Whether the simulated flow on `link_index` runs from the link's end
     /// node to its start node (i.e. opposite the model's stored direction).
-    fn flow_reversed(&self, link_index: usize) -> bool {
+    /// Whether flow direction on `link_index` is the reverse of the
+    /// model's start -> end convention (negative flow) - `pub(crate)`:
+    /// also used by `network_layers.rs`'s GPU-rendered direction arrows,
+    /// not just this module's own (removed) `egui::Painter` ones.
+    pub(crate) fn flow_reversed(&self, link_index: usize) -> bool {
         self.enabled
             && self
                 .link_flow_signs
@@ -887,15 +873,23 @@ fn normalize(value: f64, lo: f64, hi: f64) -> f64 {
 /// Blue (low) -> yellow (mid) -> red (high) heatmap, the same 3-stop
 /// gradient used by the legend text.
 fn heat_color(t: f64) -> Color32 {
+    let (r, g, b) = heat_color_rgb(t);
+    Color32::from_rgb(r, g, b)
+}
+
+/// The color math behind `heat_color`, without the `egui::Color32`
+/// dependency - shared with `network_layers.rs`'s `galileo::Color`-based
+/// feature fill, which has no reason to depend on `egui` at all.
+fn heat_color_rgb(t: f64) -> (u8, u8, u8) {
     let t = t.clamp(0.0, 1.0) as f32;
-    const LOW: Color32 = Color32::from_rgb(60, 90, 220);
-    const MID: Color32 = Color32::from_rgb(250, 210, 60);
-    const HIGH: Color32 = Color32::from_rgb(220, 60, 60);
-    if t < 0.5 {
-        lerp_color(LOW, MID, t / 0.5)
-    } else {
-        lerp_color(MID, HIGH, (t - 0.5) / 0.5)
+    const LOW: (u8, u8, u8) = (60, 90, 220);
+    const MID: (u8, u8, u8) = (250, 210, 60);
+    const HIGH: (u8, u8, u8) = (220, 60, 60);
+    fn lerp(a: (u8, u8, u8), b: (u8, u8, u8), t: f32) -> (u8, u8, u8) {
+        let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+        (l(a.0, b.0), l(a.1, b.1), l(a.2, b.2))
     }
+    if t < 0.5 { lerp(LOW, MID, t / 0.5) } else { lerp(MID, HIGH, (t - 0.5) / 0.5) }
 }
 
 /// Paints `rect` as a left-to-right swatch of the `heat_color` gradient
@@ -919,9 +913,4 @@ fn draw_gradient_bar(painter: &egui::Painter, rect: Rect) {
         );
         painter.rect_filled(strip, 0.0, heat_color(t));
     }
-}
-
-fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
-    let lerp = |i: usize| -> u8 { (a[i] as f32 + (b[i] as f32 - a[i] as f32) * t).round() as u8 };
-    Color32::from_rgb(lerp(0), lerp(1), lerp(2))
 }

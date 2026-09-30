@@ -32,7 +32,7 @@ const VALVE_TYPES: [ValveType; 7] = [
 const LINK_STATUSES: [LinkStatus; 3] = [LinkStatus::Open, LinkStatus::Closed, LinkStatus::Active];
 
 pub fn top_menu(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
-    egui::Panel::top("top_menu").show(ui, |ui| {
+    egui::Panel::top("top_menu").show_inside(ui, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("Import INP...").clicked() {
@@ -127,7 +127,7 @@ pub fn left_panel(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>
         .resizable(true)
         .default_size(260.0)
         .min_size(180.0)
-        .show(ui, |ui| {
+        .show_inside(ui, |ui| {
             ui.heading("Elements");
             ui.add_space(4.0);
 
@@ -327,7 +327,7 @@ pub fn right_panel(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action
     egui::Panel::right("right_panel")
         .resizable(true)
         .default_size(320.0)
-        .show(ui, |ui| {
+        .show_inside(ui, |ui| {
             ui.heading("Properties");
             ui.add_space(4.0);
 

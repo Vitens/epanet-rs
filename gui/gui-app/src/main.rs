@@ -5,6 +5,8 @@
 mod app;
 mod canvas;
 mod command_palette;
+mod galileo_target;
+mod instanced_renderer;
 mod panels;
 mod shortcuts;
 
@@ -34,12 +36,18 @@ fn main() -> eframe::Result<()> {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1280.0, 800.0])
             .with_title("EPANET Network Editor"),
+        // Force the `wgpu` backend (rather than eframe's default, which
+        // may pick `glow` depending on platform/features) so
+        // `cc.wgpu_render_state` is populated - `galileo_target.rs` shares
+        // that exact `Device`/`Queue` with Galileo's renderer instead of
+        // creating a second GPU context.
+        renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
 
     eframe::run_native(
         "EPANET Network Editor",
         native_options,
-        Box::new(|_cc| Ok(Box::new(app::EditorApp::new(state)))),
+        Box::new(|cc| Ok(Box::new(app::EditorApp::new(cc, state)))),
     )
 }

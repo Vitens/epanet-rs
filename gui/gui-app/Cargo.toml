@@ -10,28 +10,47 @@ publish = false
 name = "epanet-gui"
 path = "src/main.rs"
 
-[features]
-default = []
-# HTTP(S) `.pmtiles` basemap sources, on top of the always-available local
-# file source. Off by default: `reqwest`'s rustls TLS stack pulls in a
-# fairly heavy dependency subtree that isn't needed for the primary
-# (local/offline `.pmtiles`) use case - see the plan's assumption 0. Build
-# with `--features http-basemap` to enable "Load basemap from URL...".
-http-basemap = ["pmtiles/http-async", "pmtiles/reqwest-rustls"]
-
 [dependencies]
 gui-core = { path = "../gui-core" }
 epanet-rs = { path = "../.." }
-eframe = "0.36"
-egui = "0.36"
 rfd = "0.17"
-pmtiles = { version = "0.23", default-features = false, features = [
-    "mmap-async-tokio",
-    "tilejson",
+
+# Rendering backend for the network canvas: Galileo's `wgpu` renderer draws
+# nodes/links as GPU feature layers (see `network_layers.rs`), instead of
+# egui's own per-frame CPU tessellation, so 141k+ node/147k+ link networks
+# render at full fidelity with no decimation fallback. `egui`/`eframe`/
+# `egui-wgpu` are pinned to "0.34" (rather than
+# gui-app's previous "0.36") to match the exact version Galileo's `main`
+# branch depends on - see the workspace `[workspace.dependencies]` at
+# https://github.com/Maximkaaa/galileo/blob/main/Cargo.toml. Galileo isn't
+# yet published to crates.io past a stale 0.2.1 (Feb 2023), so this is a git
+# dependency pinned to a specific commit rather than a version.
+#
+# `web-sys` is pinned directly (rather than left to float) to resolve a
+# version conflict between `eframe`'s `^0.3.70` requirement and Galileo's
+# `<0.3.92` upper bound - both are satisfied by 0.3.91.
+eframe = { version = "0.34", default-features = false, features = [
+    "default_fonts",
+    "wgpu",
+    "persistence",
+    # eframe's own default feature list includes these ("Required for
+    # Linux support (including CI!)"); `default-features = false` above
+    # drops them, so they're re-added explicitly rather than inherited.
+    "wayland",
+    "x11",
 ] }
-mvt-reader = "2.3"
-geo-types = { version = "0.7", default-features = false }
-tokio = { version = "1", default-features = false, features = ["rt"] }
+egui = "0.34"
+egui-wgpu = "0.34"
+wgpu = "29"
+bytemuck = { version = "1", features = ["derive"] }
+web-sys = "=0.3.91"
+parking_lot = "0.12"
+galileo = { git = "https://github.com/Maximkaaa/galileo", default-features = false, features = [
+    "wgpu",
+    "image",
+    "rustybuzz",
+] }
+galileo-types = { git = "https://github.com/Maximkaaa/galileo" }
 
 [profile.release]
 opt-level = 3
