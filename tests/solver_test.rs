@@ -508,3 +508,14 @@ fn test_solve_pcv_valve_minor_loss_si_units_status_change() {
         &expected_flows,
     );
 }
+
+#[test]
+fn test_bidirectional_gpv_curve() {
+    let mut simulation = Simulation::from_file("tests/bidirectional.inp").expect("Failed to create simulation");
+
+    let result = simulation.solve_hydraulics(false).expect("Failed to solve hydraulics");
+
+    
+    assert!(result.flows[0][0].abs() - 100.0 < 1e-9)
+    
+}
