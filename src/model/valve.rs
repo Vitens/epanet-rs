@@ -262,12 +262,21 @@ impl Valve {
     fn gpv_coefficients(&self, q: f64) -> LinkCoefficients {
         let curve = self.gpv_curve.as_ref().unwrap();
 
-        let q_abs = q.abs().max(TINY);
+        match curve.bidirectional {
+            true => {
+                let (h0, r) = curve.coefficients(q);
+                let r = r.max(TINY);
 
-        let (h0, r) = curve.coefficients(q_abs);
-        let r = r.max(TINY);
+                LinkCoefficients::simple(1.0 / r, h0 / r + q)
+            }
+            false => {
+                let q_abs = q.abs().max(TINY);
+                let (h0, r) = curve.coefficients(q_abs);
+                let r = r.max(TINY);
 
-        LinkCoefficients::simple(1.0 / r, (h0 / r + q_abs) * q.signum())
+                LinkCoefficients::simple(1.0 / r, (h0 / r + q_abs) * q.signum())
+            }
+        }
     }
 
     /// Compute the coefficients for pressure sustaining valve with a flow q and excess flow upstream

@@ -334,4 +334,13 @@ impl Simulation {
         .min()
         .unwrap()
     }
+
+    /// Returns the solved state if it is available, otherwise `None`.
+    pub fn solved_state(&self) -> Option<&SolverState> {
+        if self.solved {
+            self.state.as_ref()
+        } else {
+            None
+        }
+    }
 }
