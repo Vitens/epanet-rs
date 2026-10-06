@@ -461,7 +461,10 @@ fn test_emitter_inp_roundtrip() {
     );
 
     for (id, coeff) in original_coeffs {
-        let idx = *reloaded.node_map.get(&id).expect("node missing after reload");
+        let idx = *reloaded
+            .node_map
+            .get(&id)
+            .expect("node missing after reload");
         let epanet_rs::model::node::NodeType::Junction(j) = &reloaded.nodes[idx].node_type else {
             panic!("node {} is not a junction", id);
         };
@@ -511,11 +514,12 @@ fn test_solve_pcv_valve_minor_loss_si_units_status_change() {
 
 #[test]
 fn test_bidirectional_gpv_curve() {
-    let mut simulation = Simulation::from_file("tests/bidirectional.inp").expect("Failed to create simulation");
+    let mut simulation =
+        Simulation::from_file("tests/bidirectional.inp").expect("Failed to create simulation");
 
-    let result = simulation.solve_hydraulics(false).expect("Failed to solve hydraulics");
+    let result = simulation
+        .solve_hydraulics(false)
+        .expect("Failed to solve hydraulics");
 
-    
     assert!(result.flows[0][0].abs() - 100.0 < 1e-9)
-    
 }

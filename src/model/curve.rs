@@ -34,7 +34,7 @@ impl Curve {
 #[derive(Debug, Clone)]
 pub struct ValveCurve {
     pub curve: Curve,
-    pub bidirectional: bool
+    pub bidirectional: bool,
 }
 
 impl ValveCurve {
@@ -54,7 +54,7 @@ impl ValveCurve {
             .iter()
             .map(|y| y / system.per_feet())
             .collect::<Vec<f64>>();
-        
+
         let bidirectional = flows[0] < 0.0;
 
         let converted_curve = Curve {
@@ -63,11 +63,10 @@ impl ValveCurve {
             y: heads,
         };
 
-
         // validate the curve to ensure the head is decreasing and the flow is increasing monotonically
         Ok(Self {
             curve: converted_curve,
-            bidirectional
+            bidirectional,
         })
     }
     pub fn coefficients(&self, q: f64) -> (f64, f64) {

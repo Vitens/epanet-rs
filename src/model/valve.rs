@@ -266,15 +266,14 @@ impl Valve {
             true => {
                 let (h0, r) = curve.coefficients(q);
                 let r = r.max(TINY);
-        
+
                 LinkCoefficients::simple(1.0 / r, h0 / r + q)
-                
-            },
+            }
             false => {
                 let q_abs = q.abs().max(TINY);
                 let (h0, r) = curve.coefficients(q_abs);
                 let r = r.max(TINY);
-        
+
                 LinkCoefficients::simple(1.0 / r, (h0 / r + q_abs) * q.signum())
             }
         }
