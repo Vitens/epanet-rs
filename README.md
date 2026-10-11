@@ -6,7 +6,6 @@ A fast, modern and safe re-implementation of the EPANET2 hydraulic solver, writt
 [![crate](https://img.shields.io/crates/v/epanet-rs.svg)](https://crates.io/crates/epanet-rs)
 ![docs.rs](https://img.shields.io/docsrs/epanet-rs)
 
-
 Dual-licensed under [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT).
 
 ## Background
@@ -16,7 +15,7 @@ The core EPANET2 codebase, however, is several decades old and written in C, mak
 
 Modern applications of the EPANET solver, such as monte-carlo simulations, leak detection algorithms and real-time digital twins of huge networks require a more modern implementation, with better performance and maintainability.
 
-`epanet-rs` is a modern reimplementation of the EPANET2 hydraulic solver written in Rust, designed to preserve the original algorithms and numerical behavior while enabling safer memory management, improved maintainability, and performance optimizations through multi-threading and SIMD acceleration.  
+`epanet-rs` is a modern reimplementation of the EPANET2 hydraulic solver written in Rust, designed to preserve the original algorithms and numerical behavior while enabling safer memory management, improved maintainability, and performance optimizations through multi-threading and SIMD acceleration.
 
 `epanet-rs` runs about as fast as the original EPANET2_3 solver in sequential mode, and up to 5 times faster in parallel mode for extended period simulations for supported networks (no tanks/controls)!
 
@@ -51,7 +50,7 @@ epanet-rs convert <network_file.inp> output.msgpack
 epanet-rs validate <network_file.inp>
 ```
 
-### Rust API 
+### Rust API
 
 ```rust
 use epanet_rs::model::network::Network;
@@ -66,6 +65,7 @@ let results = match simulation.solve_hydraulics() {
   }
 };
 ```
+
 ## Building
 
 ```bash
@@ -76,6 +76,18 @@ cargo build
 cargo build --release
 ```
 
+## Development Tools
+
+This project uses [just](https://github.com/casey/just) as a command runner for common tasks:
+
+```bash
+# Install just (one-time setup)
+cargo install just
+
+# See all available commands
+just --list
+```
+
 ## Testing
 
 ```bash
@@ -84,6 +96,13 @@ cargo test
 
 # Run solver tests
 cargo test --test solver_test
+
+# Generate code coverage report
+just coverage-html  # Generates target/llvm-cov/html/index.html
+
+# Or manually with cargo-llvm-cov
+cargo install cargo-llvm-cov
+cargo llvm-cov --all-features --workspace --html
 ```
 
 ## Supported Features and To-Do
