@@ -3,65 +3,84 @@
 use crate::error::InputError;
 
 /// Parse a time string with optional time unit suffix.
-/// Supports formats:
-/// - "HH:MM" with optional AM/PM suffix
-/// - Numeric value with unit (HOUR, MINUTE, MIN, SECOND, SEC, DAY, AM, PM)
-/// - If no unit is provided, defaults to HOURS
+/// Matches EPANET C `hour()` function behavior exactly:
+/// - Supports HH:MM or HH:MM:SS clock time format
+/// - Supports decimal time with unit suffixes (SECONDS, MINUTES, HOURS, DAYS)
+/// - Supports AM/PM suffixes with validation (hours must be < 13)
+/// - Defaults to HOURS when no unit is provided for decimal values
+/// - Rounds to nearest second (adds 0.5 before truncating)
+///
+/// Examples:
+///   5           = 5 * 3600 sec
+///   5 MINUTES   = 5 * 60   sec
+///   13:50       = 13*3600 + 50*60 sec
+///   1:50 pm     = (12+1)*3600 + 50*60 sec
 pub fn parse_time_str(time_str: &str, unit_or_suffix: Option<&str>) -> Result<usize, InputError> {
-    let seconds: usize;
+    let units = unit_or_suffix.unwrap_or("").to_uppercase();
 
-    // If time contains ":", parse as HH:MM format
-    if time_str.contains(':') {
-        let mut time_parts = time_str.split(':');
+    // Separate clock time into hrs, min, sec (supports HH:MM or HH:MM:SS)
+    let time_parts: Vec<&str> = time_str.split(':').collect();
 
-        let hours = time_parts
-            .next()
-            .ok_or_else(|| InputError::new("Missing hours in time"))?
-            .parse::<usize>()
-            .map_err(|_| InputError::new(format!("Invalid hours value in time: {}", time_str)))?;
-
-        let minutes = time_parts
-            .next()
-            .ok_or_else(|| InputError::new("Missing minutes in time"))?
-            .parse::<usize>()
-            .map_err(|_| InputError::new(format!("Invalid minutes value in time: {}", time_str)))?;
-
-        let mut hour24 = hours;
-
-        if let Some(suffix) = unit_or_suffix {
-            match suffix.to_uppercase().as_str() {
-                "AM" => hour24 = hours % 12,        // 12 AM → 0
-                "PM" => hour24 = (hours % 12) + 12, // 12 PM → 12
-                _ => {}
-            }
-        }
-
-        seconds = hour24 * 3600 + minutes * 60;
-    } else {
-        // Parse as numeric value (integer or float) with optional time unit
-        let value = time_str
+    // Parse up to 3 components (hours, minutes, seconds)
+    let mut y = [0.0_f64; 3];
+    for (i, part) in time_parts.iter().enumerate().take(3) {
+        y[i] = part
             .parse::<f64>()
-            .map_err(|_| InputError::new(format!("Invalid time value: {}", time_str)))?;
-
-        let mut unit = unit_or_suffix.unwrap_or("HOURS").to_uppercase();
-
-        // Remove trailing "S" for singular form
-        if unit.ends_with('S') && unit != "HOURS" {
-            unit.pop();
-        }
-
-        seconds = match unit.as_str() {
-            "HOUR" | "HOURS" => (value * 3600.0) as usize,
-            "MINUTE" | "MIN" => (value * 60.0) as usize,
-            "SECOND" | "SEC" => value as usize,
-            "DAY" => (value * 86_400.0) as usize,
-            "AM" => (value as usize % 12) * 3600,
-            "PM" => (((value as usize) % 12) + 12) * 3600,
-            _ => return Err(InputError::new(format!("Invalid time unit: {}", unit))),
-        };
+            .map_err(|_| InputError::new(format!("Invalid time component: {}", part)))?;
     }
 
+    let hours_as_float = match time_parts.len() {
+        // Single numeric value with optional unit
+        1 => convert_decimal_time_to_hours(y[0], units.as_str())?,
+
+        // Clock time format (HH:MM or HH:MM:SS)
+        2..=3 => {
+            let combined_hours = y[0] + y[1] / 60.0 + y[2] / 3600.0;
+            apply_am_pm_conversion(combined_hours, units.as_str())?
+        }
+
+        _ => return Err(InputError::new("Invalid time format".to_string())),
+    };
+
+    // Convert hours to seconds with rounding (matches C: (long)(3600.0 * y + 0.5))
+    let seconds = (3600.0 * hours_as_float + 0.5) as usize;
+
     Ok(seconds)
+}
+
+/// Convert a decimal time value to hours based on the unit
+fn convert_decimal_time_to_hours(value: f64, unit: &str) -> Result<f64, InputError> {
+    match unit {
+        "" => Ok(value),
+        "SECOND" | "SECONDS" | "SEC" => Ok(value / 3600.0),
+        "MINUTE" | "MINUTES" | "MIN" => Ok(value / 60.0),
+        "HOUR" | "HOURS" => Ok(value),
+        "DAY" | "DAYS" => Ok(value * 24.0),
+        "AM" | "PM" => apply_am_pm_conversion(value, unit),
+        _ => Err(InputError::new(format!("Invalid time unit: {}", unit))),
+    }
+}
+
+/// Apply AM/PM conversion to hours value
+/// AM: 12.xx → 0.xx (midnight), others stay as-is
+/// PM: 12.xx stays as-is (noon), others add 12
+fn apply_am_pm_conversion(hours: f64, suffix: &str) -> Result<f64, InputError> {
+    match suffix {
+        "" => Ok(hours),
+        "AM" => {
+            if hours >= 13.0 {
+                return Err(InputError::new(format!("Invalid hour for AM: {}", hours)));
+            }
+            Ok(if hours >= 12.0 { hours - 12.0 } else { hours })
+        }
+        "PM" => {
+            if hours >= 13.0 {
+                return Err(InputError::new(format!("Invalid hour for PM: {}", hours)));
+            }
+            Ok(if hours >= 12.0 { hours } else { hours + 12.0 })
+        }
+        _ => Err(InputError::new(format!("Invalid time suffix: {}", suffix))),
+    }
 }
 
 pub fn seconds_to_hhmm(seconds: usize) -> String {
@@ -103,6 +122,15 @@ mod tests {
     }
 
     #[test]
+    fn test_hhmmss_format() {
+        assert_eq!(
+            parse_time_str("1:30:45", None).unwrap(),
+            (3600.0 * (1.0 + 30.0 / 60.0 + 45.0 / 3600.0) + 0.5) as usize
+        );
+        assert_eq!(parse_time_str("0:0:30", None).unwrap(), 30);
+    }
+
+    #[test]
     fn test_numeric_with_units() {
         assert_eq!(parse_time_str("2", Some("HOURS")).unwrap(), 2 * 3600);
         assert_eq!(parse_time_str("15", Some("MIN")).unwrap(), 15 * 60);
@@ -113,9 +141,15 @@ mod tests {
     #[test]
     fn test_numeric_am_pm() {
         assert_eq!(parse_time_str("12", Some("AM")).unwrap(), 0);
-        assert_eq!(parse_time_str("12", Some("PM")).unwrap(), 12 * 3600);
         assert_eq!(parse_time_str("1", Some("AM")).unwrap(), 3600);
+        assert_eq!(parse_time_str("11", Some("AM")).unwrap(), 11 * 3600);
+
+        assert_eq!(parse_time_str("12", Some("PM")).unwrap(), 12 * 3600);
         assert_eq!(parse_time_str("1", Some("PM")).unwrap(), 13 * 3600);
+        assert_eq!(parse_time_str("11", Some("PM")).unwrap(), 23 * 3600);
+
+        assert!(parse_time_str("13", Some("AM")).is_err());
+        assert!(parse_time_str("13", Some("PM")).is_err());
     }
 
     #[test]
@@ -124,9 +158,37 @@ mod tests {
     }
 
     #[test]
+    fn test_rounding() {
+        assert_eq!(parse_time_str("5.5", None).unwrap(), 19800);
+        assert_eq!(parse_time_str("1.999", None).unwrap(), 7196);
+        assert_eq!(parse_time_str("2.0003", None).unwrap(), 7201);
+    }
+
+    #[test]
+    fn test_epanet_c_examples() {
+        assert_eq!(parse_time_str("5", None).unwrap(), 5 * 3600);
+        assert_eq!(parse_time_str("5", Some("MINUTES")).unwrap(), 5 * 60);
+        assert_eq!(parse_time_str("13:50", None).unwrap(), 13 * 3600 + 50 * 60);
+        assert_eq!(
+            parse_time_str("1:50", Some("PM")).unwrap(),
+            (12 + 1) * 3600 + 50 * 60
+        );
+    }
+
+    #[test]
     fn test_invalid_inputs() {
         assert!(parse_time_str("abc", None).is_err());
         assert!(parse_time_str("10", Some("WEEKS")).is_err());
         assert!(parse_time_str("xx:yy", None).is_err());
+    }
+
+    #[test]
+    fn test_zero_value() {
+        assert_eq!(parse_time_str("0", None).unwrap(), 0);
+        assert_eq!(parse_time_str("0", Some("HOURS")).unwrap(), 0);
+        assert_eq!(parse_time_str("0", Some("MINUTES")).unwrap(), 0);
+        assert_eq!(parse_time_str("0", Some("SECONDS")).unwrap(), 0);
+        assert_eq!(parse_time_str("0:00", None).unwrap(), 0);
+        assert_eq!(parse_time_str("0:0:0", None).unwrap(), 0);
     }
 }
