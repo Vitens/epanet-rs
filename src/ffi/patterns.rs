@@ -72,6 +72,11 @@ pub unsafe extern "C" fn EN_getaveragepatternvalue(
     index: c_int,
     out_value: *mut c_double,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_value.is_null() {
+        unsafe { *out_value = 0.0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let index = (index - 1) as usize;
@@ -192,6 +197,11 @@ pub unsafe extern "C" fn EN_getpatternindex(
     id: *const c_char,
     out_index: *mut c_int,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_index.is_null() {
+        unsafe { *out_index = 0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let c_str = unsafe { CStr::from_ptr(id) };
@@ -220,6 +230,11 @@ pub unsafe extern "C" fn EN_getpatternlen(
     index: c_int,
     out_count: *mut c_int,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_count.is_null() {
+        unsafe { *out_count = 0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let index = (index - 1) as usize;
@@ -244,6 +259,11 @@ pub unsafe extern "C" fn EN_getpatternvalue(
     time: c_int,
     out_value: *mut c_double,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_value.is_null() {
+        unsafe { *out_value = 0.0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let index = (index - 1) as usize;

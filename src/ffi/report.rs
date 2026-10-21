@@ -19,6 +19,11 @@ pub unsafe extern "C" fn EN_getcount(
     object: c_int,
     out_count: *mut c_int,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_count.is_null() {
+        unsafe { *out_count = 0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let count_type = match CountType::from_repr(object) {

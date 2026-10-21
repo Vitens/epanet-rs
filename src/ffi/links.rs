@@ -62,6 +62,11 @@ pub unsafe extern "C" fn EN_getlinkindex(
     id: *const c_char,
     out_index: *mut c_int,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_index.is_null() {
+        unsafe { *out_index = 0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let c_str = unsafe { CStr::from_ptr(id) };
@@ -166,6 +171,11 @@ pub unsafe extern "C" fn EN_getlinktype(
     index: c_int,
     out_type: *mut c_int,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_type.is_null() {
+        unsafe { *out_type = 0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let link = match simulation.network.links.get((index - 1) as usize) {
@@ -208,6 +218,15 @@ pub unsafe extern "C" fn EN_getlinknodes(
     out_start_node: *mut c_int,
     out_end_node: *mut c_int,
 ) -> ErrorCode {
+    // Initialize output parameters to match C API behavior
+    if !out_start_node.is_null() {
+        unsafe { *out_start_node = 0 };
+    }
+
+    if !out_end_node.is_null() {
+        unsafe { *out_end_node = 0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let link = match simulation.network.links.get((index - 1) as usize) {
@@ -280,6 +299,11 @@ pub unsafe extern "C" fn EN_getlinkvalue(
     property: c_int,
     out_value: *mut c_double,
 ) -> ErrorCode {
+    // Initialize output parameter to match C API behavior
+    if !out_value.is_null() {
+        unsafe { *out_value = 0.0 };
+    }
+
     let simulation = get_simulation!(ph);
 
     let index = (index - 1) as usize;
