@@ -10,11 +10,11 @@ use faer::{Mat, Side};
 use crate::solver::matrix::*;
 use crate::solver::state::SolverState;
 
-use crate::model::units::Cfs;
+use crate::model::units::{Cfs, Ft};
 
 use simplelog::{debug, error, warn};
 
-use crate::constants::{BIG_VALUE, PDA_MIN_DIFF, Q_ZERO};
+use crate::constants::{BIG_VALUE, H_TOL, PDA_MIN_DIFF, Q_ZERO};
 use crate::error::SolverError;
 use crate::model::control::ControlCondition;
 use crate::model::link::{LinkStatus, LinkTrait, LinkType};
@@ -37,6 +37,8 @@ pub struct IterationStatistics {
     pub sum_q: Cfs,
     pub max_dq: Cfs,
     pub max_dq_index: usize,
+    /// maximum head error (ft) of links with an engaged reverse-flow barrier, |hloss(q_old) - dh_new|
+    pub max_barrier_head_error: Ft,
     pub status_changed: bool,
 }
 
@@ -250,9 +252,10 @@ impl HydraulicSolver {
                 iteration, rel_change, stats.status_changed, damping_factor
             );
             debug!(
-                ">>>> Max flow change: {:.6} for link {}",
+                ">>>> Max flow change: {:.6} for link {}, max barrier head error: {:.6} ft",
                 stats.max_dq_converted(&network.options),
-                network.links[stats.max_dq_index].id
+                network.links[stats.max_dq_index].id,
+                stats.max_barrier_head_error
             );
 
             let max_flow_change = network.options.max_flow_change.unwrap_or(BIG_VALUE);
@@ -262,9 +265,13 @@ impl HydraulicSolver {
             // - relative change is less than the accuracy
             // - no status changes
             // - maximum flow change is less than the maximum flow change allowed
+            // - heads across engaged reverse-flow barriers (CV pipes, pumps) are consistent with
+            //   the barrier head loss; there a negligible flow change corresponds to a large
+            //   head change, which the flow-based criteria above cannot detect
             if rel_change < network.options.accuracy
                 && !stats.status_changed
                 && stats.max_dq_converted(&network.options) < max_flow_change
+                && stats.max_barrier_head_error < H_TOL
             {
                 // if pressure controls are active, apply them and continue the iteration
                 if self.apply_pressure_controls(network, &mut state) {
@@ -343,6 +350,17 @@ impl HydraulicSolver {
 
             // calculate the (possibly under-relaxed) flow change
             let dq = damping_factor * (y - g_inv * dh);
+
+            // head error of a link whose reverse-flow barrier (CV pipe, pump) was engaged at the
+            // linearisation flow: |hloss(q_old) - dh_new| = |dq_newton| / g_inv
+            if link.reverse_flow_barrier_active(
+                state.flows[i],
+                state.statuses[i],
+                state.settings[i],
+            ) {
+                let head_error = (y - g_inv * dh).abs() / g_inv;
+                stats.max_barrier_head_error = stats.max_barrier_head_error.max(head_error);
+            }
 
             // update the maximum flow change
             if dq.abs() > stats.max_dq {

@@ -132,6 +132,16 @@ impl LinkTrait for Pipe {
 }
 
 impl Pipe {
+    /// Whether the check-valve barrier dominates the head loss at flow `q`, i.e. the flow
+    /// is reversed beyond the `Q_ZERO` offset and the head loss gradient is ~`BIG_VALUE`
+    #[inline]
+    pub fn cv_barrier_active(&self, q: Cfs, status: LinkStatus) -> bool {
+        self.check_valve
+            && q + Q_ZERO < 0.0
+            && status != LinkStatus::Closed
+            && status != LinkStatus::TempClosed
+    }
+
     /// Continuous check-valve barrier added on top of normal pipe head loss preventing reverse flow, replaces valve checks in EPANET2.3
     #[inline]
     fn add_cv_head_loss(q: Cfs, g_inv: f64, y: f64) -> (f64, f64) {

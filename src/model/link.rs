@@ -293,6 +293,18 @@ impl UnitConversion for Link {
 }
 
 impl Link {
+    /// Whether a reverse-flow barrier (check valve pipe or pump) is engaged at flow `q`.
+    /// In that region the head loss gradient is ~`BIG_VALUE`, so negligible flow changes
+    /// still correspond to large head changes.
+    #[inline]
+    pub fn reverse_flow_barrier_active(&self, q: f64, status: LinkStatus, setting: f64) -> bool {
+        match &self.link_type {
+            LinkType::Pipe(pipe) => pipe.cv_barrier_active(q, status),
+            LinkType::Pump(pump) => pump.barrier_active(q, status, setting),
+            LinkType::Valve(_) => false,
+        }
+    }
+
     /// Get the initial setting of the link
     pub fn initial_setting(&self) -> f64 {
         match &self.link_type {

@@ -189,6 +189,42 @@ fn test_zero_flow_check_valve_head() {
     );
 }
 
+/// A zero-demand junction fed by a check valve and a tiny bypass must stay at the
+/// reservoir head in every timestep, not only once the warm-started iterations settle.
+#[test]
+fn test_zero_demand_check_valve_head_all_timesteps() {
+    for file in ["tests/cv-zero-demand.inp", "tests/cv-zero-demand-hw.inp"] {
+        assert_outlet_head_all_periods(file, 5.0);
+    }
+}
+
+/// A pump running at shutoff (zero flow) must deliver its shutoff head in every timestep.
+#[test]
+fn test_zero_flow_pump_shutoff_head_all_timesteps() {
+    // single point curve (10 m at 10 m3/h) has a shutoff head of 4/3 * 10 m on top of 5 m
+    assert_outlet_head_all_periods("tests/pump-zero-flow.inp", 5.0 + 40.0 / 3.0);
+}
+
+fn assert_outlet_head_all_periods(file: &str, expected_head: f64) {
+    let mut simulation = Simulation::from_file(file).expect("Failed to create simulation");
+    let result = simulation
+        .solve_hydraulics(false)
+        .expect("Failed to solve hydraulics");
+    let outlet = *simulation.network.node_map.get("Outlet").unwrap();
+
+    assert_eq!(result.heads.len(), 3);
+    for (step, heads) in result.heads.iter().enumerate() {
+        assert!(
+            (heads[outlet] - expected_head).abs() < 0.01,
+            "{}: Outlet head in period {} is {:.3}, expected {:.3}",
+            file,
+            step,
+            heads[outlet],
+            expected_head
+        );
+    }
+}
+
 /// Test solving valve.inp and verify exact head and flow values
 #[test]
 fn test_solve_valve_network() {

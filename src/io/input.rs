@@ -551,7 +551,8 @@ impl Network {
                 end_node, id
             ))
         })?;
-        let headloss_formula = HeadlossFormula::HazenWilliams;
+        // use the current headloss formula; pipes read before [OPTIONS] are updated in read_options
+        let headloss_formula = self.options.headloss_formula;
 
         Ok(Link {
             id,
@@ -1676,6 +1677,22 @@ mod tests {
             .unwrap();
 
         assert_eq!(link.initial_status, LinkStatus::Closed);
+    }
+
+    #[test]
+    fn test_read_pipe_after_headloss_option() {
+        // [OPTIONS] may precede [PIPES]; pipes read afterwards must use the configured formula
+        let mut network = test_network(true);
+        network.read_options("HEADLOSS  D-W").unwrap();
+
+        let link = network
+            .read_pipe("P4  N1  N2  200.0  6.0  0.1  0.0")
+            .unwrap();
+
+        let LinkType::Pipe(pipe) = &link.link_type else {
+            panic!("Expected Pipe link type");
+        };
+        assert_eq!(pipe.headloss_formula, HeadlossFormula::DarcyWeisbach);
     }
     // ==================== Tank Tests ====================
 

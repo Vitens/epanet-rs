@@ -264,6 +264,16 @@ impl HeadCurve {
         (hgrad, hloss)
     }
 
+    /// Head loss (negative = head gain) of the speed-adjusted curve at zero flow
+    pub fn shutoff_head_loss(&self, speed: f64) -> Ft {
+        if self.curve_type == HeadCurveType::Custom {
+            let (h0, _) = self.coefficients(0.0);
+            -h0 * speed.powi(2)
+        } else {
+            -self.statistics.h_shutoff * speed.powi(2)
+        }
+    }
+
     // return hydraulic gradient and head loss
     pub fn curve_coefficients(&self, q: Cfs, speed: f64) -> (f64, f64) {
         // for a custom curve, find the slope and intercept of the curve segment that contains the speed adjusted flow
@@ -293,10 +303,10 @@ impl HeadCurve {
                 (hgrad, hloss)
             };
 
-            // use linear function for very small gradient
+            // use linear function for very small gradient (keeps the shutoff head, as in EPANET)
             if hgrad < RQ_TOL {
                 hgrad = RQ_TOL;
-                hloss = self.statistics.h_shutoff + hgrad * q / n;
+                hloss = h0 + hgrad * q;
             }
 
             (hgrad, hloss)
