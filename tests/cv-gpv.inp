@@ -1,0 +1,33 @@
+[JUNCTIONS]
+J 0 3
+
+[RESERVOIRS]
+Supply 5.05
+Outlet 5 OutletHead
+
+[PIPES]
+Check Supply J 1 150 0.01 0 CV
+
+[VALVES]
+Load J Outlet 150 GPV Loss 0
+
+[CURVES]
+; Flow (L/s), head loss (m)
+Loss 0 0
+Loss 1 1
+Loss 4 2
+
+[PATTERNS]
+OutletHead 1 1.02 2
+
+[TIMES]
+Duration 2:00
+Hydraulic Timestep 1:00
+Pattern Timestep 1:00
+
+[OPTIONS]
+Units LPS
+Headloss D-W
+Damplimit 0.01
+
+[END]

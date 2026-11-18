@@ -1,10 +1,11 @@
 //! Assembly of the Jacobian matrix and right-hand side vector for the GGA system.
 
 use crate::constants::{PDA_MIN_DIFF, SMALL_VALUE};
-use crate::model::link::LinkTrait;
+use crate::model::link::{LinkTrait, LinkType};
 use crate::model::network::Network;
 use crate::model::node::NodeType;
 use crate::model::options::DemandModel;
+use crate::model::valve::ValveType;
 use crate::solver::hydraulicsolver::HydraulicSolver;
 use crate::solver::matrix::ResistanceCoefficients;
 use crate::solver::state::SolverState;
@@ -87,7 +88,7 @@ impl HydraulicSolver {
 
             let q = state.flows[i];
             let csc_index = &self.csc_indices[i];
-            let coefficients = link.coefficients(
+            let mut coefficients = link.coefficients(
                 q,
                 state.resistances[i],
                 state.settings[i],
@@ -97,6 +98,25 @@ impl HydraulicSolver {
                 network.nodes[link.start_node].elevation,
                 network.nodes[link.end_node].elevation,
             );
+
+            if let LinkType::Valve(valve) = &link.link_type
+                && valve.valve_type == ValveType::GPV
+                && let Some(curve) = &valve.gpv_curve
+                && !curve.bidirectional
+            {
+                // A segment of a mirrored head-loss curve can extrapolate past
+                // zero and predict reverse flow even under a forward head drop
+                // (or vice versa). In that case use the secant through the origin
+                // and (q, h(q)). This keeps the head loss at q and gives the
+                // next flow the same sign as the new head drop.
+                let head_drop = state.heads[link.start_node] - state.heads[link.end_node];
+                let trial_flow = q - coefficients.y + coefficients.g_inv * head_drop;
+                if q * trial_flow < 0.0 && head_drop * trial_flow <= 0.0 {
+                    // y = h(q) * g_inv, so the secant conductance is q / h(q).
+                    coefficients.g_inv *= q / coefficients.y;
+                    coefficients.y = q;
+                }
+            }
 
             link_coefficients.g_inv[i] = coefficients.g_inv;
             link_coefficients.y[i] = coefficients.y;
