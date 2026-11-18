@@ -523,3 +523,35 @@ fn test_bidirectional_gpv_curve() {
 
     assert!(result.flows[0][0].abs() - 100.0 < 1e-9)
 }
+
+#[test]
+fn test_check_valve_feeding_gpv_with_steep_low_flow_segment() {
+    let mut simulation = Simulation::from_file("tests/cv-gpv.inp").unwrap();
+    let result = simulation.solve_hydraulics(false).unwrap();
+    let check = simulation.network.link_map["Check"];
+    let load = simulation.network.link_map["Load"];
+    let junction = simulation.network.node_map["J"];
+
+    // Raising the outlet head first reverses the GPV, then closes the CV.
+    let expected = [(3.05, 0.05, 5.05), (2.95, -0.05, 5.05), (0.0, -3.0, 8.333)];
+    assert_eq!(result.flows.len(), expected.len());
+    for (step, (cv_flow, gpv_flow, head)) in expected.into_iter().enumerate() {
+        let flows = &result.flows[step];
+        assert!(
+            (flows[check] - cv_flow).abs() < 0.001,
+            "CV flow at step {step}"
+        );
+        assert!(
+            (flows[load] - gpv_flow).abs() < 0.001,
+            "GPV flow at step {step}"
+        );
+        assert!(
+            (result.heads[step][junction] - head).abs() < 0.001,
+            "head at step {step}"
+        );
+        assert!(
+            (flows[check] - flows[load] - 3.0).abs() < 0.001,
+            "junction balance at step {step}"
+        );
+    }
+}
