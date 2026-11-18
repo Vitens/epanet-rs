@@ -18,6 +18,23 @@ pub struct Pump {
     pub head_curve: Option<HeadCurve>,
 }
 
+impl Pump {
+    /// Whether a pump is treated as a closed link (closed, stalled or zero speed)
+    #[inline]
+    fn is_closed(status: LinkStatus, setting: f64) -> bool {
+        status == LinkStatus::Closed
+            || status == LinkStatus::Xhead
+            || status == LinkStatus::TempClosed
+            || setting == 0.0
+    }
+
+    /// Whether the reverse-flow barrier determines the pump head loss at flow `q`
+    #[inline]
+    pub fn barrier_active(&self, q: f64, status: LinkStatus, setting: f64) -> bool {
+        q < 0.0 && !Pump::is_closed(status, setting)
+    }
+}
+
 impl LinkTrait for Pump {
     #[inline]
     fn coefficients(
@@ -32,19 +49,21 @@ impl LinkTrait for Pump {
         _: f64,
     ) -> LinkCoefficients {
         // for closed pumps, stalled pumps, or pumps with speed, act as closed pipe
-        if status == LinkStatus::Closed
-            || status == LinkStatus::Xhead
-            || status == LinkStatus::TempClosed
-            || setting == 0.0
-        {
+        if Pump::is_closed(status, setting) {
             return LinkCoefficients::simple(1.0 / BIG_VALUE, q);
         }
 
-        // Prevent negative flow using a barrier function (similar to check_valve)
+        // Prevent negative flow using a barrier function (similar to check_valve). The barrier is
+        // added on top of the zero-flow head loss of the pump curve, so that head loss is
+        // continuous at q = 0 and reverse flow only occurs once the head exceeds the shutoff head
         if q < 0.0 {
+            let shutoff_hloss = match &self.head_curve {
+                Some(curve) => curve.shutoff_head_loss(setting),
+                None => 0.0,
+            };
             let a = BIG_VALUE * q;
             let b = (a * a + CV_HEAD_EPSILON).sqrt();
-            let hloss = (a - b) * 0.5;
+            let hloss = shutoff_hloss + (a - b) * 0.5;
             let hgrad = BIG_VALUE * (1.0 - a / b) * 0.5;
             return LinkCoefficients::simple(1.0 / hgrad, hloss / hgrad);
         }

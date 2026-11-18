@@ -10,11 +10,11 @@ use faer::{Mat, Side};
 use crate::solver::matrix::*;
 use crate::solver::state::SolverState;
 
-use crate::model::units::Cfs;
+use crate::model::units::{Cfs, Ft};
 
 use simplelog::{debug, error, warn};
 
-use crate::constants::{BIG_VALUE, PDA_MIN_DIFF, Q_ZERO};
+use crate::constants::{BIG_VALUE, H_TOL, PDA_MIN_DIFF, Q_ZERO};
 use crate::error::SolverError;
 use crate::model::control::ControlCondition;
 use crate::model::link::{LinkStatus, LinkTrait, LinkType};
@@ -37,6 +37,10 @@ pub struct IterationStatistics {
     pub sum_q: Cfs,
     pub max_dq: Cfs,
     pub max_dq_index: usize,
+    /// maximum head error (ft) of links with an engaged reverse-flow barrier, |hloss(q_old) - dh_new|
+    pub max_barrier_head_error: Ft,
+    /// whether any engaged barrier has a head error above its tolerance
+    pub barrier_unconverged: bool,
     pub status_changed: bool,
 }
 
@@ -139,6 +143,8 @@ impl HydraulicSolver {
         let mut excess_flows = vec![0.0; network.nodes.len()];
 
         let mut grounded_nodes = vec![false; network.nodes.len()];
+        // scratch buffer for the summed link conductance per node (barrier convergence check)
+        let mut node_conductances = vec![0.0; network.nodes.len()];
 
         // Adaptive under-relaxation: full Newton steps while residuals fall,
         // damp when the relative change starts increasing (limit cycles).
@@ -218,8 +224,13 @@ impl HydraulicSolver {
             }
 
             // update the links and emitters and gather iteration statistics
-            let mut stats =
-                self.update_links(network, &mut state, &link_coefficients, damping_factor);
+            let mut stats = self.update_links(
+                network,
+                &mut state,
+                &link_coefficients,
+                &mut node_conductances,
+                damping_factor,
+            );
             self.update_emitter_flows(network, &mut state, &mut stats, damping_factor);
 
             // close/open links connected to tanks based on tank level
@@ -250,9 +261,10 @@ impl HydraulicSolver {
                 iteration, rel_change, stats.status_changed, damping_factor
             );
             debug!(
-                ">>>> Max flow change: {:.6} for link {}",
+                ">>>> Max flow change: {:.6} for link {}, max barrier head error: {:.6} ft",
                 stats.max_dq_converted(&network.options),
-                network.links[stats.max_dq_index].id
+                network.links[stats.max_dq_index].id,
+                stats.max_barrier_head_error
             );
 
             let max_flow_change = network.options.max_flow_change.unwrap_or(BIG_VALUE);
@@ -262,9 +274,13 @@ impl HydraulicSolver {
             // - relative change is less than the accuracy
             // - no status changes
             // - maximum flow change is less than the maximum flow change allowed
+            // - heads across engaged reverse-flow barriers (CV pipes, pumps) are consistent with
+            //   the barrier head loss; there a negligible flow change corresponds to a large
+            //   head change, which the flow-based criteria above cannot detect
             if rel_change < network.options.accuracy
                 && !stats.status_changed
                 && stats.max_dq_converted(&network.options) < max_flow_change
+                && !stats.barrier_unconverged
             {
                 // if pressure controls are active, apply them and continue the iteration
                 if self.apply_pressure_controls(network, &mut state) {
@@ -325,9 +341,17 @@ impl HydraulicSolver {
         network: &Network,
         state: &mut SolverState,
         coefficients: &ResistanceCoefficients,
+        node_conductances: &mut [f64],
         damping_factor: f64,
     ) -> IterationStatistics {
         let mut stats = IterationStatistics::default();
+
+        // summed link conductance per node, used to estimate the round-off floor of barrier head errors
+        node_conductances.fill(0.0);
+        for (i, link) in network.links.iter().enumerate() {
+            node_conductances[link.start_node] += coefficients.g_inv[i];
+            node_conductances[link.end_node] += coefficients.g_inv[i];
+        }
 
         for (i, link) in network.links.iter().enumerate() {
             // skip if the start/end node is disabled
@@ -343,6 +367,28 @@ impl HydraulicSolver {
 
             // calculate the (possibly under-relaxed) flow change
             let dq = damping_factor * (y - g_inv * dh);
+
+            // head error of a link whose reverse-flow barrier (CV pipe, pump) was engaged at the
+            // linearisation flow: |hloss(q_old) - dh_new| = |dq_newton| / g_inv
+            if link.reverse_flow_barrier_active(
+                state.flows[i],
+                state.statuses[i],
+                state.settings[i],
+            ) {
+                let head_error = (y - g_inv * dh).abs() / g_inv;
+                stats.max_barrier_head_error = stats.max_barrier_head_error.max(head_error);
+                if head_error
+                    > Self::barrier_head_tolerance(
+                        g_inv,
+                        node_conductances[link.start_node].max(node_conductances[link.end_node]),
+                        state.heads[link.start_node]
+                            .abs()
+                            .max(state.heads[link.end_node].abs()),
+                    )
+                {
+                    stats.barrier_unconverged = true;
+                }
+            }
 
             // update the maximum flow change
             if dq.abs() > stats.max_dq {
@@ -382,6 +428,21 @@ impl HydraulicSolver {
             stats.sum_q += state.flows[i].abs();
         }
         stats
+    }
+
+    /// Head error tolerance (ft) for a link with an engaged reverse-flow barrier.
+    ///
+    /// Flows through the links adjacent to the barrier are computed as `g * (h1 - h2)` from
+    /// absolute heads, which carries a round-off error of about `eps * |h| * g`. The barrier
+    /// (conductance `g_inv` ~ 1 / BIG_VALUE) turns that flow noise into head noise of
+    /// `eps * |h| * g_node / g_inv`; this can reach tenths of a foot when a barrier isolates
+    /// a zone of short, large-diameter pipes. Demanding more than this floor (with a safety
+    /// factor) stalls convergence on noise, so `H_TOL` only applies above it.
+    #[inline]
+    fn barrier_head_tolerance(g_inv: f64, node_conductance: f64, head_abs: Ft) -> Ft {
+        const ROUNDOFF_SAFETY_FACTOR: f64 = 10.0;
+        let roundoff_floor = f64::EPSILON * head_abs * node_conductance / g_inv;
+        H_TOL.max(ROUNDOFF_SAFETY_FACTOR * roundoff_floor)
     }
 
     /// Update emitter flows and update iteration statistics

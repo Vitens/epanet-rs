@@ -1,0 +1,43 @@
+[OPTIONS]
+  Units CMH
+  Headloss H-W
+  Accuracy 0.001
+  Trials 200
+
+[TITLE]
+Pump at shutoff: the pump (shutoff head 13.33 m) lifts Supply (5 m) above the
+High reservoir (17 m), so the junction must sit at the shutoff head (18.33 m)
+with ~zero flow. The tiny bypass keeps the pump flow close to its barrier.
+
+[JUNCTIONS]
+; ID        Elevation  Demand
+  Outlet    0          0
+
+[RESERVOIRS]
+; ID        Head
+  Supply    5
+  High      17
+
+[PIPES]
+; ID        From     To      Length  Diameter  Roughness  MinorLoss  Status
+  Bypass    High     Outlet  1000    1         130        0          OPEN
+
+[PUMPS]
+; ID        From     To      Parameters
+  Pump1     Supply   Outlet  HEAD C1
+
+[CURVES]
+; ID  Flow  Head
+  C1  10    10
+
+[TIMES]
+  Duration 2:00
+  Hydraulic Timestep 1:00
+  Report Timestep 1:00
+
+[COORDINATES]
+Supply 0 0
+Outlet 1 0
+High 2 0
+
+[END]
